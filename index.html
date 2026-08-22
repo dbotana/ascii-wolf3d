@@ -1,0 +1,983 @@
+<title>ASCII Rain City v2</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=VT323&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+  :root {
+    --ink:        #02030A;
+    --sodium:     #FF9500;
+    --crt:        #7FFF6B;
+    --slate:      #3A4A5C;
+    --window:     #FFD07A;
+    --neon-pink:  #FF3B7C;
+    --neon-cyan:  #55E6E6;
+    --fog:        #0A1A2E;
+    --hud-ink:    rgba(127,255,107,0.85);
+    --wood:       #7A5535;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; overflow: hidden; }
+  body {
+    background: var(--ink);
+    color: var(--hud-ink);
+    font-family: 'IBM Plex Mono', ui-monospace, Menlo, monospace;
+    font-size: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    -webkit-user-select: none;
+    user-select: none;
+    cursor: crosshair;
+  }
+  #stage {
+    position: relative;
+    width: min(100vw, 100vh * 1.4);
+    height: min(100vh, 100vw / 1.4);
+    max-width: 1400px;
+    max-height: 1000px;
+    background: var(--ink);
+    box-shadow: 0 0 120px rgba(255,149,0,0.05), 0 0 40px rgba(127,255,107,0.03) inset;
+    overflow: hidden;
+  }
+  canvas#screen {
+    display: block;
+    width: 100%;
+    height: 100%;
+    image-rendering: pixelated;
+    image-rendering: crisp-edges;
+    filter: contrast(1.05) saturate(1.1);
+    transition: opacity 0.28s ease;
+  }
+  #screen.fading { opacity: 0.12; }
+  #stage::before {
+    content: '';
+    position: absolute; inset: 0;
+    background: repeating-linear-gradient(
+      to bottom,
+      rgba(0,0,0,0) 0px,
+      rgba(0,0,0,0) 2px,
+      rgba(0,0,0,0.10) 3px
+    );
+    pointer-events: none;
+    z-index: 4;
+  }
+  #stage::after {
+    content: '';
+    position: absolute; inset: 0;
+    background: radial-gradient(ellipse at center, transparent 55%, rgba(2,3,10,0.6) 100%);
+    pointer-events: none;
+    z-index: 3;
+  }
+  header {
+    position: absolute;
+    top: 16px; left: 20px;
+    z-index: 5;
+    display: flex;
+    align-items: baseline;
+    gap: 12px;
+    color: var(--sodium);
+  }
+  header h1 {
+    font-family: 'VT323', monospace;
+    font-size: 28px;
+    font-weight: normal;
+    letter-spacing: 0.05em;
+    text-shadow: 0 0 8px rgba(255,149,0,0.5);
+  }
+  header .meta {
+    font-size: 10px;
+    letter-spacing: 0.18em;
+    color: rgba(255,208,122,0.55);
+    text-transform: uppercase;
+  }
+  #hud {
+    position: absolute;
+    bottom: 16px; left: 20px;
+    z-index: 5;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 11px;
+    color: var(--hud-ink);
+    display: grid;
+    grid-template-columns: auto auto;
+    gap: 2px 14px;
+    font-variant-numeric: tabular-nums;
+  }
+  #hud b { color: var(--sodium); font-weight: 500; }
+  #controls {
+    position: absolute;
+    bottom: 16px; right: 20px;
+    z-index: 5;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 11px;
+    color: rgba(127,255,107,0.55);
+    text-align: right;
+    line-height: 1.6;
+    transition: opacity 0.6s ease;
+  }
+  #controls kbd {
+    display: inline-block;
+    padding: 1px 5px;
+    border: 1px solid rgba(127,255,107,0.35);
+    border-radius: 2px;
+    background: rgba(127,255,107,0.06);
+    color: var(--crt);
+    font-family: inherit;
+    font-size: 10px;
+    margin: 0 1px;
+  }
+  #prompt {
+    position: absolute;
+    top: 58%; left: 50%;
+    transform: translate(-50%, -50%);
+    z-index: 5;
+    font-family: 'VT323', monospace;
+    font-size: 22px;
+    letter-spacing: 0.12em;
+    color: var(--sodium);
+    background: rgba(2,3,10,0.55);
+    padding: 6px 16px;
+    border: 1px solid rgba(255,149,0,0.55);
+    text-shadow: 0 0 10px rgba(255,149,0,0.6);
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.2s ease;
+    white-space: nowrap;
+  }
+  #prompt.show { opacity: 1; }
+  #splash {
+    position: absolute;
+    inset: 0;
+    z-index: 10;
+    background: radial-gradient(ellipse at center, rgba(2,3,10,0.65), rgba(2,3,10,0.95));
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-direction: column;
+    gap: 14px;
+    text-align: center;
+    color: var(--sodium);
+    font-family: 'VT323', monospace;
+    cursor: pointer;
+    transition: opacity 0.5s ease;
+  }
+  #splash h2 { font-size: 44px; letter-spacing: 0.06em; text-shadow: 0 0 14px rgba(255,149,0,0.5); }
+  #splash p { font-size: 18px; color: var(--crt); letter-spacing: 0.1em; opacity: 0.85; }
+  #splash small { font-size: 12px; color: rgba(127,255,107,0.5); letter-spacing: 0.2em; text-transform: uppercase; font-family: 'IBM Plex Mono', monospace; }
+  .fade-out { opacity: 0; pointer-events: none; }
+  @media (prefers-reduced-motion: reduce) {
+    #stage::before { background: none; }
+    canvas#screen { filter: none; }
+  }
+</style>
+
+<div id="stage">
+  <canvas id="screen"></canvas>
+  <header>
+    <h1>ASCII RAIN CITY</h1>
+    <span class="meta">v2 · atlas · interior · elevator · npcs · audio</span>
+  </header>
+  <div id="hud">
+    <span>fps</span><span id="fps"><b>&mdash;</b></span>
+    <span>pos</span><span id="pos"><b>&mdash;</b></span>
+    <span>alt</span><span id="alt"><b>&mdash;</b></span>
+    <span>heading</span><span id="hdg"><b>&mdash;</b></span>
+    <span>scene</span><span id="scn"><b>city</b></span>
+    <span>audio</span><span id="aud"><b>on</b></span>
+  </div>
+  <div id="controls">
+    <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> walk<br>
+    <kbd>&larr;</kbd><kbd>&rarr;</kbd> turn &nbsp; <kbd>&uArr;</kbd> run<br>
+    <kbd>Q</kbd>/<kbd>E</kbd> elevator &nbsp; <kbd>&crarr;</kbd> enter<br>
+    <kbd>M</kbd> mute
+  </div>
+  <div id="prompt"></div>
+  <div id="splash">
+    <h2>ASCII RAIN CITY</h2>
+    <p>a walkable text metropolis</p>
+    <small>click to enter &middot; v2</small>
+  </div>
+</div>
+
+<script>
+(() => {
+  'use strict';
+
+  // ─── CONFIG ─────────────────────────────────────────────────
+  const COLS = 160, ROWS = 90;
+  const CELL_W = 7, CELL_H = 12;
+  const CANVAS_W = COLS * CELL_W;
+  const CANVAS_H = ROWS * CELL_H;
+  const FOV = Math.PI * 0.42;
+  const MAX_DEPTH = 42;
+  const WORLD_W = 96, WORLD_H = 96;
+  const PPH = ROWS / 4;  // pixels per world unit at distance 1
+
+  // ─── PALETTE ────────────────────────────────────────────────
+  const COLOR = {
+    sky:'#0A1A2E', fogFar:'#0F2038', fogMid:'#1B2E44',
+    slate:'#3A4A5C', warm:'#5C4C3A',
+    sodium:'#FF9500', sodiumD:'#B0640F',
+    crt:'#7FFF6B', crtD:'#4EA044',
+    pink:'#FF3B7C', cyan:'#55E6E6',
+    window:'#FFD07A', ground:'#1A1A22', groundH:'#282838',
+    rain:'#3E5C7C', rainH:'#7092B0', starB:'#B9C8DE',
+    wood:'#7A5535', woodD:'#4E361F',
+    ped:'#C8B090', pedAlt:'#8DA0B4', pedWarm:'#D9A470',
+    car:'#E64545', carH:'#FFD07A', carC:'#55E6E6', carS:'#FF9500',
+    door:'#FFD07A', exit:'#7FFF6B',
+  };
+
+  // ─── ATLAS CACHE (killer perf) ──────────────────────────────
+  const ATLAS_COLS = 512, ATLAS_ROWS = 64;
+  const ATLAS_MAX = ATLAS_COLS * ATLAS_ROWS;
+  let atlasCanvas = null, atlasCtx = null;
+  let atlasFailed = false;
+  const atlasMap = new Map();
+  let atlasNext = 0;
+
+  function initAtlas() {
+    try {
+      atlasCanvas = document.createElement('canvas');
+      atlasCanvas.width  = ATLAS_COLS * CELL_W;
+      atlasCanvas.height = ATLAS_ROWS * CELL_H;
+      atlasCtx = atlasCanvas.getContext('2d', { alpha: true });
+      if (!atlasCtx) throw new Error('no atlas ctx');
+      atlasCtx.font = (CELL_H - 1) + "px 'VT323', ui-monospace, monospace";
+      atlasCtx.textBaseline = 'top';
+      atlasCtx.clearRect(0, 0, atlasCanvas.width, atlasCanvas.height);
+    } catch (e) {
+      atlasFailed = true;
+      atlasCanvas = null;
+    }
+  }
+
+  function atlasGet(ch, color) {
+    const k = ch + '\x00' + color;
+    let slot = atlasMap.get(k);
+    if (slot !== undefined) return slot;
+    if (atlasFailed || atlasNext >= ATLAS_MAX) return null;
+    const idx = atlasNext++;
+    const ax = idx % ATLAS_COLS;
+    const ay = (idx / ATLAS_COLS) | 0;
+    const sx = ax * CELL_W;
+    const sy = ay * CELL_H;
+    atlasCtx.clearRect(sx, sy, CELL_W, CELL_H);
+    atlasCtx.fillStyle = color;
+    atlasCtx.fillText(ch, sx, sy);
+    slot = { sx, sy };
+    atlasMap.set(k, slot);
+    return slot;
+  }
+
+  // ─── WORLD GEN ──────────────────────────────────────────────
+  const doors = new Map();       // "x,y" → { name, iid }
+  const interiors = [];          // list of interior grids
+
+  const NAMES = ['SAKE BAR','NEON DINER','24H CLINIC','RAMEN','TOKYO WIRE',
+                 'ORB CAFE','GHOST INN','LOOP BAR','MASA-YA','MEATSHOP',
+                 'LIVE ROOM','JPY EXCHG'];
+
+  function interiorName(cell) {
+    return NAMES[((cell.seed || 0) >>> 4) % NAMES.length];
+  }
+
+  function genCity() {
+    const g = new Array(WORLD_H);
+    for (let y = 0; y < WORLD_H; y++) {
+      g[y] = new Array(WORLD_W);
+      for (let x = 0; x < WORLD_W; x++) g[y][x] = 0;
+    }
+    const BLOCK = 5, PERIOD = 7;
+    for (let y = 0; y < WORLD_H; y++) {
+      for (let x = 0; x < WORLD_W; x++) {
+        const cy = y % PERIOD, cx = x % PERIOD;
+        if (cy < BLOCK && cx < BLOCK) {
+          const seed = ((x * 91) ^ (y * 17)) >>> 0;
+          const r = ((seed * 2654435761) >>> 0) / 0xFFFFFFFF;
+          if (r < 0.15) continue;
+          const h = 1 + Math.floor(r * 8);
+          let tag = 'plain', signColor = null;
+          const r2 = (((seed ^ 0xA5A5A5A5) * 2654435761) >>> 0) / 0xFFFFFFFF;
+          if (r2 < 0.06) {
+            tag = 'sign';
+            const palette = ['sodium','pink','cyan','crt','window'];
+            signColor = palette[Math.floor(r2 * 100) % palette.length];
+          } else if (r2 < 0.55) {
+            tag = 'lit';
+          }
+          g[y][x] = { h, tag, signColor, seed };
+        }
+      }
+    }
+    // safe plaza in the center
+    for (let y = 46; y < 52; y++)
+      for (let x = 46; x < 52; x++) g[y][x] = 0;
+
+    // seed doors on ~6% of sign/lit buildings
+    for (let y = 1; y < WORLD_H - 1; y++) {
+      for (let x = 1; x < WORLD_W - 1; x++) {
+        const c = g[y][x];
+        if (!c || (c.tag !== 'sign' && c.tag !== 'lit')) continue;
+        const s = (((x * 313) ^ (y * 71) ^ (c.seed || 0)) >>> 0) / 0xFFFFFFFF;
+        if (s > 0.055) continue;
+        const nbrs = [[1,0],[-1,0],[0,1],[0,-1]];
+        for (const [dx, dy] of nbrs) {
+          const nx = x + dx, ny = y + dy;
+          if (nx < 0 || ny < 0 || nx >= WORLD_W || ny >= WORLD_H) continue;
+          if (!g[ny][nx]) {
+            const name = interiorName(c);
+            const iid = interiors.length;
+            interiors.push(genInterior(name, c));
+            doors.set(nx + ',' + ny, { name, iid });
+            break;
+          }
+        }
+      }
+    }
+    return g;
+  }
+
+  function genInterior(name, cell) {
+    const W = 14, H = 12;
+    const g = new Array(H);
+    for (let y = 0; y < H; y++) {
+      g[y] = new Array(W);
+      for (let x = 0; x < W; x++) g[y][x] = 0;
+    }
+    // walls
+    for (let x = 0; x < W; x++) {
+      g[0][x] = { h: 3, tag: 'iwall' };
+      // bottom wall except a 2-cell gap in the middle (the exit)
+      if (x === 6 || x === 7) g[H - 1][x] = 0;
+      else g[H - 1][x] = { h: 3, tag: 'iwall' };
+    }
+    for (let y = 0; y < H; y++) {
+      g[y][0] = { h: 3, tag: 'iwall' };
+      g[y][W - 1] = { h: 3, tag: 'iwall' };
+    }
+    // lit window strip in far wall
+    for (let x = 4; x < 10; x++) g[0][x] = { h: 3, tag: 'iwindow' };
+    // interior brand sign centered on far wall
+    const sc = (cell && cell.signColor) || 'sodium';
+    g[1][6] = { h: 3, tag: 'isign', signColor: sc, name };
+    g[1][7] = { h: 3, tag: 'isign', signColor: sc, name };
+    // bar counter row
+    for (let x = 3; x < 11; x++) g[4][x] = { h: 1, tag: 'bar' };
+    // a couple of stools / pillars
+    g[6][3]  = { h: 1, tag: 'stool' };
+    g[6][10] = { h: 1, tag: 'stool' };
+    return {
+      grid: g, W, H, name,
+      spawnX: 7, spawnY: H - 1.5,
+    };
+  }
+
+  const cityGrid = genCity();
+  let mode = 'city';
+  let activeGrid = cityGrid;
+  let activeInterior = null;
+  let savedCityCam = null;
+  let inTransition = false;
+
+  function cellAt(x, y) {
+    if (x < 0 || y < 0) return 0;
+    const gy = y | 0, gx = x | 0;
+    if (mode === 'city') {
+      if (gx >= WORLD_W || gy >= WORLD_H) return 0;
+    } else {
+      if (gx >= activeInterior.W || gy >= activeInterior.H) return 0;
+    }
+    return activeGrid[gy][gx];
+  }
+
+  // ─── CANVAS ─────────────────────────────────────────────────
+  const canvas = document.getElementById('screen');
+  canvas.width = CANVAS_W;
+  canvas.height = CANVAS_H;
+  const ctx = canvas.getContext('2d', { alpha: false });
+  ctx.imageSmoothingEnabled = false;
+  ctx.font = (CELL_H - 1) + "px 'VT323', ui-monospace, monospace";
+  ctx.textBaseline = 'top';
+
+  // ─── CHAR RAMPS ─────────────────────────────────────────────
+  const WALL_CHARS = ['█','▓','▒','░','#','%','&','+','=',':','.',' '];
+  const GROUND_CHARS = ['▒','░','+',':','.','\'','`',' '];
+  const SIGN_TEXTS = ['SAKE','NEON','24H','電気','TOKYO','WIRE','GHOST','LOOP',
+                      'MASA','KIYO','ORB','RAM','JPY','88','404','RUN','LIVE','MEAT'];
+
+  function distChar(d, ramp) {
+    const idx = Math.min(ramp.length - 1, Math.floor(d / (MAX_DEPTH / ramp.length)));
+    return ramp[idx];
+  }
+  function wallColor(d, cell) {
+    if (cell) {
+      if (cell.tag === 'sign' && d < 20) {
+        switch (cell.signColor) {
+          case 'pink':   return d < 8 ? COLOR.pink   : COLOR.sodium;
+          case 'cyan':   return d < 8 ? COLOR.cyan   : COLOR.slate;
+          case 'crt':    return d < 8 ? COLOR.crt    : COLOR.crtD;
+          case 'window': return d < 8 ? COLOR.window : COLOR.sodiumD;
+          default:       return d < 8 ? COLOR.sodium : COLOR.sodiumD;
+        }
+      }
+      if (cell.tag === 'iwall')   return d < 4 ? COLOR.wood : (d < 8 ? COLOR.woodD : COLOR.slate);
+      if (cell.tag === 'iwindow') return d < 6 ? COLOR.window : COLOR.sodium;
+      if (cell.tag === 'isign') {
+        switch (cell.signColor) {
+          case 'crt':    return COLOR.crt;
+          case 'pink':   return COLOR.pink;
+          case 'cyan':   return COLOR.cyan;
+          case 'window': return COLOR.window;
+          default:       return COLOR.sodium;
+        }
+      }
+      if (cell.tag === 'bar')   return d < 5 ? COLOR.wood : COLOR.woodD;
+      if (cell.tag === 'stool') return COLOR.woodD;
+    }
+    if (d < 3)  return COLOR.slate;
+    if (d < 8)  return COLOR.slate;
+    if (d < 16) return COLOR.fogMid;
+    if (d < 28) return COLOR.fogFar;
+    return COLOR.sky;
+  }
+  function litWindowChance(cell, worldRow) {
+    if (!cell || cell.tag !== 'lit') return false;
+    const k = ((cell.seed ^ (worldRow * 2654435761)) >>> 0) / 0xFFFFFFFF;
+    return k < 0.22;
+  }
+
+  // ─── DDA RAYCAST ────────────────────────────────────────────
+  function castRay(px, py, angle) {
+    const sinA = Math.sin(angle), cosA = Math.cos(angle);
+    let mapX = px | 0, mapY = py | 0;
+    const deltaX = Math.abs(1 / cosA);
+    const deltaY = Math.abs(1 / sinA);
+    let stepX, stepY, sideDistX, sideDistY;
+    if (cosA < 0) { stepX = -1; sideDistX = (px - mapX) * deltaX; }
+    else          { stepX =  1; sideDistX = (mapX + 1 - px) * deltaX; }
+    if (sinA < 0) { stepY = -1; sideDistY = (py - mapY) * deltaY; }
+    else          { stepY =  1; sideDistY = (mapY + 1 - py) * deltaY; }
+    let side = 0;
+    for (let n = 0; n < MAX_DEPTH; n++) {
+      if (sideDistX < sideDistY) { sideDistX += deltaX; mapX += stepX; side = 0; }
+      else                       { sideDistY += deltaY; mapY += stepY; side = 1; }
+      const c = cellAt(mapX, mapY);
+      if (c) {
+        const perp = side === 0 ? (sideDistX - deltaX) : (sideDistY - deltaY);
+        return { dist: perp, cell: c, side, mapX, mapY };
+      }
+    }
+    return { dist: MAX_DEPTH, cell: null, side: 0, mapX, mapY };
+  }
+
+  // ─── CAMERA ─────────────────────────────────────────────────
+  const cam = { x: 49, y: 49, a: -Math.PI / 4, z: 1.5 };
+  const CAM_Z_MIN = 0.5, CAM_Z_MAX = 8.0;
+  const keys = new Set();
+  addEventListener('keydown', e => {
+    const k = e.key.toLowerCase();
+    keys.add(k);
+    if (['arrowleft','arrowright','arrowup','arrowdown','w','a','s','d','q','e',' '].includes(k)) e.preventDefault();
+    if (k === 'enter') tryDoor();
+    if (k === 'm')     toggleMute();
+  });
+  addEventListener('keyup', e => keys.delete(e.key.toLowerCase()));
+
+  function updateCam(dt) {
+    if (inTransition) return;
+    const run = keys.has('shift') ? 2.2 : 1;
+    const speed = 3.6 * run * dt;
+    const turn = 1.9 * dt;
+    const climb = 3.0 * dt;
+    const fx = Math.cos(cam.a), fy = Math.sin(cam.a);
+    const sx = Math.cos(cam.a + Math.PI/2), sy = Math.sin(cam.a + Math.PI/2);
+    let nx = cam.x, ny = cam.y;
+    if (keys.has('w')) { nx += fx * speed; ny += fy * speed; }
+    if (keys.has('s')) { nx -= fx * speed; ny -= fy * speed; }
+    if (keys.has('a')) { nx -= sx * speed; ny -= sy * speed; }
+    if (keys.has('d')) { nx += sx * speed; ny += sy * speed; }
+    if (keys.has('q')) cam.z = Math.max(CAM_Z_MIN, cam.z - climb);
+    if (keys.has('e')) cam.z = Math.min(CAM_Z_MAX, cam.z + climb);
+    const BUF = 0.22;
+    if (!cellAt(nx + Math.sign(nx - cam.x) * BUF, cam.y)) cam.x = nx;
+    if (!cellAt(cam.x, ny + Math.sign(ny - cam.y) * BUF)) cam.y = ny;
+    if (keys.has('arrowleft'))  cam.a -= turn;
+    if (keys.has('arrowright')) cam.a += turn;
+  }
+
+  // ─── INTERIOR TRANSITION ───────────────────────────────────
+  let currentDoor = null;
+  const promptEl = document.getElementById('prompt');
+
+  function updatePrompt() {
+    if (inTransition) { promptEl.classList.remove('show'); return; }
+    if (mode === 'city') {
+      const k = (cam.x | 0) + ',' + (cam.y | 0);
+      const door = doors.get(k);
+      if (door) {
+        currentDoor = door;
+        promptEl.textContent = 'ENTER: ' + door.name + '   [↵]';
+        promptEl.classList.add('show');
+      } else {
+        currentDoor = null;
+        promptEl.classList.remove('show');
+      }
+    } else {
+      // exit gap is at (6..8, H-1)
+      const H = activeInterior.H;
+      const inGap = cam.x >= 5.8 && cam.x <= 8.2 && cam.y > H - 1.3;
+      if (inGap) {
+        currentDoor = 'exit';
+        promptEl.textContent = 'EXIT   [↵]';
+        promptEl.classList.add('show');
+        if (cam.y > H - 0.6) doExit();  // step-through auto exit
+      } else {
+        currentDoor = null;
+        promptEl.classList.remove('show');
+      }
+    }
+  }
+
+  function tryDoor() {
+    if (inTransition) return;
+    if (mode === 'city' && currentDoor && currentDoor !== 'exit') {
+      doEnter(currentDoor);
+    } else if (mode === 'interior' && currentDoor === 'exit') {
+      doExit();
+    }
+  }
+
+  function doEnter(door) {
+    inTransition = true;
+    canvas.classList.add('fading');
+    setTimeout(() => {
+      savedCityCam = { x: cam.x, y: cam.y, a: cam.a, z: cam.z };
+      activeInterior = interiors[door.iid];
+      activeGrid = activeInterior.grid;
+      mode = 'interior';
+      cam.x = activeInterior.spawnX;
+      cam.y = activeInterior.spawnY;
+      cam.a = -Math.PI / 2;  // face into room (north)
+      cam.z = 1.5;
+      document.getElementById('scn').innerHTML = '<b>' + activeInterior.name + '</b>';
+      canvas.classList.remove('fading');
+      inTransition = false;
+    }, 260);
+  }
+
+  function doExit() {
+    inTransition = true;
+    canvas.classList.add('fading');
+    setTimeout(() => {
+      activeGrid = cityGrid;
+      activeInterior = null;
+      mode = 'city';
+      if (savedCityCam) {
+        cam.x = savedCityCam.x;
+        cam.y = savedCityCam.y;
+        cam.a = savedCityCam.a;
+        cam.z = savedCityCam.z;
+      }
+      document.getElementById('scn').innerHTML = '<b>city</b>';
+      canvas.classList.remove('fading');
+      inTransition = false;
+    }, 260);
+  }
+
+  // ─── NPCs (pedestrians + cars) ─────────────────────────────
+  const npcs = [];
+  function initNPCs() {
+    for (let i = 0; i < 22; i++) {
+      const [x, y] = randStreet();
+      const d = randDir();
+      npcs.push({
+        type: 'ped', x, y, dx: d[0], dy: d[1], speed: 0.9 + Math.random() * 0.5,
+        ch: (i & 1) ? ',' : '.',
+        color: [COLOR.ped, COLOR.pedAlt, COLOR.pedWarm][i % 3],
+      });
+    }
+    for (let i = 0; i < 8; i++) {
+      const [x, y] = randStreet();
+      const d = randDir();
+      npcs.push({
+        type: 'car', x, y, dx: d[0], dy: d[1], speed: 3.0 + Math.random() * 1.2,
+        ch: dirChar(d),
+        color: [COLOR.car, COLOR.carH, COLOR.carC, COLOR.carS][i % 4],
+      });
+    }
+  }
+  function randStreet() {
+    for (let tries = 0; tries < 200; tries++) {
+      const x = Math.random() * WORLD_W;
+      const y = Math.random() * WORLD_H;
+      if (!cityGrid[y|0][x|0]) return [x, y];
+    }
+    return [49, 49];
+  }
+  function randDir() {
+    const d = [[1,0],[-1,0],[0,1],[0,-1]];
+    return d[Math.floor(Math.random() * 4)];
+  }
+  function dirChar(d) {
+    if (d[0] > 0) return '>';
+    if (d[0] < 0) return '<';
+    if (d[1] > 0) return 'v';
+    return '^';
+  }
+  function stepNPCs(dt) {
+    if (mode !== 'city') return;
+    for (const n of npcs) {
+      const nx = n.x + n.dx * n.speed * dt;
+      const ny = n.y + n.dy * n.speed * dt;
+      if (nx < 0.5 || nx >= WORLD_W - 0.5 || ny < 0.5 || ny >= WORLD_H - 0.5) {
+        const [rx, ry] = randStreet();
+        n.x = rx; n.y = ry;
+        const d = randDir();
+        n.dx = d[0]; n.dy = d[1];
+        if (n.type === 'car') n.ch = dirChar(d);
+        continue;
+      }
+      if (cityGrid[ny|0][nx|0]) {
+        // try turning
+        const d = randDir();
+        n.dx = d[0]; n.dy = d[1];
+        if (n.type === 'car') n.ch = dirChar(d);
+      } else {
+        n.x = nx; n.y = ny;
+      }
+    }
+  }
+
+  function drawNPCs(zbuf, horizon) {
+    if (mode !== 'city') return;
+    const cosA = Math.cos(cam.a), sinA = Math.sin(cam.a);
+    const focal = COLS / (2 * Math.tan(FOV / 2));
+    for (const n of npcs) {
+      const ex = n.x - cam.x, ey = n.y - cam.y;
+      const depth   =  ex * cosA + ey * sinA;
+      const lateral = -ex * sinA + ey * cosA;
+      if (depth <= 0.3 || depth >= MAX_DEPTH) continue;
+      const col = Math.floor(COLS / 2 + (lateral / depth) * focal);
+      if (col < 0 || col >= COLS) continue;
+      if (zbuf[col] < depth) continue;  // occluded by wall
+      const pph = PPH / depth;
+      const feetZ = n.type === 'car' ? 0.28 : 0.14;
+      const row = Math.floor(horizon + pph * (cam.z - feetZ));
+      if (row < 0 || row >= ROWS) continue;
+      drawChar(col, row, n.ch, n.color);
+      if (n.type === 'car' && row - 1 >= 0) {
+        drawChar(col, row - 1, '_', COLOR.carH);
+      }
+    }
+  }
+
+  // ─── RAIN + STARS ───────────────────────────────────────────
+  const RAIN_N = 260;
+  const rain = Array.from({ length: RAIN_N }, () => ({
+    x: Math.random() * COLS,
+    y: Math.random() * ROWS,
+    v: 0.35 + Math.random() * 0.55,
+    tilt: 0.35 + Math.random() * 0.25,
+  }));
+  function stepRain() {
+    for (const r of rain) {
+      r.y += r.v; r.x += r.tilt;
+      if (r.y >= ROWS) { r.y = -1; r.x = Math.random() * COLS; }
+      if (r.x >= COLS) r.x -= COLS;
+    }
+  }
+  const STARS = Array.from({ length: 60 }, () => ({
+    x: Math.random() * COLS,
+    y: Math.random() * (ROWS * 0.28),
+    ch: Math.random() < 0.15 ? '*' : '.',
+  }));
+
+  // ─── DRAW HELPERS ───────────────────────────────────────────
+  function drawChar(col, row, ch, color) {
+    if (col < 0 || col >= COLS || row < 0 || row >= ROWS) return;
+    if (!ch || ch === ' ') return;
+    const slot = atlasGet(ch, color);
+    if (slot) {
+      ctx.drawImage(atlasCanvas,
+        slot.sx, slot.sy, CELL_W, CELL_H,
+        col * CELL_W, row * CELL_H, CELL_W, CELL_H);
+    } else {
+      ctx.fillStyle = color;
+      ctx.fillText(ch, col * CELL_W, row * CELL_H);
+    }
+  }
+
+  // ─── AUDIO (procedural, CSP-safe) ──────────────────────────
+  let audio = null, audioReady = false, muted = false;
+  let masterGain, rainGain, humGain, buzzGain, buzzOsc;
+
+  function initAudio() {
+    if (audioReady) return;
+    try {
+      const AC = window.AudioContext || window.webkitAudioContext;
+      if (!AC) throw new Error('no webaudio');
+      audio = new AC();
+      masterGain = audio.createGain();
+      masterGain.gain.value = 0.55;
+      masterGain.connect(audio.destination);
+
+      // Rain: filtered white noise
+      const sr = audio.sampleRate;
+      const buf = audio.createBuffer(1, sr * 2, sr);
+      const dat = buf.getChannelData(0);
+      for (let i = 0; i < dat.length; i++) dat[i] = Math.random() * 2 - 1;
+      const noise = audio.createBufferSource();
+      noise.buffer = buf;
+      noise.loop = true;
+      const bp = audio.createBiquadFilter();
+      bp.type = 'bandpass';
+      bp.frequency.value = 1400;
+      bp.Q.value = 0.8;
+      const hp = audio.createBiquadFilter();
+      hp.type = 'highpass';
+      hp.frequency.value = 300;
+      rainGain = audio.createGain();
+      rainGain.gain.value = 0.14;
+      noise.connect(bp); bp.connect(hp); hp.connect(rainGain);
+      rainGain.connect(masterGain);
+      noise.start();
+
+      // Traffic hum: 2 detuned saws + slow LFO on gain
+      const hum1 = audio.createOscillator();
+      const hum2 = audio.createOscillator();
+      hum1.type = 'sawtooth'; hum2.type = 'sawtooth';
+      hum1.frequency.value = 55;
+      hum2.frequency.value = 58;
+      const lp = audio.createBiquadFilter();
+      lp.type = 'lowpass';
+      lp.frequency.value = 260;
+      lp.Q.value = 0.7;
+      humGain = audio.createGain();
+      humGain.gain.value = 0.045;
+      const lfo = audio.createOscillator();
+      lfo.frequency.value = 0.15;
+      const lfoAmp = audio.createGain();
+      lfoAmp.gain.value = 0.02;
+      lfo.connect(lfoAmp);
+      lfoAmp.connect(humGain.gain);
+      hum1.connect(lp); hum2.connect(lp);
+      lp.connect(humGain);
+      humGain.connect(masterGain);
+      hum1.start(); hum2.start(); lfo.start();
+
+      // Neon buzz: 118Hz saw, bandpass, proximity-modulated gain
+      buzzOsc = audio.createOscillator();
+      buzzOsc.type = 'sawtooth';
+      buzzOsc.frequency.value = 118;
+      const bf = audio.createBiquadFilter();
+      bf.type = 'bandpass';
+      bf.frequency.value = 800;
+      bf.Q.value = 2;
+      buzzGain = audio.createGain();
+      buzzGain.gain.value = 0;
+      buzzOsc.connect(bf); bf.connect(buzzGain);
+      buzzGain.connect(masterGain);
+      buzzOsc.start();
+
+      audioReady = true;
+    } catch (e) {
+      audioReady = false;
+    }
+  }
+
+  function toggleMute() {
+    if (!audioReady) return;
+    muted = !muted;
+    masterGain.gain.setTargetAtTime(muted ? 0 : 0.55, audio.currentTime, 0.05);
+    document.getElementById('aud').innerHTML = '<b>' + (muted ? 'off' : 'on') + '</b>';
+  }
+
+  function updateBuzz() {
+    if (!audioReady) return;
+    if (mode !== 'city') {
+      buzzGain.gain.setTargetAtTime(0, audio.currentTime, 0.1);
+      return;
+    }
+    let min = 999;
+    const cx = cam.x | 0, cy = cam.y | 0;
+    for (let dy = -5; dy <= 5; dy++) {
+      const yy = cy + dy;
+      if (yy < 0 || yy >= WORLD_H) continue;
+      for (let dx = -5; dx <= 5; dx++) {
+        const xx = cx + dx;
+        if (xx < 0 || xx >= WORLD_W) continue;
+        const c = cityGrid[yy][xx];
+        if (c && c.tag === 'sign') {
+          const d = Math.hypot(dx, dy);
+          if (d < min) min = d;
+        }
+      }
+    }
+    const g = min < 5 ? (0.06 * (1 - min / 5)) : 0;
+    buzzGain.gain.setTargetAtTime(g, audio.currentTime, 0.15);
+  }
+
+  // ─── FRAME ──────────────────────────────────────────────────
+  let last = performance.now(), fpsAcc = 0, fpsN = 0, buzzTick = 0;
+
+  function frame(now) {
+    const dt = Math.min(0.05, (now - last) / 1000);
+    last = now;
+    updateCam(dt);
+    stepRain();
+    stepNPCs(dt);
+    updatePrompt();
+
+    // clear
+    ctx.fillStyle = COLOR.sky;
+    ctx.fillRect(0, 0, CANVAS_W, CANVAS_H);
+
+    if (mode === 'city') {
+      for (const s of STARS) drawChar(s.x|0, s.y|0, s.ch, COLOR.starB);
+    }
+
+    const horizon = Math.floor(ROWS * 0.5);
+    const zbuf = new Float32Array(COLS);
+
+    // WALL PASS
+    for (let col = 0; col < COLS; col++) {
+      const rayA = cam.a + Math.atan((col / COLS - 0.5) * 2 * Math.tan(FOV / 2));
+      const hit = castRay(cam.x, cam.y, rayA);
+      const correctedDist = Math.max(0.05, hit.dist * Math.cos(rayA - cam.a));
+      zbuf[col] = correctedDist;
+      if (!hit.cell) continue;
+
+      const bh = hit.cell.h;
+      const pph = PPH / correctedDist;
+      const wallTop = Math.floor(horizon - pph * (bh - cam.z));
+      const wallBot = Math.floor(horizon + pph * cam.z);
+
+      const baseChar = distChar(correctedDist, WALL_CHARS);
+      const baseColor = wallColor(correctedDist, hit.cell);
+
+      const start = Math.max(0, wallTop);
+      const end   = Math.min(ROWS, wallBot);
+      for (let row = start; row < end; row++) {
+        // pull "world row" (0 = ground, bh = roof) for effects
+        const worldRow = Math.floor(Math.max(0, Math.min(bh - 0.001,
+          (wallBot - row) / Math.max(1, pph))));
+        let ch = baseChar, color = baseColor;
+        if (hit.cell.tag === 'lit' && correctedDist < 22) {
+          if (litWindowChance(hit.cell, worldRow)) {
+            const rr = ((hit.cell.seed ^ (worldRow * 373) ^ (col * 19)) >>> 0) / 0xFFFFFFFF;
+            if (rr < 0.55) {
+              ch = correctedDist < 6 ? '▓' : (correctedDist < 12 ? '#' : 'o');
+              color = COLOR.window;
+            }
+          }
+        }
+        if (hit.cell.tag === 'sign' && correctedDist < 18) {
+          const bandCenter = wallTop + (wallBot - wallTop) * 0.35;
+          if (Math.abs(row - bandCenter) < 1.5) {
+            const txt = SIGN_TEXTS[(hit.cell.seed >> 3) % SIGN_TEXTS.length];
+            const localCol = ((col + (hit.cell.seed & 7)) % txt.length);
+            ch = txt[localCol];
+          }
+        }
+        if (hit.cell.tag === 'isign' && correctedDist < 14) {
+          const bandCenter = wallTop + (wallBot - wallTop) * 0.45;
+          if (Math.abs(row - bandCenter) < 1.5) {
+            const name = hit.cell.name || 'BAR';
+            const localCol = (col * 2) % name.length;
+            ch = name[localCol];
+          }
+        }
+        if (hit.cell.tag === 'iwindow' && correctedDist < 14) {
+          const bandTop = wallTop + (wallBot - wallTop) * 0.15;
+          const bandBot = wallTop + (wallBot - wallTop) * 0.5;
+          if (row > bandTop && row < bandBot && (col & 1) === 0) {
+            ch = '▒';
+            color = COLOR.window;
+          }
+        }
+        if (hit.side === 1 && color === COLOR.slate) color = COLOR.fogMid;
+        drawChar(col, row, ch, color);
+      }
+
+      // GROUND
+      const groundStart = Math.max(horizon, wallBot);
+      for (let row = groundStart; row < ROWS; row++) {
+        const gDist = (row - horizon) / Math.max(0.1, (ROWS - horizon)) * MAX_DEPTH * 0.5;
+        const gc = distChar(gDist, GROUND_CHARS);
+        drawChar(col, row, gc, row % 2 === 0 ? COLOR.ground : COLOR.groundH);
+      }
+    }
+
+    // STREETLIGHTS (city only)
+    if (mode === 'city') {
+      for (let col = 0; col < COLS; col += 6) {
+        const d = zbuf[col];
+        if (d > 8 && d < 24) {
+          const row = horizon - 8 + ((col * 7) % 5);
+          if (row > 2 && row < horizon - 3 && ((col * 31) & 7) < 2) {
+            drawChar(col, row, '¤', COLOR.sodium);
+          }
+        }
+      }
+    }
+
+    // NPCs
+    drawNPCs(zbuf, horizon);
+
+    // RAIN (city only)
+    if (mode === 'city') {
+      for (const r of rain) {
+        const col = r.x | 0, row = r.y | 0;
+        if (row < 0 || row >= ROWS) continue;
+        const nearWall = zbuf[col] || MAX_DEPTH;
+        const ch = r.v > 0.7 ? '/' : (r.v > 0.5 ? '|' : '.');
+        const bright = nearWall < 6 || row > horizon - 4;
+        drawChar(col, row, ch, bright ? COLOR.rainH : COLOR.rain);
+      }
+    }
+
+    // Audio update (every ~8 frames)
+    buzzTick++;
+    if ((buzzTick & 7) === 0) updateBuzz();
+
+    // HUD
+    fpsAcc += 1 / dt; fpsN++;
+    if (fpsN >= 20) {
+      const fps = fpsAcc / fpsN;
+      fpsAcc = 0; fpsN = 0;
+      document.getElementById('fps').innerHTML = '<b>' + fps.toFixed(0) + '</b>';
+      document.getElementById('pos').innerHTML = '<b>' + cam.x.toFixed(1) + ', ' + cam.y.toFixed(1) + '</b>';
+      document.getElementById('alt').innerHTML = '<b>' + cam.z.toFixed(1) + 'u</b>';
+      const deg = ((cam.a * 180 / Math.PI) % 360 + 360) % 360;
+      document.getElementById('hdg').innerHTML = '<b>' + deg.toFixed(0) + '°</b>';
+    }
+
+    requestAnimationFrame(frame);
+  }
+
+  // ─── SPLASH → START ────────────────────────────────────────
+  const splash = document.getElementById('splash');
+  function begin() {
+    if (!splash.parentElement) return;
+    splash.classList.add('fade-out');
+    setTimeout(() => splash.remove(), 600);
+    const controls = document.getElementById('controls');
+    setTimeout(() => controls.style.opacity = '0.28', 8000);
+    initNPCs();
+    initAudio();  // user-gesture safe
+    const start = () => {
+      initAtlas();
+      requestAnimationFrame(frame);
+    };
+    if (document.fonts && document.fonts.ready) {
+      document.fonts.ready.then(start, start);
+    } else {
+      start();
+    }
+  }
+  splash.addEventListener('click', begin);
+  addEventListener('keydown', () => { if (splash.parentElement) begin(); }, { once: true });
+})();
+</script>
