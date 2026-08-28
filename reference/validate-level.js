@@ -19,10 +19,11 @@
 const fs = require('fs');
 const path = require('path');
 
-const WALK   = '.@gd+ar b$';        // tiles a body can stand on
-const ITEMS  = 'gd+arb$';           // entities that must be reachable
+const WALK   = '.@gdC+ar b$';       // tiles a body can stand on
+const ITEMS  = 'gdC+arb$';          // entities that must be reachable
 const LOCKS  = { R: 'red', B: 'blue' };
 const SECRET = 'S';                 // push-wall: solid until shoved, then passable
+const PICKUP = '+arb$';             // pushSecret() also stops short of these
 const KEYCH  = { r: 'red', b: 'blue' };
 
 function extractLevels(htmlPath) {
@@ -105,8 +106,10 @@ function validate(name, rows) {
         } else if (c === SECRET) {
           // pushSecret() slides the slab along the facing axis and refuses if
           // wedged, so the wall is only passable when the cell beyond is free
+          // — and it stops short of pickups as well as walls, so a slab with a
+          // battery cell directly behind it does not move at all
           const beyond = at(nx + dx, ny + dy);
-          if (!WALK.includes(beyond) && beyond !== 'D') {
+          if ((!WALK.includes(beyond) && beyond !== 'D') || PICKUP.includes(beyond)) {
             found.wedged.add(`${nx},${ny}`);
             continue;
           }
@@ -154,8 +157,12 @@ function validate(name, rows) {
       // other — a free neighbour alone is not enough if you cannot reach the
       // opposite face to push from
       const open = ch => WALK.includes(ch) || ch === 'D';
+      // the first cell of the slide must also be clear of pickups: pushSecret()
+      // treats a pickup like a wall, and refuses silently when span works out
+      // to zero, so this is indistinguishable from rock at the keyboard
+      const clear = ch => open(ch) && !PICKUP.includes(ch);
       const pushable = [[1, 0], [-1, 0], [0, 1], [0, -1]]
-        .some(([dx, dy]) => open(at(x - dx, y - dy)) && open(at(x + dx, y + dy)));
+        .some(([dx, dy]) => open(at(x - dx, y - dy)) && clear(at(x + dx, y + dy)));
       if (!pushable) wedged.push(`${x},${y}`);
     }
   }
@@ -168,7 +175,7 @@ function summarise(rows) {
   const all = rows.join('');
   const n = ch => all.split(ch).length - 1;
   return `${[...rows[0]].length}x${rows.length}  ` +
-         `enemies ${n('g') + n('d')} (${n('g')}g/${n('d')}d)  ` +
+         `enemies ${n('g') + n('d') + n('C')} (${n('g')}g/${n('d')}d/${n('C')}C)  ` +
          `pickups ${n('+') + n('a') + n('$') + n('r') + n('b')}  ` +
          `doors ${n('D') + n('R') + n('B')}  secrets ${n('S')}`;
 }

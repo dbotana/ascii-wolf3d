@@ -183,6 +183,48 @@
   #sKeys i.red.on  { background: #FF3B4E; border-color: #FF8A96; box-shadow: 0 0 8px #FF3B4E; }
   #sKeys i.blue.on { background: #4FA8FF; border-color: #A6D4FF; box-shadow: 0 0 8px #4FA8FF; }
 
+  /* ── boss bar: only up while the CEO is awake and alive ──── */
+  #bossBar {
+    position: absolute;
+    top: 54px; left: 50%;
+    transform: translateX(-50%);
+    z-index: 7;
+    width: min(60%, 520px);
+    text-align: center;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.35s ease;
+  }
+  #bossBar.show { opacity: 1; }
+  #bossBar .name {
+    display: block;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 10px; letter-spacing: 0.26em;
+    color: rgba(255,194,74,0.8); text-transform: uppercase;
+    text-shadow: 0 0 8px rgba(255,194,74,0.45);
+  }
+  #bossBar .track {
+    position: relative;
+    height: 9px; margin: 4px 0 3px;
+    border: 1px solid rgba(255,194,74,0.45);
+    background: rgba(2,3,10,0.6);
+    overflow: hidden;
+  }
+  #bossFill {
+    position: absolute; inset: 0 auto 0 0;
+    width: 100%;
+    background: linear-gradient(to right, #6A5480, #FFC24A);
+    box-shadow: 0 0 10px rgba(255,194,74,0.55);
+    transition: width 0.2s linear;
+  }
+  #bossBar .phase {
+    display: block;
+    font-family: 'VT323', monospace;
+    font-size: 15px; letter-spacing: 0.16em;
+    color: var(--neon-pink);
+    text-shadow: 0 0 10px rgba(255,59,124,0.5);
+  }
+
   #prompt {
     position: absolute;
     top: 60%; left: 50%;
@@ -244,6 +286,65 @@
     color: rgba(127,255,107,0.55); text-transform: uppercase;
   }
 
+  /* ── end-of-floor tally, the Wolf3D percentage screen ─────── */
+  #tally {
+    position: absolute;
+    inset: 0;
+    z-index: 8;
+    display: none;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 14px;
+    text-align: center;
+    background: radial-gradient(ellipse at center, rgba(2,3,10,0.74), rgba(2,3,10,0.96));
+    font-family: 'VT323', monospace;
+    pointer-events: none;
+  }
+  #tally.show { display: flex; }
+  #tally h2 {
+    font-size: 44px; letter-spacing: 0.08em;
+    color: var(--sodium); text-shadow: 0 0 18px rgba(255,149,0,0.55);
+  }
+  #tally .sub {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 11px; letter-spacing: 0.24em;
+    color: rgba(255,208,122,0.55); text-transform: uppercase;
+    margin-top: -8px;
+  }
+  #tRows {
+    display: grid;
+    grid-template-columns: auto auto auto;
+    gap: 4px 26px;
+    align-items: baseline;
+    font-size: 26px;
+    font-variant-numeric: tabular-nums;
+    margin: 4px 0;
+  }
+  #tRows .lbl {
+    text-align: right;
+    color: rgba(127,255,107,0.75);
+    letter-spacing: 0.14em;
+  }
+  #tRows .val { text-align: right; color: var(--crt); min-width: 4.2em;
+                text-shadow: 0 0 10px rgba(127,255,107,0.45); }
+  #tRows .bon { text-align: left; color: var(--sodium); min-width: 6.5em; font-size: 22px; }
+  #tRows .r { display: contents; }
+  #tRows .r.hide .lbl, #tRows .r.hide .val, #tRows .r.hide .bon { visibility: hidden; }
+  #tRows .r.perfect .val { color: var(--neon-pink); text-shadow: 0 0 14px rgba(255,59,124,0.7); }
+  #tScore {
+    font-size: 30px; letter-spacing: 0.12em; color: var(--window);
+    text-shadow: 0 0 14px rgba(255,208,122,0.45);
+    font-variant-numeric: tabular-nums;
+  }
+  #tScore.hide { visibility: hidden; }
+  #tHint {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 11px; letter-spacing: 0.22em;
+    color: rgba(127,255,107,0.55); text-transform: uppercase;
+  }
+  #tHint.hide { visibility: hidden; }
+
   #splash {
     position: absolute;
     inset: 0;
@@ -287,10 +388,16 @@
   <canvas id="screen"></canvas>
   <header>
     <h1>WOLFENSTAIN 3D</h1>
-    <span class="meta">neon reich &middot; floor 1</span>
+    <span class="meta" id="floorName">neon reich &middot; floor 1</span>
   </header>
 
   <div id="hpVignette"></div>
+
+  <div id="bossBar">
+    <span class="name">CHIEF EXECUTIVE OFFICER</span>
+    <div class="track"><div id="bossFill"></div></div>
+    <span class="phase" id="bossPhase"></span>
+  </div>
 
   <div id="prompt"></div>
   <div id="toast"></div>
@@ -300,6 +407,7 @@
     <div class="slot"><span class="lbl">score</span><span class="val" id="sScore">000000</span></div>
     <div class="slot"><span class="lbl">kills</span><span class="val" id="sKills">0/0</span></div>
     <div class="slot"><span class="lbl">secrets</span><span class="val" id="sSecrets">0/0</span></div>
+    <div class="slot"><span class="lbl">treasure</span><span class="val" id="sTreasure">0/0</span></div>
     <pre id="sFace"> ___ &#10;|o o|&#10;|\_/|</pre>
     <div class="slot" id="sHpWrap"><span class="lbl">health</span><span class="val" id="sHp">100</span>
       <div id="hpBar"><div id="hpChip"></div><div id="hpFill"></div></div>
@@ -310,8 +418,21 @@
     </div>
   </div>
 
+  <div id="tally">
+    <h2 id="tTitle">FLOOR CLEARED</h2>
+    <div class="sub" id="tSub"></div>
+    <div id="tRows">
+      <div class="r hide" id="tRowTime"><span class="lbl">TIME</span><span class="val" id="tTime">0:00</span><span class="bon" id="tTimeB"></span></div>
+      <div class="r hide" id="tRowKill"><span class="lbl">KILL RATIO</span><span class="val" id="tKill">0%</span><span class="bon" id="tKillB"></span></div>
+      <div class="r hide" id="tRowSecret"><span class="lbl">SECRET RATIO</span><span class="val" id="tSecret">0%</span><span class="bon" id="tSecretB"></span></div>
+      <div class="r hide" id="tRowTreasure"><span class="lbl">TREASURE RATIO</span><span class="val" id="tTreasure">0%</span><span class="bon" id="tTreasureB"></span></div>
+    </div>
+    <div id="tScore" class="hide">SCORE 000000</div>
+    <small id="tHint" class="hide"></small>
+  </div>
+
   <div id="banner">
-    <h2 id="bTitle">FLOOR CLEARED</h2>
+    <h2 id="bTitle">OUT</h2>
     <p id="bBody"></p>
     <small id="bHint">press P to restart</small>
   </div>
@@ -319,7 +440,7 @@
   <div id="splash">
     <h2>WOLFENSTAIN 3D</h2>
     <h3>NEON REICH</h3>
-    <p>escape the arcology</p>
+    <p>three floors up &middot; one boardroom &middot; no notice period</p>
     <div class="keys">
       <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> move &nbsp;
       <kbd>&larr;</kbd><kbd>&rarr;</kbd> turn &nbsp;
@@ -327,7 +448,7 @@
       <kbd>Space</kbd> / click fire &nbsp;
       <kbd>E</kbd> use door &middot; switch &middot; search walls &nbsp;
       <kbd>R</kbd> reload<br>
-      <kbd>P</kbd> restart &nbsp; <kbd>M</kbd> mute &nbsp; <kbd>Esc</kbd> release mouse
+      <kbd>P</kbd> restart floor &nbsp; <kbd>M</kbd> mute &nbsp; <kbd>Esc</kbd> release mouse
     </div>
     <small>click to enter</small>
   </div>
@@ -349,6 +470,7 @@
   const EYE_Z = 1.6;            // player eye height
   const FOCAL = COLS / (2 * Math.tan(FOV / 2));
   const CLIP_SIZE = 8;          // rounds per magazine before a reload cycle
+  const KILL_SCORE = { guard: 200, drone: 150, ceo: 5000 };
   const RELOAD_TIME = 1.05;     // seconds for the full reload animation
 
   // ─── PALETTE ────────────────────────────────────────────────
@@ -364,6 +486,7 @@
     steel:'#8A97A6', steelD:'#4A5563',
     keyRed:'#FF3B4E', keyBlue:'#4FA8FF',
     guard:'#C8B090', guardSuit:'#5C6B80', visor:'#55E6E6', visorHot:'#FF3B7C',
+    ceoSuit:'#6A5480', ceoTrim:'#FFC24A',
     drone:'#9FB4C8', droneEye:'#FF3B7C',
     blood:'#B3243C',
     gun:'#6E7B8C', gunHi:'#AAB8C8', muzzle:'#FFE9A8',
@@ -478,17 +601,17 @@
   const LEVEL_1 = [
     '########################################',
     '########################################',
-    '###############.......##################',
-    '###############.a$X$..S$a###############',
-    '###############.......##################',
+    '###############.......#$a###############',
+    '###############.a$X$..S..###############',
+    '###############.......#.$###############',
     '###############NN#B#NN##################',
     '#################...####################',
     '#################...####################',
     '#################...#####...........####',
     '#################.a.#####.$..a..$..a####',
-    '#################...#####...d...d...####',
-    '#################.g.##.$S..a.....a..####',
-    '##############.$S...#####$....b....$####',
+    '#################...##$a#...d...d...####',
+    '##############$a#.g.##..S..a.....a..####',
+    '##############..S...#####$....b....$####',
     '#################...#####...........####',
     '#################...##########R#########',
     '###..................................###',
@@ -517,6 +640,99 @@
     '###......a..........@..........a.....###',
     '#####||||||||||||||||||||||||||||||#####',
   ];
+
+  const LEVEL_2 = [
+    '########################################',
+    '#################..XX..#################',
+    '#################......#################',
+    '###################BB###################',
+    '##########....$..........$....##########',
+    '#########N..d..............d..N#########',
+    '##########...####....####.....##########',
+    '#########N...#a$#....#$a#.....N#########',
+    '##########..g..............g..##########',
+    '###################RR###################',
+    '###..a..........$..........$......a..###',
+    '###.##....##....##....##....##....##.###',
+    '###..................................###',
+    '###............##########............###',
+    '###...######...##.$..$.##...######...###',
+    '###...Dr..$#....S......S....#$..bD...###',
+    '###...######...##.$..$.##...######...###',
+    '###..g......g..##########..d......d..###',
+    '###............##########............###',
+    '########..####################..########',
+    '###..................................###',
+    '###...##...##...##...##...##...##....###',
+    '###...##.a.##.$.##...##.a.##.$.##....###',
+    '###....g........d........g.......d...###',
+    '###...##...##...##...##...##...##....###',
+    '###..$.....a........a.....$......a...###',
+    '#####...########################...#####',
+    '#####...########################...#####',
+    '#####.a.#.$...$.################...#####',
+    '#####...S.......################.a.#####',
+    '#####.g.#.$...$.################.d.#####',
+    '#####...#..d....################...#####',
+    '#####.$.########################.$.#####',
+    '#####...########################...#####',
+    '###...a..........................a...###',
+    '###..####......####......####......a.###',
+    '###..#$a#......#a$#......#$a#........###',
+    '###.................@................###',
+    '###||||||||||||||||||||||||||||||||||###',
+    '########################################',
+  ];
+
+  const LEVEL_3 = [
+    '########################################',
+    '#################..XX..#################',
+    '#################......#################',
+    '######............................######',
+    '######..NN....................NN..######',
+    '######............................######',
+    '##.$.#...####..............####...#.$.##',
+    '##...S...#$a#..............#a$#...S...##',
+    '##.$.#............................#.$.##',
+    '######..............C.............######',
+    '######....d..............d........######',
+    '######............................######',
+    '######..g......................g..######',
+    '###################RR###################',
+    '###..................................###',
+    '###.####...####...####...####...####.###',
+    '###.#$a#...#a$#...#$a#...#a$#...#$a#.###',
+    '###..................................###',
+    '###..g.....d.....g.....d.....g.....a.###',
+    '###..................................###',
+    '########..####################..########',
+    '###..................................###',
+    '###..####........####........####....###',
+    '###..#r.#........#$a#........#a$#....###',
+    '###..................................###',
+    '###....g...........d...........g.....###',
+    '###............##########............###',
+    '###............##.$$$$.##............###',
+    '###.............S......S.............###',
+    '###............##.$$$$.##............###',
+    '###............##########............###',
+    '###..................................###',
+    '###..####......####......####......a.###',
+    '###..#$a#......#a$#......#$a#........###',
+    '###..................................###',
+    '###...a....d..........d....a.........###',
+    '###.................@................###',
+    '###..a............................a..###',
+    '###||||||||||||||||||||||||||||||||||###',
+    '########################################',
+  ];
+
+  // Floors in play order. Each stays its own `const LEVEL_*` array so
+  // reference/validate-level.js keeps finding them by name.
+  const LEVELS = [LEVEL_1, LEVEL_2, LEVEL_3];
+  const FLOOR_NAMES = ['ATRIUM · SUBLEVEL', 'R&D · SERVER FARM', 'EXECUTIVE SUITE'];
+  // seconds a competent run takes; drives the time bonus on the tally screen
+  const PAR_TIME = [150, 180, 210];
 
   // ─── SPRITE ART ─────────────────────────────────────────────
   const SPR = {
@@ -603,6 +819,59 @@
       ],
       wW: 1.2, wH: 0.35, foot: 0.0,
       base: 'steelD', accent: '', accentColor: 'steelD',
+    },
+    // The CEO. Twice a guard's footprint and the full height of the corridor,
+    // so it reads as a wall of suit long before the damage numbers do.
+    ceo: {
+      rows: [
+        '   ▄███▄   ',
+        '  ▟█████▙  ',
+        ' ▐██◘█◘██▌ ',
+        ' ▐███▄███▌ ',
+        '▟█████████▙',
+        '███▛███▜███',
+        '▜██▌▐█▌▐██▛',
+        ' ▐███████▌ ',
+        ' ▐██▌ ▐██▌ ',
+        ' ▟██▛ ▜██▙ ',
+      ],
+      wW: 2.5, wH: 2.9, foot: 0.0,
+      base: 'ceoSuit', accent: '◘', accentColor: 'ceoTrim',
+    },
+    ceoFire: {
+      rows: [
+        '   ▄███▄   ',
+        '  ▟█████▙  ',
+        ' ▐██◙█◙██▌ ',
+        ' ▐███▄███▌ ',
+        '▟█████████▙',
+        '◄██▛███▜██►',
+        '▜██▌▐█▌▐██▛',
+        ' ▐███████▌ ',
+        ' ▐██▌ ▐██▌ ',
+        ' ▟██▛ ▜██▙ ',
+      ],
+      wW: 2.5, wH: 2.9, foot: 0.0,
+      base: 'ceoSuit', accent: '◙◄►', accentColor: 'muzzle',
+    },
+    ceoDie: {
+      rows: [
+        '    ▄▄▄    ',
+        '  ▄██x██▄  ',
+        '▄█████████▄',
+        '███████████',
+        '▀▀▀▀▀▀▀▀▀▀▀',
+      ],
+      wW: 2.8, wH: 1.5, foot: 0.0,
+      base: 'ceoSuit', accent: 'x', accentColor: 'blood',
+    },
+    ceoDead: {
+      rows: [
+        '▂▂▂▂▂▂▂▂▂▂▂',
+        '██▄▄▄▄▄▄▄██',
+      ],
+      wW: 3.0, wH: 0.55, foot: 0.0,
+      base: 'blood', accent: '', accentColor: 'blood',
     },
     health: {
       rows: ['╭─╮', '╰♨╯'],
@@ -736,6 +1005,10 @@
   let enemies = [], items = [], doorList = [];
   let secretList = [], movingSecrets = [];
   let totalEnemies = 0, totalSecrets = 0, secretsFound = 0;
+  // treasure is the crypto wallets only — the generic item loop also runs over
+  // ramen, cells and keycards, and dropLoot() appends to `items` mid-level, so
+  // the denominator has to be fixed at parse time from the '$' tiles alone
+  let totalTreasure = 0, treasureFound = 0;
 
   const player = {
     x: 20.5, y: 38.5, a: -Math.PI / 2,
@@ -750,6 +1023,8 @@
 
   let gameState = 'playing';   // playing | dead | cleared
   let levelTime = 0;
+  let levelIndex = 0;          // which floor of LEVELS we are on
+  let boss = null;             // the CEO, once a floor places one
 
   function mkDoor(lock) {
     return { tag: 'door', h: WALL_H, lock, open: 0, phase: 'closed', timer: 0, seed: 7 };
@@ -761,7 +1036,12 @@
              gx: x, gy: y, dx: 0, dy: 0, push: 0, span: 0, phase: 'idle' };
   }
   function mkEnemy(type, x, y) {
-    const spec = type === 'guard'
+    // The CEO is tuned as a fight, not an obstacle: enough hp to need three
+    // magazines, enough reach that backing off is not a free answer, and a
+    // standoff of its own so it never simply walks into your muzzle.
+    const spec = type === 'ceo'
+      ? { hp: 520, speed: 1.10, range: 12.0, cd: 1.40, dmg: 16, sight: 20 }
+      : type === 'guard'
       ? { hp: 45, speed: 1.35, range: 9.5, cd: 1.15, dmg: 11, sight: 15 }
       : { hp: 28, speed: 2.10, range: 7.0, cd: 0.85, dmg:  7, sight: 13 };
     return {
@@ -769,6 +1049,8 @@
       hp: spec.hp, maxHp: spec.hp, spec,
       state: 'idle', stateT: 0, atkCd: 0, bob: Math.random() * 6.28,
       alive: true,
+      phase: 0, burst: 1, shotsLeft: 1,
+      want: type === 'ceo' ? CEO_PHASES[0].want : undefined,
     };
   }
   function mkItem(kind, x, y) {
@@ -780,6 +1062,8 @@
     MAP_W = src[0].length;
     grid = [];
     enemies = []; items = []; doorList = []; secretList = []; movingSecrets = [];
+    totalTreasure = 0; treasureFound = 0;
+    boss = null;
     for (let y = 0; y < MAP_H; y++) {
       const row = new Array(MAP_W).fill(0);
       for (let x = 0; x < MAP_W; x++) {
@@ -805,11 +1089,16 @@
           }
           case 'g': enemies.push(mkEnemy('guard', x + 0.5, y + 0.5)); break;
           case 'd': enemies.push(mkEnemy('drone', x + 0.5, y + 0.5)); break;
+          case 'C': {
+            const c = mkEnemy('ceo', x + 0.5, y + 0.5);
+            enemies.push(c); boss = c;
+            break;
+          }
           case '+': items.push(mkItem('health',  x + 0.5, y + 0.5)); break;
           case 'a': items.push(mkItem('ammo',    x + 0.5, y + 0.5)); break;
           case 'r': items.push(mkItem('keyRed',  x + 0.5, y + 0.5)); break;
           case 'b': items.push(mkItem('keyBlue', x + 0.5, y + 0.5)); break;
-          case '$': items.push(mkItem('cash',    x + 0.5, y + 0.5)); break;
+          case '$': items.push(mkItem('cash',    x + 0.5, y + 0.5)); totalTreasure++; break;
           case '@': player.x = x + 0.5; player.y = y + 0.5; break;
         }
       }
@@ -820,10 +1109,22 @@
     secretsFound = 0;
   }
 
-  function startLevel() {
-    parseLevel(LEVEL_1);
+  /**
+   * Start (or restart) a floor.
+   * @param {number} [n]      index into LEVELS; defaults to the current floor
+   * @param {boolean} [carry] true when descending — health, ammo and score
+   *                          come with you, the way they do in Wolf3D. A cold
+   *                          start resets them.
+   */
+  function startLevel(n, carry) {
+    levelIndex = Math.max(0, Math.min(LEVELS.length - 1,
+                                      n === undefined ? levelIndex : n));
+    parseLevel(LEVELS[levelIndex]);
     player.a = -Math.PI / 2;
-    player.hp = 100; player.ammo = 24; player.score = 0; player.kills = 0;
+    if (!carry) { player.hp = 100; player.ammo = 24; player.score = 0; }
+    // kills and keycards are per-floor even on a descent: the ratio on the
+    // tally screen is this floor's, and last floor's keys open nothing here
+    player.kills = 0;
     player.keyRed = false; player.keyBlue = false;
     player.fireCd = 0; player.bob = 0; player.hurtT = 0; player.flashT = 0;
     player.reloadT = 0; player.clip = Math.min(CLIP_SIZE, player.ammo);
@@ -833,7 +1134,16 @@
     levelTime = 0;
     gunFrame = 0; gunT = 0;
     hideBanner();
+    hideTally();
     syncHud();
+  }
+
+  function nextLevel() {
+    if (levelIndex + 1 >= LEVELS.length) return false;
+    startLevel(levelIndex + 1, true);
+    sfx('door');
+    toast('FLOOR ' + (levelIndex + 1) + '  ·  ' + FLOOR_NAMES[levelIndex]);
+    return true;
   }
 
   // ─── GRID QUERIES ───────────────────────────────────────────
@@ -942,7 +1252,7 @@
     if (k === 'e')     use();
     if (k === 'm')     toggleMute();
     if (k === 'r')     { if (gameState === 'playing') startReload(); }
-    if (k === 'p')     startLevel();
+    if (k === 'p')     startLevel(gameState === 'won' ? 0 : levelIndex);
   });
   addEventListener('keyup', e => keys.delete(e.key.toLowerCase()));
 
@@ -1002,6 +1312,16 @@
     return false;
   }
 
+  // An uncollected pickup makes a tile off-limits to anything that turns it
+  // solid: `blockAt` would keep the player out and `stepItems` needs them
+  // within 0.62u, so a slab parked on top of one seals it away for good.
+  function itemAt(gx, gy) {
+    for (const it of items) {
+      if (!it.taken && (it.x | 0) === gx && (it.y | 0) === gy) return true;
+    }
+    return false;
+  }
+
   function stepDoors(dt) {
     for (const d of doorList) {
       if (d.phase === 'opening') {
@@ -1052,7 +1372,7 @@
   }
 
   // travels along whichever axis you are facing, up to two tiles, stopping short
-  // of anything solid or anyone alive
+  // of anything solid, anyone alive, or any pickup still on the floor
   function pushSecret(s) {
     const fx = Math.cos(player.a), fy = Math.sin(player.a);
     let dx = 0, dy = 0;
@@ -1062,7 +1382,7 @@
     for (let n = 1; n <= 2; n++) {
       const nx = s.gx + dx * n, ny = s.gy + dy * n;
       if (nx < 0 || ny < 0 || nx >= MAP_W || ny >= MAP_H) break;
-      if (cellAt(nx, ny) || occupied(nx, ny)) break;
+      if (cellAt(nx, ny) || occupied(nx, ny) || itemAt(nx, ny)) break;
       span = n;
     }
     if (!span) return;           // wedged — stay silent rather than give it away
@@ -1086,7 +1406,9 @@
   }
 
   function use() {
-    if (gameState === 'cleared' || gameState === 'dead') { startLevel(); return; }
+    if (gameState === 'cleared') { advanceFromTally(); return; }
+    if (gameState === 'won')     { startLevel(0); return; }
+    if (gameState === 'dead')    { startLevel(levelIndex); return; }
     const f = frontCell();
     if (!f) return;
     const c = f.cell;
@@ -1099,6 +1421,8 @@
     } else if (c.secret && c.phase === 'idle') {
       pushSecret(c);
     } else if (c.tag === 'exit') {
+      // the CEO holds the elevator: no leaving the floor while the board sits
+      if (boss && boss.alive) { toast('THE BOARD IS STILL IN SESSION'); sfx('deny'); return; }
       clearLevel();
     }
   }
@@ -1172,7 +1496,7 @@
       best.state = 'dying';
       best.stateT = 0;
       player.kills++;
-      player.score += best.type === 'guard' ? 200 : 150;
+      player.score += KILL_SCORE[best.type] || 150;
       dropLoot(best);
       sfx('kill');
       syncHud();
@@ -1276,6 +1600,73 @@
     syncHud();
   }
 
+  // ─── THE CEO ────────────────────────────────────────────────
+  // A three-phase fight rather than a guard with more hp. Each phase re-tunes
+  // the same spec fields the ordinary FSM already reads — speed, cooldown,
+  // damage, standoff — plus a burst length, so no new state machine is needed.
+  const CEO_PHASES = [
+    // `at` is the health fraction at or below which the phase takes over
+    { at: 1.00, name: 'BOARD MEETING',    speed: 1.10, cd: 1.40, dmg: 16, want: 5.2, burst: 1 },
+    { at: 0.62, name: 'HOSTILE TAKEOVER', speed: 1.75, cd: 1.00, dmg: 14, want: 3.2, burst: 3 },
+    { at: 0.28, name: 'GOLDEN PARACHUTE', speed: 2.20, cd: 0.62, dmg: 12, want: 2.3, burst: 4,
+      summon: 2 },
+  ];
+
+  // Drones the CEO calls in are real enemies, so they count toward the floor's
+  // kill ratio — the denominator grows with them and 100% stays achievable.
+  function summonDrones(e, n) {
+    const spots = [];
+    for (let r = 2; r <= 4 && spots.length < n; r++) {
+      for (let k = 0; k < 12 && spots.length < n; k++) {
+        const th = (k / 12) * Math.PI * 2;
+        const x = e.x + Math.cos(th) * r, y = e.y + Math.sin(th) * r;
+        if (blockAt(x, y)) continue;
+        if (spots.some(p => Math.hypot(p[0] - x, p[1] - y) < 1.2)) continue;
+        spots.push([x, y]);
+      }
+    }
+    for (const [x, y] of spots) {
+      const d = mkEnemy('drone', x, y);
+      d.state = 'chase';
+      enemies.push(d);
+      totalEnemies++;
+    }
+    if (spots.length) { sfx('ping'); syncHud(); }
+  }
+
+  function stepCeoPhase(e) {
+    const frac = e.hp / e.maxHp;
+    let want = 0;
+    for (let i = 0; i < CEO_PHASES.length; i++) if (frac <= CEO_PHASES[i].at) want = i;
+    if (want === e.phase) return;
+    e.phase = want;
+    const ph = CEO_PHASES[want];
+    e.spec.speed = ph.speed;
+    e.spec.cd    = ph.cd;
+    e.spec.dmg   = ph.dmg;
+    e.want  = ph.want;
+    e.burst = ph.burst;
+    e.atkCd = Math.min(e.atkCd, 0.5);
+    if (want > 0) {
+      toast('CEO  ·  ' + ph.name);
+      sfx('bark');
+      alertNear(e.x, e.y, 12);
+      if (ph.summon) summonDrones(e, ph.summon);
+    }
+  }
+
+  // One enemy shot, shared by the whole roster: the CEO's bursts are this same
+  // call repeated, so accuracy falloff and damage scaling stay in one place.
+  function enemyShot(e, dist) {
+    if (!hasLOS(e.x, e.y, player.x, player.y)) return;
+    if (dist >= e.spec.range + 1) return;
+    sfx('enemyShot');
+    const p = Math.max(0.16, 0.72 - dist * 0.045);
+    if (Math.random() >= p) return;
+    const falloff = Math.max(0.45, 1 - dist / 18);
+    hurtPlayer(Math.round(e.spec.dmg * falloff * (0.7 + Math.random() * 0.6)));
+  }
+
   // ─── ENEMY FSM ──────────────────────────────────────────────
   function stepEnemies(dt) {
     for (const e of enemies) {
@@ -1288,6 +1679,7 @@
         continue;
       }
       if (gameState !== 'playing') continue;
+      if (e.type === 'ceo') stepCeoPhase(e);
 
       const dx = player.x - e.x, dy = player.y - e.y;
       const dist = Math.hypot(dx, dy);
@@ -1322,10 +1714,12 @@
           if (los && dist < e.spec.range && e.atkCd <= 0) {
             e.state = 'attack';
             e.stateT = 0.22;
+            e.shotsLeft = e.burst || 1;
             break;
           }
           // close the gap, but keep a little standoff
-          const want = e.type === 'guard' ? 3.2 : 2.2;
+          const want = e.want !== undefined ? e.want
+                     : e.type === 'guard' ? 3.2 : 2.2;
           if (dist > want) {
             const sp = e.spec.speed * dt;
             const nx = dx / dist * sp, ny = dy / dist * sp;
@@ -1338,15 +1732,13 @@
         case 'attack': {
           e.stateT -= dt;
           if (e.stateT <= 0) {
-            e.state = 'chase';
-            e.atkCd = e.spec.cd * (0.75 + Math.random() * 0.5);
-            if (hasLOS(e.x, e.y, player.x, player.y) && dist < e.spec.range + 1) {
-              sfx('enemyShot');
-              const p = Math.max(0.16, 0.72 - dist * 0.045);
-              if (Math.random() < p) {
-                const falloff = Math.max(0.45, 1 - dist / 18);
-                hurtPlayer(Math.round(e.spec.dmg * falloff * (0.7 + Math.random() * 0.6)));
-              }
+            enemyShot(e, dist);
+            if (e.shotsLeft > 1) {
+              e.shotsLeft--;
+              e.stateT = 0.16;          // stay in the muzzle-flash frame
+            } else {
+              e.state = 'chase';
+              e.atkCd = e.spec.cd * (0.75 + Math.random() * 0.5);
             }
           }
           break;
@@ -1375,6 +1767,7 @@
           toast('BATTERY CELL  +' + CLIP_SIZE + ' AMMO'); break;
         case 'cash':
           player.score += 500;
+          treasureFound++;
           toast('CRYPTO WALLET  +500'); break;
         case 'keyRed':
           player.keyRed = true;
@@ -1733,9 +2126,14 @@
   }
 
   function syncHud() {
+    el('sFloor').textContent = String(levelIndex + 1);
     el('sScore').textContent = String(player.score).padStart(6, '0');
     el('sKills').textContent = player.kills + '/' + totalEnemies;
     el('sSecrets').textContent = secretsFound + '/' + totalSecrets;
+    el('sTreasure').textContent = treasureFound + '/' + totalTreasure;
+    const meta = el('floorName');
+    if (meta) meta.textContent = 'neon reich \u00b7 floor ' + (levelIndex + 1) +
+                                 ' \u00b7 ' + FLOOR_NAMES[levelIndex].toLowerCase();
     el('sHp').textContent   = player.hp;
     el('sAmmo').textContent = player.reloadT > 0
       ? '--/' + player.ammo
@@ -1747,6 +2145,19 @@
     const ks = el('sKeys').children;
     ks[0].classList.toggle('on', player.keyRed);
     ks[1].classList.toggle('on', player.keyBlue);
+    paintBossBar();
+  }
+
+  // The bar stays hidden until the CEO has actually noticed you, so walking in
+  // does not spoil the reveal, and drops away the moment it dies.
+  function paintBossBar() {
+    const bar = el('bossBar');
+    const live = boss && boss.alive && boss.state !== 'idle' && gameState === 'playing';
+    bar.classList.toggle('show', !!live);
+    if (!live) return;
+    const frac = Math.max(0, boss.hp / boss.maxHp);
+    el('bossFill').style.width = (frac * 100).toFixed(1) + '%';
+    el('bossPhase').textContent = CEO_PHASES[boss.phase].name;
   }
 
   function showBanner(title, body, hint, fail) {
@@ -1758,19 +2169,167 @@
   }
   function hideBanner() { bannerEl.classList.remove('show'); }
 
+  // ─── END-OF-FLOOR TALLY ─────────────────────────────────────
+  // Wolf3D's percentage screen: the ratios roll up one row at a time with a
+  // tick per digit, and a category only pays out at a clean 100%.
+  const PERFECT_BONUS = 2500;    // per category, awarded only at 100%
+  const TIME_BONUS_PER_SEC = 10; // for every second under par
+  const ROW_ROLL = 0.85;         // seconds a row takes to count up
+  const ROW_GAP  = 0.30;         // pause before the next row starts
+
+  let tally = null;
+
+  function mmss(t) {
+    const s = Math.max(0, Math.floor(t));
+    return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0');
+  }
+  const ratio = (a, b) => (b > 0 ? Math.round((a / b) * 100) : 100);
+
+  function openTally(finalFloor) {
+    const par = PAR_TIME[levelIndex] || 180;
+    tally = {
+      finalFloor: !!finalFloor,
+      par,
+      timeBonus: Math.max(0, Math.round(par - levelTime) * TIME_BONUS_PER_SEC),
+      rows: [
+        { id: 'Kill',     pct: ratio(player.kills,  totalEnemies)  },
+        { id: 'Secret',   pct: ratio(secretsFound,  totalSecrets)  },
+        { id: 'Treasure', pct: ratio(treasureFound, totalTreasure) },
+      ],
+      stage: 0,        // 0 = time row, 1..3 = the ratio rows, 4 = score + hint
+      stageT: 0,
+      shown: [0, 0, 0],
+      lastTick: [-1, -1, -1],
+      done: false,
+    };
+    el('tTitle').textContent = finalFloor ? 'ARCOLOGY CLEARED' : 'FLOOR CLEARED';
+    el('tSub').textContent = 'FLOOR ' + (levelIndex + 1) + '  ·  ' + FLOOR_NAMES[levelIndex];
+    for (const id of ['Time', 'Kill', 'Secret', 'Treasure']) {
+      const r = el('tRow' + id);
+      r.classList.add('hide');
+      r.classList.remove('perfect');
+      el('t' + id + 'B').textContent = '';
+    }
+    el('tKill').textContent = el('tSecret').textContent = el('tTreasure').textContent = '0%';
+    el('tTime').textContent = mmss(levelTime);
+    el('tScore').classList.add('hide');
+    el('tHint').classList.add('hide');
+    el('tally').classList.add('show');
+  }
+
+  function hideTally() {
+    tally = null;
+    el('tally').classList.remove('show');
+  }
+
+  function paintScoreRow() {
+    el('tScore').textContent = 'SCORE ' + String(player.score).padStart(6, '0');
+  }
+
+  // Reveal one row, award it, and move on. Called both by the roll-up and by
+  // finishTally(), so skipping the animation pays out exactly the same.
+  function settleRow(i) {
+    const r = tally.rows[i];
+    tally.shown[i] = r.pct;
+    el('t' + r.id).textContent = r.pct + '%';
+    el('tRow' + r.id).classList.remove('hide');
+    if (r.pct >= 100 && !r.paid) {
+      r.paid = true;
+      el('tRow' + r.id).classList.add('perfect');
+      el('t' + r.id + 'B').textContent = '100% +' + PERFECT_BONUS;
+      player.score += PERFECT_BONUS;
+      sfx('key');
+    }
+  }
+
+  function finishTally() {
+    if (!tally || tally.done) return;
+    if (!tally.timePaid) {
+      tally.timePaid = true;
+      player.score += tally.timeBonus;
+    }
+    el('tRowTime').classList.remove('hide');
+    el('tTimeB').textContent = 'PAR ' + mmss(tally.par) +
+      (tally.timeBonus > 0 ? '  +' + tally.timeBonus : '');
+    for (let i = 0; i < tally.rows.length; i++) settleRow(i);
+    paintScoreRow();
+    el('tScore').classList.remove('hide');
+    el('tHint').textContent = tally.finalFloor
+      ? 'press E to step outside'
+      : 'press E to descend  ·  P to replay this floor';
+    el('tHint').classList.remove('hide');
+    tally.done = true;
+    tally.stage = 5;
+    sfx('clear');
+    syncHud();
+  }
+
+  function stepTally(dt) {
+    if (!tally || tally.done) return;
+    tally.stageT += dt;
+
+    if (tally.stage === 0) {                       // time row
+      if (!tally.timePaid) {
+        tally.timePaid = true;
+        player.score += tally.timeBonus;
+        el('tRowTime').classList.remove('hide');
+        el('tTimeB').textContent = 'PAR ' + mmss(tally.par) +
+          (tally.timeBonus > 0 ? '  +' + tally.timeBonus : '');
+        sfx('pickup');
+      }
+      if (tally.stageT >= ROW_GAP) { tally.stage = 1; tally.stageT = 0; }
+      return;
+    }
+
+    const i = tally.stage - 1;
+    if (i >= tally.rows.length) {                  // score + hint
+      if (tally.stageT >= ROW_GAP) finishTally();
+      return;
+    }
+
+    const r = tally.rows[i];
+    el('tRow' + r.id).classList.remove('hide');
+    const k = Math.min(1, tally.stageT / ROW_ROLL);
+    const v = Math.round(r.pct * k);
+    tally.shown[i] = v;
+    el('t' + r.id).textContent = v + '%';
+    // one tick every few percent, so a 100% row is a run of ticks and a 0% row
+    // is a single one — the audio reads as the number climbing
+    const tickBucket = Math.floor(v / 7);
+    if (tickBucket !== tally.lastTick[i]) {
+      tally.lastTick[i] = tickBucket;
+      sfx('ping');
+    }
+    if (k >= 1) {
+      settleRow(i);                 // idempotent: the payout and chime self-guard
+      if (tally.stageT >= ROW_ROLL + ROW_GAP) { tally.stage++; tally.stageT = 0; }
+    }
+  }
+
   function clearLevel() {
     if (gameState !== 'playing') return;
     gameState = 'cleared';
     if (document.exitPointerLock) document.exitPointerLock();
-    const bonus = Math.max(0, 1200 - Math.round(levelTime) * 8);
-    player.score += bonus;
-    sfx('clear');
-    showBanner('FLOOR CLEARED',
-      'ELEVATOR ENGAGED  ·  ' + player.kills + '/' + totalEnemies + ' NEUTRALISED  ·  ' +
-      secretsFound + '/' + totalSecrets + ' SECRETS  ·  TIME BONUS ' + bonus +
-      '  ·  SCORE ' + String(player.score).padStart(6, '0'),
-      'press P to run it again', false);
+    openTally(levelIndex + 1 >= LEVELS.length);
     syncHud();
+  }
+
+  // The tally screen's own action key: skip the roll-up if it is still
+  // running, otherwise ride the elevator down to the next floor.
+  function advanceFromTally() {
+    if (tally && !tally.done) { finishTally(); return; }
+    hideTally();
+    if (!nextLevel()) winGame();
+  }
+
+  function winGame() {
+    gameState = 'won';
+    hideTally();
+    sfx('clear');
+    showBanner('OUT',
+      'YOU RESIGN, WITH PREJUDICE  ·  FINAL SCORE ' +
+      String(player.score).padStart(6, '0'),
+      'press P to start over', false);
   }
 
   function killPlayer() {
@@ -1778,8 +2337,9 @@
     if (document.exitPointerLock) document.exitPointerLock();
     sfx('die');
     showBanner('TERMINATED',
-      'YOUR EMPLOYMENT HAS BEEN CONCLUDED  ·  SCORE ' + String(player.score).padStart(6, '0'),
-      'press P to restart', true);
+      'YOUR EMPLOYMENT HAS BEEN CONCLUDED ON FLOOR ' + (levelIndex + 1) +
+      '  ·  SCORE ' + String(player.score).padStart(6, '0'),
+      'press P or E to retake the floor', true);
   }
 
   function updatePrompt() {
@@ -1793,7 +2353,9 @@
       else if (c.lock === 'blue') msg = player.keyBlue ? 'BLUE DOOR  [E] OPEN' : 'BLUE DOOR — LOCKED';
       else                        msg = '[E] OPEN';
     } else if (c.tag === 'exit') {
-      msg = 'ELEVATOR  [E] DESCEND';
+      msg = (boss && boss.alive) ? 'ELEVATOR — HELD BY THE BOARD'
+          : levelIndex + 1 >= LEVELS.length ? 'ELEVATOR  [E] SURFACE'
+          : 'ELEVATOR  [E] DESCEND';
     }
     if (msg) { promptEl.textContent = msg; promptEl.classList.add('show'); }
     else promptEl.classList.remove('show');
@@ -1808,7 +2370,11 @@
     animT += dt;
     if (gameState === 'playing') levelTime += dt;
 
-    if (firePressed) { fire(); firePressed = false; }
+    if (firePressed) {
+      firePressed = false;
+      if (gameState === 'cleared') advanceFromTally();
+      else fire();
+    }
     if (keys.has(' ') && gameState === 'playing') fire();   // hold to auto-fire
 
     updatePlayer(dt);
@@ -1820,6 +2386,7 @@
     stepReload(dt);
     stepDmgPops(dt);
     stepHpBar(dt);
+    stepTally(dt);
     stepToast(dt);
     updatePrompt();
 

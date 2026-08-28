@@ -43,6 +43,18 @@ const PROBE_SRC = `global.__PROBE = {
   totalSecrets:  () => (typeof totalSecrets  !== "undefined" ? totalSecrets : 0),
   secretsFound:  () => (typeof secretsFound  !== "undefined" ? secretsFound : 0),
   pushSecret:    (typeof pushSecret !== "undefined" ? pushSecret : null),
+  // multi-floor, the tally screen and the CEO arrived in the Phase 1 pass;
+  // same typeof guard so the harness still loads a pre-Phase-1 build
+  levels:        () => (typeof LEVELS !== "undefined" ? LEVELS : [LEVEL_1]),
+  levelIndex:    () => (typeof levelIndex !== "undefined" ? levelIndex : 0),
+  nextLevel:     (typeof nextLevel !== "undefined" ? nextLevel : null),
+  clearLevel:    (typeof clearLevel !== "undefined" ? clearLevel : null),
+  boss:          () => (typeof boss !== "undefined" ? boss : null),
+  totalTreasure: () => (typeof totalTreasure !== "undefined" ? totalTreasure : 0),
+  treasureFound: () => (typeof treasureFound !== "undefined" ? treasureFound : 0),
+  tally:         () => (typeof tally !== "undefined" ? tally : null),
+  itemAt:        (typeof itemAt !== "undefined" ? itemAt : null),
+  ceoPhases:     () => (typeof CEO_PHASES !== "undefined" ? CEO_PHASES : []),
 };`;
 
 function extractScript(htmlPath) {

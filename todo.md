@@ -1,41 +1,14 @@
 # WOLFENSTAIN 3D — next steps
 
-Roadmap for `wolf3d.html`. One floor, core combat, sliding doors + keycards,
-secret push-walls, and the magazine/feedback pass are in. Open work is ordered
-roughly by value per hour of work; everything finished is collected under
-**Completed** at the bottom.
+Roadmap for `wolf3d.html`. Three floors, the CEO fight, core combat, sliding
+doors + keycards, secret push-walls, the magazine/feedback pass and the
+end-of-floor tally are in — Phase 1 is done. Open work is ordered roughly by
+value per hour of work; everything finished is collected under **Completed** at
+the bottom.
 
 File references are to `wolf3d.html` unless noted, and they drift every time the
 file grows — grep the function name if one looks wrong. Line numbers below
 predate the combat-feedback pass and have all shifted; treat them as hints.
-
----
-
-## Phase 1 — finish the Wolf3D feature set
-
-What remains of the MVP cuts, plus one defect found reviewing what replaced
-them. These are what people expect from the parody and the cheapest wins left.
-
-- [ ] **End-of-level tally screen.** Wolf3D's percentage screen: kill %, secret %,
-  treasure %, time bonus. The counters mostly exist already — `player.kills`,
-  `totalEnemies`, `player.score`, `levelTime`, and now `secretsFound` /
-  `totalSecrets`. Needs `totalItems` /
-  `treasureFound` split out from the generic item loop in `stepItems` (`:1152`),
-  and a proper screen rather than the one-line banner in `clearLevel` (`:1489`).
-- [ ] **A push-wall can strand a pickup.** `pushSecret` (`:948`) checks
-  `cellAt` for walls and `occupied` for the player and live enemies, but not
-  items. A slab that lands on a `#`/`a`/`+` makes that tile solid, and the
-  pickup can never be collected — `blockAt` keeps you out and `stepItems` needs
-  you within 0.62u. **Latent, not live:** every legal push in the shipped level
-  was enumerated and none lands on a pickup, but that is a property of the
-  current layout, not of the code. One clause fixes it:
-  `if (cellAt(nx, ny) || occupied(nx, ny) || itemAt(nx, ny)) break;`
-  Alternatively guard it in `reference/validate-level.js`, which already knows
-  every secret and its landing cell.
-- [ ] **Floors 2 and 3 + the CEO boss.** `LEVEL_1` (`:429`) is one array of
-  strings; make it `LEVELS[]` and have `startLevel(n)` take an index. The tally
-  screen then advances to the next floor instead of restarting. Boss needs a
-  bigger sprite, a multi-phase FSM, and its own damage/health tuning.
 
 ---
 
@@ -118,14 +91,21 @@ Both of the first two are **confirmed empirically**, not suspected.
   automatically. A pre-commit hook or a GitHub action calling
   `node reference/run-tests.js && node reference/validate-level.js` is the whole
   job.
-- [ ] **Keep the mutation battery.** The suite was mutation-tested by injecting
-  16 bugs into copies of the game; it now catches all 16. Three of those
-  initially slipped through, and one test was a false pass. That battery lives
-  only in session scratch — porting it to `reference/mutate.js` would keep the
-  suite honest as it grows.
-- [ ] **Move levels out of the source file.** `LEVEL_1` is inline (`:429`). Once
-  there are several floors, load them from a separate `levels.js` — still
-  CSP-safe, still no build step, but the game file stops growing.
+- [ ] **Keep the mutation battery.** The suite has been mutation-tested twice by
+  injecting bugs into copies of the game: 16 at the MVP, 20 more over the
+  Phase 1 systems. It catches all of them, but only after the Phase 1 run
+  exposed two behaviours with no assertion behind them. Three of the original sixteen
+  initially slipped through, and one test was a false pass. Both batteries live
+  only in session scratch — porting them to `reference/mutate.js` would keep the
+  suite honest as it grows, and this is now the highest-value item in Phase 5:
+  the Phase 1 pass had to rebuild the harness from nothing to check its own
+  work.
+- [ ] **Move levels out of the source file.** All three floors are inline and
+  are now ~120 of `wolf3d.html`'s lines. Load them from a separate `levels.js` —
+  still CSP-safe, still no build step, but the game file stops growing. Note
+  that both tools find floors by the `const LEVEL_*` name: `validate-level.js`
+  regexes them out of the HTML and `harness.js` substitutes fixtures into
+  `LEVEL_1`. Moving them means teaching both where to look.
 - [ ] **Persist high scores.** `localStorage`, guarded by try/catch — it throws
   in some privacy contexts.
 - [ ] **Touch / mobile controls.** Currently keyboard + pointer-lock mouse only;
@@ -139,9 +119,19 @@ Both of the first two are **confirmed empirically**, not suspected.
 
 ## Known minor issues
 
+- `reference/CLAUDE.md` shipped with the entire document duplicated inside one
+  bullet of its own "bugs already made here" list — caused by exactly the
+  unquoted-heredoc interpolation that bullet warns about. Repaired in the
+  Phase 1 pass; noted here because the same mistake would be invisible in a
+  diff that only reads the top of the file.
+
 - `castSecrets` divides by `cosA`/`sinA` for its slab test and so shares the
   latent axis-aligned trap described immediately below; same reasoning, same
   non-reachability in practice.
+- Two adjacent push-walls could still be pushed into one another (see the last
+  bullet in this list). Now that there are three floors' worth of secrets, that
+  is worth a validator check rather than a curiosity — no shipped floor places
+  two secrets adjacent, but nothing enforces it.
 - `castRay` (`:791`) computes `Math.abs(1 / cosA)`, which is `Infinity` when the
   angle is exactly axis-aligned; combined with a player sitting exactly on a
   grid line it would produce `NaN`. Not reachable in practice — JS `Math.cos`
@@ -152,7 +142,7 @@ Both of the first two are **confirmed empirically**, not suspected.
 - `frontCell` (`:970`) probes three fixed distances (0.6 / 1.1 / 1.6) along the
   facing vector to find what you are trying to use. Crude, and it can pick a
   diagonal neighbour at odd angles.
-- The atlas holds only ~74 entries in normal play against a 32768 cap, so there
+- The atlas holds only ~80 entries in normal play against a 32768 cap, so there
   is plenty of headroom for new colours and glyphs.
 - `castSecrets` returns `mapX`/`mapY` truncated from a fractional slab origin.
   Nothing reads them — the wall renderer uses `cell`, `side`, `wallX` and the
@@ -169,6 +159,41 @@ Both of the first two are **confirmed empirically**, not suspected.
 
 Newest first. Kept for the design notes — several record why an approach that
 looks obvious was not the one taken.
+
+- [x] **Phase 1 — the rest of the Wolf3D feature set.** Three items, shipped
+  together; the suite went 74 assertions → 145, and a 20-bug mutation battery
+  confirms each new assertion can go red. Two of those twenty initially slipped
+  through — the CEO's standoff and its burst fire had no assertion behind them
+  at all, and deleting either left the suite fully green. Both now have one.
+  - *End-of-level tally.* `#tally` replaces the one-line clear banner: time
+    against par, then kill / secret / treasure ratios rolling up a row at a
+    time with a tick per few percent. `totalTreasure` had to be counted at
+    **parse time** rather than off the item list, because `dropLoot()` appends
+    ammo to `items` mid-level and would otherwise inflate the denominator every
+    time you killed something. Payout is the time bonus plus 2500 per category,
+    and **only at a clean 100%** — Wolf3D paid nothing for 99%. `finishTally()`
+    is the single payout path so skipping the roll-up awards exactly what
+    watching it does; an early version paid the skip path nothing.
+  - *Push-walls no longer strand pickups.* `itemAt` joins `cellAt` and
+    `occupied` in `pushSecret`'s span loop. **The todo entry that described this
+    as "latent, not live" was wrong** — turning the same rule on in
+    `validate-level.js` failed three of the shipped floor's own secrets on the
+    first run, all of them treasure pockets one tile wide. That geometry can
+    never work: the slab stops *short* of the loot, so it always parks between
+    you and it. All three pockets were widened to two tiles across the slide
+    axis so you can walk around the landed slab. The lesson is in
+    `reference/CLAUDE.md`; the enumeration that "proved" it was safe had found
+    none of them.
+  - *Three floors and the CEO.* `LEVELS[]` plus `startLevel(n, carry)`, where
+    `carry` is what separates descending (health, ammo and score come with you)
+    from restarting (they reset); kills and keycards are per-floor either way.
+    Floors 2 (R&D · server farm) and 3 (executive suite) are new 40x40 maps,
+    both authored against the validator rather than by eye. The CEO is an
+    ordinary member of `enemies` with a `phase` that re-tunes its own `spec` as
+    its health falls — three phases, the last of which summons drones and
+    **increments `totalEnemies`** so the kill ratio stays honest. Its elevator
+    refuses to move while it is alive. The burst fire it needed turned into
+    `enemyShot()`, shared by the whole roster at `burst: 1`.
 
 - [x] **Ammo economy, reload cycle, and combat feedback.** Five changes shipped
   together, all verified by driving the real game in a headless browser rather
