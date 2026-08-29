@@ -20,6 +20,12 @@ addEventListener('keydown', e => {
   if (k === ' ')     firePressed = true;
   if (k === 'e')     use();
   if (k === 'm')     toggleMute();
+  // Esc both pauses and, as its browser default action, exits pointer lock —
+  // which pauses too, through pointerlockchange below. The default action runs
+  // AFTER dispatch, so this lands first and that handler then finds a floor
+  // already paused and no-ops. Chrome swallows the keydown entirely, which is
+  // exactly why the lock handler carries the same call.
+  if (k === 'escape') togglePause();
   if (k === 'r')     { if (gameState === 'playing') startReload(); }
   if (k === 'p')     startLevel(gameState === 'won' ? 0 : levelIndex);
   if (k >= '1' && k <= '4') selectWeapon(+k - 1);
@@ -39,10 +45,11 @@ canvas.addEventListener('mousedown', e => {
 // every way the button can stop being down, including the ones that never
 // deliver a mouseup: releasing the pointer lock with Esc, and losing focus
 addEventListener('mouseup', e => { if (e.button === 0) mouseHeld = false; });
-addEventListener('blur', () => { mouseHeld = false; keys.clear(); });
+addEventListener('blur', () => { mouseHeld = false; keys.clear(); pauseGame(); });
 document.addEventListener('pointerlockchange', () => {
   mouseLocked = document.pointerLockElement === canvas;
-  if (!mouseLocked) mouseHeld = false;
+  if (!mouseLocked) { mouseHeld = false; pauseGame(); }
+  else resumeGame();
 });
 addEventListener('mousemove', e => {
   if (!mouseLocked || gameState !== 'playing') return;

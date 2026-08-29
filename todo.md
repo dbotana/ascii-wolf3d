@@ -6,41 +6,15 @@ end-of-floor tally are in — Phase 1 is done. Phase 2 closed the enemy engine
 gaps: pathfinding, separation, patrols and rotations. The restructure pass then
 split the single file into `wolf3d/*.js` and gave it a bundler. Phase 3 added
 the weapon roster, the semi-auto pistol, difficulty levels and a damage
-direction arc. Open work is
+direction arc. Phase 4 is the presentation pass: thin-wall doors with frames,
+pause, music, death frames and blood, and a HUD that no longer escapes the CRT
+overlay. Open work is
 ordered roughly by value per hour of work; everything finished is collected
 under **Completed** at the bottom.
 
 Entries below name the function and the file it lives in rather than a line
 number — line numbers drift with every edit, and the file map in
 `reference/CLAUDE.md` says which file owns what.
-
----
-
-## Phase 4 — presentation
-
-- [ ] **Thin-wall doors with frames.** Doors currently fill their whole tile, so
-  they sit flush with the wall plane. Real Wolf3D doors sit at the tile centre
-  with a visible recess. Requires proper thin-wall raycasting: on hitting a door
-  cell, step to the mid-plane and test there. `castRay` in `wolf3d/raycast.js`
-  already computes `wallX` and already slips rays through the opened slice, so
-  this is an extension of machinery that exists, not a rewrite.
-- [ ] **Door slide direction is view-dependent.** `wallX` runs along opposite
-  axes depending on which face you hit, so the same door appears to retract left
-  from one side and right from the other. Cosmetic and easy to miss, but it is
-  wrong. Fix by deriving the slide direction from the door's own fixed axis
-  rather than from the hit face.
-- [ ] **Status bar sits above the scanlines.** `#statusbar` is `z-index: 7`
-  and `#stage::before` (the scanline overlay) is `z-index: 6`, both in
-  `wolf3d/style.css`, so the HUD escapes the CRT treatment the viewport gets.
-  Either move the bar under the overlay or render it into the canvas as ASCII
-  cells.
-- [ ] **Music.** Audio is ambience plus one-shots (`initAudio` and `sfx` in
-  `wolf3d/audio.js`). A procedural chiptune march, muted with the rest under
-  `M`, would do a lot for the parody.
-- [ ] **Pause.** No pause exists. `gameState` (`wolf3d/world.js`) already gates
-  movement, firing and enemies, so a `'paused'` value is a small addition.
-- [ ] **Blood decals / gib frames.** Corpses persist (good) but death is two
-  frames. More frames, plus floor decals, would sell the hits.
 
 ---
 
@@ -51,16 +25,24 @@ number — line numbers drift with every edit, and the file map in
   calling `node reference/run-tests.js && node reference/validate-level.js &&
   node reference/check-structure.js` — plus the same suite against
   `WOLF3D_HTML=dist/wolf3d.html` — is the whole job.
-- [ ] **Keep the mutation battery.** The suite has been mutation-tested three
-  times by injecting bugs into copies of the game: 16 at the MVP, 20 more over
-  the Phase 1 systems, 14 over the Phase 2 movement systems — of which **five
-  survived a fully green suite** and two turned out to be real bugs. It catches all of them, but only after the Phase 1 run
-  exposed two behaviours with no assertion behind them. Three of the original sixteen
-  initially slipped through, and one test was a false pass. Both batteries live
-  only in session scratch — porting them to `reference/mutate.js` would keep the
-  suite honest as it grows, and this is now the highest-value item in Phase 5:
-  the Phase 1 pass had to rebuild the harness from nothing to check its own
-  work.
+- [ ] **Keep the mutation battery.** The suite has been mutation-tested five
+  times by injecting bugs into copies of the game: 16 at the MVP, 20 over the
+  Phase 1 systems, 14 over the Phase 2 movement systems, 31 over Phase 3, and
+  11 over Phase 4 — of which **seven survived a fully green suite** across the
+  runs, and several turned out to be real gaps. Every pass has had to rebuild
+  the harness from scratch to check its own work, and every pass has found
+  something: Phase 4's survivor was a jamb rejection whose deletion the suite
+  could not see, because the one oblique ray under test pointed the direction
+  another guard already covered.
+
+  All five batteries live only in session scratch. Porting them to
+  `reference/mutate.js` is the highest-value item in Phase 5 — the shape is
+  already stable (copy the tree, patch one file, run the suite against the
+  copy, assert it goes red), and Phase 4's was a ten-line shell script over a
+  directory of one-line Python patches. One caveat worth carrying over: a
+  mutation can be **unkillable by construction** rather than merely uncovered,
+  and Phase 4 has a documented example. The battery needs a way to mark those
+  so they are not chased twice.
 - [ ] **Persist high scores.** `localStorage`, guarded by try/catch — it throws
   in some privacy contexts.
 - [ ] **Touch / mobile controls.** Currently keyboard + pointer-lock mouse only;
@@ -91,7 +73,10 @@ number — line numbers drift with every edit, and the file map in
   `Infinity` when the angle is exactly axis-aligned; combined with a player
   sitting exactly on a grid line it would produce `NaN`. Not reachable in
   practice — JS `Math.cos` returns `6.1e-17` rather than `0` at ±π/2 — but it
-  is a latent trap if angles are ever snapped to exact multiples of π/2.
+  is a latent trap if angles are ever snapped to exact multiples of π/2. The
+  thin-wall door branch added in Phase 4 divides by the same `cosA`/`sinA` and
+  lands harmlessly: a near-zero divisor yields a huge `t`, which fails the
+  `t > limit` test and marches on.
 - `zbuf` is a fresh `new Float32Array(COLS)` every frame, allocated in `frame()`
   in `wolf3d/main.js`. Harmless at 160 columns, but it is per-frame garbage;
   hoist it if the profile ever matters.
@@ -115,6 +100,107 @@ number — line numbers drift with every edit, and the file map in
 
 Newest first. Kept for the design notes — several record why an approach that
 looks obvious was not the one taken.
+
+- [x] **Phase 4 — presentation.** All six items, shipped together. The suite
+  went 270 assertions → 350, and an 11-bug mutation battery covers the new
+  systems. **One of the six turned out not to be a bug**, and one of the eleven
+  mutations is unkillable by construction — both below.
+  - **The view-dependent door slide did not exist.** The entry claimed `wallX`
+    ran along opposite axes depending on the hit face, so a door retracted left
+    from one side and right from the other. It cannot: a well-formed door is
+    flanked by solid cells on the axis it slides into, so the DDA can only
+    enter it through the two faces perpendicular to travel — `side` is always
+    the *same* value for a given door. Measured on the pre-Phase-4 build before
+    touching anything: rays fired at the same physical point on a slab from
+    both sides returned `wallX = 0.2500`, both orientations, with the half-open
+    slice passing and blocking identically either way. What a player sees — a
+    door sliding toward world-north reading as leftward from one side and
+    rightward from the other — is what a real sliding door does. **This is the
+    second Phase todo in a row to describe a problem that was not there**,
+    after the Phase 3 melee cone. Both were caught by measuring first.
+  - *So the mutation for it is unkillable, and is recorded rather than fixed.*
+    Swapping `c.axis` for the DDA's `side` in the `lat` line of `castGrid`
+    survives the full suite, because for any door the validator will accept the
+    two are equal. `c.axis` is kept — `t` genuinely needs it and one source for
+    both lines is the honest form — but no test claims to cover the difference,
+    because none can.
+  - *Thin-wall doors are the mid-plane crossing, and the frame is free.* On
+    stepping into a door cell `castGrid` discards the march's own hit and
+    solves for the slab at the tile centre. A ray steep enough to leave the
+    tile first falls through the `lat` range test and the DDA carries on to the
+    flanking wall's face — half a tile proud of the slab. **That is the recess;
+    nothing draws it.** The `jamb` flag exists only to tint those cells steel.
+    Head-on distance goes 2.5u → 3.0u on the corridor fixture, exact to 1e-6.
+  - **Deleting the `lat` range test survived a green suite**, because the
+    oblique ray the first test used pointed north: it lands at `lat < 0`, which
+    `lat < c.open` skips anyway. Only a *southward* ray lands at `lat > 1`,
+    where nothing else catches it — and the symptom is a door hit reported at a
+    point that is not on the door, handing the renderer a `wallX` above 1. The
+    fix is a 138° sweep asserting every door hit lands on the slab: 65 of 234
+    hits were off it with the test removed.
+  - *`validate-level.js` gained a door-flanking rule*, because the engine will
+    not tell you. A free-standing door renders correctly head-on and only
+    misbehaves at oblique angles. Verified against two seeded faults — an
+    opened flank and a door walled in on all four sides — before being
+    believed.
+  - *Pause is `gameState`, and the half worth testing is the half that was
+    never gated.* Movement, firing, enemies, items, nav and mouse-look already
+    checked `gameState`, so they cost nothing. `frame()` now skips the rest as
+    a block: doors, secrets, the gun, the reload cycle, the damage pops, the hp
+    chip and `animT`. The sharpest probe is `e.bob`, which advances at the TOP
+    of `stepEnemies` before its own state guard and so keeps ticking on a dead
+    or cleared screen — if it freezes under pause, the call really was skipped
+    rather than leaning on a guard that was already there.
+  - *Esc pauses, and so does losing pointer lock.* Chrome swallows the `Escape`
+    keydown that exits pointer lock, so the key alone would do nothing there;
+    `pointerlockchange` carries the same call. Where the keydown IS delivered
+    it lands first (the default action runs after dispatch) and the lock
+    handler then finds a floor already paused and no-ops. `blur` pauses too.
+    Resume on Esc, E, Space or regaining the lock. No existing key moved —
+    restart had already been shuffled once, R → P, in the Phase 1 pass.
+  - *The status bar went under the overlays rather than into the canvas.*
+    Rendering it as ASCII cells is the more authentic option and was rejected:
+    it costs viewport rows, re-implements the face, hp bar and keycard lamps as
+    glyphs, and `syncHud()` would stop writing DOM — which is what every HUD
+    assertion in the suite reads. The whole diegetic layer dropped 7 → 3;
+    modals stay above at 8 and 10 because they are read, not inhabited.
+  - *Death frames subdivide `DEATH_TIME`; they do not lengthen it.* Same 0.45s
+    window, same FSM clock, so nothing in the timing moved. `DEATH_SEQ` holds
+    sprite **objects** rather than names, with frame 0 of each being the
+    existing `SPR[type + 'Die']` — which is why the death-frame assertion that
+    predates the sequences still passes untouched.
+  - *Decals are sprites, because the floor is drawn by row.* A true floor decal
+    needs per-column floor casting, which this renderer does not do; a flat
+    sprite at foot height is exactly what a corpse frame already is, so
+    `drawSprite` blits them with no new code path. They sort with a small depth
+    bias so a splat lands behind the corpse lying on it. Jitter is checked
+    against `cellAt` and folded back onto the corpse tile if it lands in a wall
+    — **and that guard is invisible from a body on a tile centre**, where ±0.35
+    of jitter can never leave the tile. The test had to place a corpse hard
+    against a wall; 29 of 64 splats end up buried with the check removed.
+  - *Music is a table and a lookahead scheduler.* Four tracks — one per floor
+    plus the boardroom — as `[semitone, beats]` voice lists, scheduled ~0.25s
+    ahead against `audio.currentTime` rather than the frame clock. It hangs off
+    `masterGain`, so `M` mutes it for free and it does not duck when a gunshot
+    pushes `sfxGain`. A track change is held until the bass voice wraps, which
+    is one bar, so the CEO reveal does not cut a note in half. The plan's idea
+    of adding a `dest` argument to `blip`/`noiseBurst` did not survive contact:
+    music needs *absolute* start times and both helpers schedule relative to
+    `currentTime`, so the two voices are their own dozen lines.
+  - **The harness got a fake AudioContext, and it earned its place
+    immediately.** Everything above about music was otherwise untestable — the
+    harness has no audio, so `stepMusic` returned at line one and its loops
+    never ran. `load({ audio: true })` installs a recording stand-in with a
+    tickable clock; the scheduler group is 13 assertions covering the lookahead
+    window, the bar-aligned hand-over, mute keeping the clock but not the notes,
+    and pause dropping the track. Three of the eleven mutations land here.
+  - *Two of my own mistakes, recorded in `reference/CLAUDE.md`.* A fixture
+    wrote `#.D.#` for the north-south door — free-standing, so `axis` fell
+    through to a default that happened to be the right answer and four
+    assertions passed while testing nothing. And an atlas bound was asserted
+    from a group running near the end of the suite, where the palette has
+    legitimately grown past the boot-time `< 500` figure; it measured group
+    ordering, not the feature.
 
 - [x] **Phase 3 — combat depth.** All four items, shipped together. The suite
   went 192 assertions → 269, and a 31-bug mutation battery covers the new

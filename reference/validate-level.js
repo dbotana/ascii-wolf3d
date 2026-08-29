@@ -86,6 +86,40 @@ function validate(name, rows) {
   const exits = count('X');
   if (exits < 1) note('no exit switch (X) — the floor cannot be completed');
 
+  // ── every door must be flanked by solid cells on exactly ONE axis.
+  //
+  // A door is a thin slab standing at the tile centre, and parseLevel derives
+  // which way it faces from its flanking walls: solid north and south means you
+  // walk through east-west, so the plane sits at constant x and the slab
+  // retracts along y into one of those two walls. Neither pair solid and there
+  // is nothing to retract into and no axis to derive — the door falls back to a
+  // default, and castGrid lets rays slip past it at oblique angles while
+  // blockAt still holds the whole tile. You get a door you can see through but
+  // not walk through, from some angles only.
+  //
+  // The engine will not tell you: the fallback renders, and a level built that
+  // way looks correct head-on. This is the same silence that made the wedged
+  // push-wall check necessary.
+  //
+  // Both pairs solid is a door in a solid wall — walled in on all four sides is
+  // caught by the flood fill, but a 2x2 of doors would satisfy both pairs and
+  // still be nonsense, so it is called out here rather than left implied.
+  const DOORCH = 'DRB';
+  const SOLIDCH = '#|NXSDRB';
+  for (let y = 0; y < H; y++) {
+    for (let x = 0; x < W; x++) {
+      if (!DOORCH.includes(at(x, y))) continue;
+      const ns = SOLIDCH.includes(at(x, y - 1)) && SOLIDCH.includes(at(x, y + 1));
+      const ew = SOLIDCH.includes(at(x - 1, y)) && SOLIDCH.includes(at(x + 1, y));
+      if (ns && ew) {
+        note(`door at ${x},${y} is walled in on all four sides — it opens onto nothing`);
+      } else if (!ns && !ew) {
+        note(`door at ${x},${y} is free-standing (needs solid cells on one axis ` +
+             `to slide into) — rays will slip past its slab at oblique angles`);
+      }
+    }
+  }
+
   // ── every locked door needs its keycard to exist somewhere
   for (const [ch, lock] of Object.entries(LOCKS)) {
     if (count(ch) > 0) {

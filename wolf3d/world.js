@@ -36,8 +36,40 @@ const player = {
 let dmgPops = [];
 // where the shots that hit US came from, for the direction arc
 let hitDirs = [];
+// blood left where a body fell — see spillBlood in enemies.js
+let decals = [];
 
-let gameState = 'playing';   // playing | dead | cleared
+let gameState = 'playing';   // playing | paused | dead | cleared | won
+
+// ─── PAUSE ──────────────────────────────────────────────────
+// Nearly free, because movement, firing, enemies, items, nav, mouse-look and
+// the gun view-model already gate on gameState. What pause adds on top is
+// frame()'s skip of the handful of steppers that never checked anything —
+// doors, secrets, the gun, the reload cycle, the damage pops and the hp chip.
+//
+// Only a floor in play can be paused. Pausing a dead or cleared one would
+// bury the banner that state is already showing, and resuming would hand
+// control back to a game that has none.
+function pauseGame() {
+  if (gameState !== 'playing') return false;
+  gameState = 'paused';
+  // Releasing the mouse is the point of pausing for most players. It also
+  // re-enters through pointerlockchange below, which is harmless: that handler
+  // only ever pauses a floor that is still 'playing'.
+  if (document.exitPointerLock) document.exitPointerLock();
+  showBanner('PAUSED', 'THE MEETING IS ON HOLD',
+             'press ESC · E · SPACE to resume', false);
+  return true;
+}
+function resumeGame() {
+  if (gameState !== 'paused') return false;
+  gameState = 'playing';
+  hideBanner();
+  return true;
+}
+function togglePause() {
+  return gameState === 'paused' ? resumeGame() : pauseGame();
+}
 
 // Chosen once on the splash and then left alone. This is a RUN-level setting,
 // not player state: startLevel deliberately does not reset it, on either the
@@ -52,8 +84,13 @@ let levelTime = 0;
 let levelIndex = 0;          // which floor of LEVELS we are on
 let boss = null;             // the CEO, once a floor places one
 
+// `axis` is which way the slab faces: 0 puts its plane at constant x, so you
+// walk through east-west and the door retracts along y; 1 is the other way
+// round. parseLevel derives it from the flanking walls — the 1 here is only
+// what a door built outside a level would get.
 function mkDoor(lock) {
-  return { tag: 'door', h: WALL_H, lock, open: 0, phase: 'closed', timer: 0, seed: 7 };
+  return { tag: 'door', h: WALL_H, lock, open: 0, phase: 'closed', timer: 0,
+           seed: 7, axis: 1 };
 }
 // a push-wall is an ordinary panel until someone leans on it: same seed, same
 // colour, same glyph ramp, so it is indistinguishable from the wall it sits in
@@ -245,6 +282,7 @@ function frontCell() {
 }
 
 function use() {
+  if (gameState === 'paused')  { resumeGame(); return; }
   if (gameState === 'cleared') { advanceFromTally(); return; }
   if (gameState === 'won')     { startLevel(0); return; }
   if (gameState === 'dead')    { startLevel(levelIndex); return; }

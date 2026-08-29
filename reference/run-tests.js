@@ -986,6 +986,279 @@ ok(popCost - popQuietCost < 100,
    `40 damage-number pops cost a bounded handful of (glyph, colour) pairs, ` +
    `not an unbounded ~375 (${popCost} entries vs ${popQuietCost} idle)`);
 
+// ── music ────────────────────────────────────────────────────────────────────
+// The harness has no AudioContext, so initAudio fails its try/catch and every
+// note is a no-op — the same condition sfx() has always run under here. What
+// IS testable without a speaker is the part that would actually break: the
+// table's shape, and which track the game reaches for.
+group('music');
+P.startLevel();
+{
+  const M = P.music();
+  ok(M.length >= 2, `the track table has ${M.length} rows`);
+  const bad = M.filter(t => !(t.bpm > 0) || !t.name || !t.root ||
+                            !t.bass || !t.bass.length ||
+                            !t.lead || !t.lead.length ||
+                            !t.drum || !t.drum.length);
+  ok(bad.length === 0,
+     `every track has a tempo, a root and three non-empty voices ` +
+     `(${bad.map(t => t.name || '?').join(', ') || 'all good'})`);
+  // A [semitone, beats] pair with zero or negative beats would spin the
+  // scheduler's while loop against its guard forever instead of advancing.
+  const badStep = [];
+  for (const t of M)
+    for (const voice of ['bass', 'lead'])
+      for (const st of t[voice])
+        if (!(Array.isArray(st) && st.length === 2 && st[1] > 0)) badStep.push(t.name + '.' + voice);
+  ok(badStep.length === 0,
+     `every note carries a positive duration (${[...new Set(badStep)].join(', ') || 'all good'})`);
+  ok(M.every(t => /^[xs.]+$/.test(t.drum)),
+     'and every drum pattern is made of x / s / . only');
+
+  // ── one march per floor, and the boardroom takes the CEO. The floor lookup
+  //    has to survive more floors than tracks, so it is a modulo over the
+  //    non-boss rows rather than an index that can fall off the end.
+  ok(M.length - 1 >= P.levels().length,
+     `there is a floor track for each of the ${P.levels().length} floors`);
+  const perFloor = [];
+  for (let i = 0; i < P.levels().length; i++) {
+    P.startLevel(i);
+    perFloor.push(P.musicTrackFor());
+  }
+  ok(new Set(perFloor).size === perFloor.length,
+     `each floor gets its own march (${perFloor.map(t => t.name).join(' / ')})`);
+  ok(perFloor.every(t => t !== M[M.length - 1]),
+     'and none of them is the boardroom track');
+
+  // the CEO's own floor, before and after it notices you
+  P.startLevel(P.levels().length - 1);
+  const ceo = P.boss();
+  ok(ceo && ceo.alive, 'test setup: the last floor has a live CEO');
+  ceo.state = 'idle';
+  ok(P.musicTrackFor() !== M[M.length - 1],
+     'a CEO that has not noticed you does not change the music — no spoiling the reveal');
+  ceo.state = 'chase';
+  ok(P.musicTrackFor() === M[M.length - 1],
+     `once it wakes, the boardroom march takes over (${P.musicTrackFor().name})`);
+  ceo.alive = false;
+  ok(P.musicTrackFor() !== M[M.length - 1], 'and drops away when it dies');
+
+  // ── the scheduler is inert without an AudioContext, which is exactly the
+  //    "everything degrades" constraint: a browser that refuses audio gets a
+  //    silent game, not a broken one. If this throws, so does every frame.
+  P.startLevel(0);
+  let threw = null;
+  try { for (let i = 0; i < 5; i++) P.stepMusic(); run(30); } catch (e) { threw = e; }
+  ok(threw === null, `stepMusic is a no-op with no AudioContext (${threw && threw.message})`);
+}
+P.startLevel(0);
+
+// ── death frames and blood decals ────────────────────────────────────────────
+group('gore');
+P.startLevel();
+{
+  const SPRT = P.spr();
+  const SEQ = P.deathSeq();
+  const DT = P.deathTime();
+
+  // ── the table has to cover every type mkEnemy can build. A missing row is a
+  //    crash in the renderer at 60fps rather than a fallback, which is the
+  //    trade rule 1 asks for: new content is a row, and a missing row should
+  //    fail loudly here instead of being papered over with a runtime guard.
+  const types = [...new Set(P.enemies().map(e => e.type))].concat('ceo');
+  ok(types.every(t => Array.isArray(SEQ[t]) && SEQ[t].length >= 2),
+     `every enemy type has a death sequence of 2+ frames ` +
+     `(${types.map(t => t + ':' + (SEQ[t] || []).length).join(' ')})`);
+  ok(['guard', 'drone', 'ceo'].every(t => SEQ[t][0] === SPRT[t + 'Die']),
+     'and frame 0 of each is the Die frame that shipped before sequences existed');
+
+  // ── a ragged sprite reads art[ay][ax] off the end of a short row and blits
+  //    `undefined`. Every table in the game is hand-typed ASCII, so this is a
+  //    typo away at all times and costs one loop to rule out.
+  const ragged = [];
+  for (const t of Object.keys(SEQ))
+    SEQ[t].forEach((fr, i) => {
+      if (!fr.rows.every(r => r.length === fr.rows[0].length)) ragged.push(t + '[' + i + ']');
+    });
+  P.decalSpr().forEach((fr, i) => {
+    if (!fr.rows.every(r => r.length === fr.rows[0].length)) ragged.push('decal[' + i + ']');
+  });
+  ok(ragged.length === 0, `every death and decal frame is rectangular (${ragged.join(', ') || 'all'})`);
+
+  // ── the frames actually advance, and land on the corpse. Driven through
+  //    enemySprite on a real body rather than by indexing the table, so the
+  //    arithmetic that picks the frame is what is under test.
+  const foe = firstGuard();
+  foe.alive = false; foe.state = 'dying';
+  const seen = [];
+  for (const frac of [0.0, 0.4, 0.75, 0.99]) {
+    foe.stateT = DT * frac;
+    const spr = P.enemySprite(foe);
+    if (!seen.includes(spr)) seen.push(spr);
+  }
+  ok(seen.length === SEQ.guard.length,
+     `a guard's death shows all ${SEQ.guard.length} frames across DEATH_TIME (saw ${seen.length})`);
+  ok(seen[0] === SPRT.guardDie, 'starting on the original death frame');
+  foe.stateT = DT * 1.5;                 // past the window, before the FSM flips it
+  ok(P.enemySprite(foe) === SEQ.guard[SEQ.guard.length - 1],
+     'and clamping to the last frame rather than running off the table');
+  foe.state = 'dead';
+  ok(P.enemySprite(foe) === SPRT.guardDead, 'then the corpse frame, as before');
+  foe.alive = true; foe.state = 'chase'; foe.stateT = 0;
+
+  // ── decals. A drone is machinery and leaves none; that asymmetry is the
+  //    cheapest thing to get wrong by making spillBlood unconditional.
+  P.startLevel();
+  const dec = () => P.decals().length;
+  const n0 = dec();
+  P.spillBlood({ type: 'guard', x: P.player.x + 2, y: P.player.y });
+  ok(dec() > n0, `a guard leaves blood (${dec() - n0} splats)`);
+  const n1 = dec();
+  P.spillBlood({ type: 'drone', x: P.player.x + 2, y: P.player.y });
+  ok(dec() === n1, 'a drone leaves none');
+
+  // ── nothing ends up inside a wall. Jitter is +-0.35, so a body standing on
+  //    a tile CENTRE can never leave its tile and the guard would look correct
+  //    while doing nothing. It has to be tested from a body pressed up against
+  //    a wall, which is where enemies actually die.
+  const grid = P.grid();
+  let edge = null;
+  for (let y = 1; y < grid.length - 1 && !edge; y++)
+    for (let x = 1; x < grid[y].length - 1 && !edge; x++)
+      if (!grid[y][x] && grid[y][x + 1]) edge = { x: x + 0.95, y: y + 0.5 };
+  ok(edge !== null, 'test setup: found an open tile hard against a wall');
+  P.startLevel();
+  for (let i = 0; i < 300; i++) P.spillBlood({ type: 'guard', x: edge.x, y: edge.y });
+  const buried = P.decals().filter(d => P.cellAt(d.x | 0, d.y | 0));
+  ok(buried.length === 0,
+     `no splat lands inside a wall from a body pressed against one ` +
+     `(${P.decals().length} kept, ${buried.length} buried)`);
+
+  // ── and the list is bounded. Corpses persist by design, so their blood does
+  //    too, and every splat is sorted and depth-tested every frame.
+  ok(P.decals().length <= P.decalCap(),
+     `the decal list is capped at ${P.decalCap()} (${P.decals().length} after 300 kills' worth)`);
+  P.startLevel();
+  ok(P.decals().length === 0, 'and a floor start wipes it');
+
+  // ── atlas cost, as an A/B over the SAME number of frames — the neon flicker
+  //    and the rain mint entries as the clock advances, and a naive
+  //    before/after would bill those to the decals. Same shape as the arc and
+  //    damage-pop measurements above, same reason.
+  run(600);
+  const gSettled = P.atlasSize();
+  run(400);
+  const gQuiet = P.atlasSize() - gSettled;
+  const beforeGore = P.atlasSize();
+  P.player.a = 0;
+  for (let i = 0; i < 80; i++) {
+    P.spillBlood({ type: 'guard', x: P.player.x + 1.5 + (i % 5) * 0.3, y: P.player.y + (i % 3) * 0.2 });
+    run(5);
+  }
+  const goreCost = P.atlasSize() - beforeGore;
+  // Every decal colour comes from fade(COLOR.blood, depth), so the whole family
+  // is 8 fog steps x the handful of block glyphs the three splats use — bounded
+  // however many bodies fall.
+  ok(goreCost - gQuiet < 60,
+     `80 splats cost a bounded set of (glyph, colour) pairs ` +
+     `(${goreCost} entries over 400 frames vs ${gQuiet} for the same frames idle)`);
+  // The `atlasSize() < 500` bound belongs at BOOT, where the boot group already
+  // asserts it. By this point the suite has deliberately driven arcs, damage
+  // pops and eight hundred shots through the palette, so the running total is
+  // legitimately larger and re-asserting 500 here would only measure how many
+  // groups happen to run first. What matters is the distance to the cap, past
+  // which drawChar silently degrades to fillText.
+  ok(P.atlasSize() < P.atlasCap() / 8,
+     `and the atlas is nowhere near the cap it degrades at ` +
+     `(${P.atlasSize()} of ${P.atlasCap()})`);
+  P.startLevel();
+}
+
+// ── pause ────────────────────────────────────────────────────────────────────
+// gameState already gated movement, firing, enemies, items, nav and mouse-look
+// before pause existed, so those cost nothing and prove nothing. What needs
+// asserting is the OTHER half: the steppers that never checked gameState at
+// all, which frame() now skips as a block. A pause that freezes the player but
+// leaves the doors sliding and the hp chip draining is the failure this group
+// exists to catch, and it is the only failure available — everything else was
+// already gated.
+//
+// `e.bob` is the sharpest probe of the two halves: it advances at the TOP of
+// stepEnemies, before the `gameState !== 'playing'` guard, so it keeps ticking
+// on a dead or cleared screen. If it freezes under pause, frame() really did
+// skip the call rather than lean on a guard that was already there.
+group('pause');
+P.startLevel();
+freezeEnemies();
+{
+  const foe = firstGuard();
+  const door = P.doors().find(x => !x.lock);
+  door.phase = 'opening';
+
+  // face somewhere actually walkable, so "the player moves again" after the
+  // resume can fail for the right reason rather than for want of floor
+  const openA = [0, Math.PI / 2, Math.PI, -Math.PI / 2].find(
+    a => !P.blockAt(P.player.x + Math.cos(a) * 1.0, P.player.y + Math.sin(a) * 1.0));
+  ok(openA !== undefined, 'test setup: the spawn has an open direction to walk in');
+  P.player.a = openA;
+  P.player.hp = 40;                       // hpShown still 100 -> the chip has something to drain
+
+  const before = {
+    x: P.player.x, y: P.player.y, t: P.levelTime(),
+    open: door.open, bob: foe.bob, hp: g.el('hpChip').style.width,
+  };
+
+  ok(P.togglePause() === true, 'togglePause() pauses a floor in play');
+  ok(P.state() === 'paused', 'and gameState says so');
+  g.run(60, ['w']);                       // a full second, walking into the pause
+
+  ok(P.player.x === before.x && P.player.y === before.y,
+     'a paused player does not move');
+  ok(P.levelTime() === before.t,
+     `the clock does not run (${P.levelTime().toFixed(3)}s)`);
+  ok(door.open === before.open,
+     `an opening door does not keep opening (${door.open.toFixed(3)})`);
+  ok(foe.bob === before.bob,
+     'and stepEnemies is skipped outright, not merely gated — e.bob is frozen');
+  ok(g.el('hpChip').style.width === before.hp,
+     'the health chip stops draining too');
+  ok(g.el('bTitle').textContent === 'PAUSED', 'the pause banner is up');
+
+  // ── resume, and everything picks up where it left off
+  ok(P.togglePause() === true, 'togglePause() resumes a paused floor');
+  ok(P.state() === 'playing', 'gameState is back to playing');
+  g.run(60, ['w']);
+  ok(P.player.x !== before.x || P.player.y !== before.y,
+     'and the player walks again');
+  ok(P.levelTime() > before.t, 'the clock runs again');
+  ok(door.open > before.open, `the door resumes opening (${door.open.toFixed(3)})`);
+  ok(foe.bob > before.bob, 'and the enemy loop is stepping again');
+
+  // ── E resumes as well, which is the path that matters when a browser has
+  //    swallowed the Esc keydown to exit pointer lock and Esc never arrives.
+  P.pauseGame();
+  ok(P.state() === 'paused', 'pauseGame() pauses directly');
+  P.use();
+  ok(P.state() === 'playing', 'use() — the E key — resumes');
+
+  // ── only a floor in play can be paused. Pausing a dead or cleared one would
+  //    bury the banner that state is already showing, and the resume would hand
+  //    control back to a game that has none.
+  P.player.hp = 100;
+  P.clearLevel();
+  ok(P.state() === 'cleared', 'test setup: the floor is cleared');
+  ok(P.pauseGame() === false && P.state() === 'cleared',
+     'a cleared floor refuses to pause');
+  P.startLevel();
+  P.hurtPlayer(999, P.player.x, P.player.y + 1);
+  ok(P.state() === 'dead', 'test setup: the player is dead');
+  ok(P.pauseGame() === false && P.state() === 'dead',
+     'and so does a dead one');
+  ok(P.resumeGame() === false && P.state() === 'dead',
+     'resumeGame() only ever acts on a paused floor');
+  P.startLevel();
+}
+
 // ── difficulty ───────────────────────────────────────────────────────────────
 // LAST of the shipped-level groups on purpose. `difficulty` is a run-level
 // setting that startLevel deliberately does NOT reset, so it leaks forward into
@@ -1616,6 +1889,205 @@ group('weapon spread (fixture)');
   F.player.fireCd = 0;
   F.fire();
   ok(foe.hp < 1e9, 'and does connect once the body is genuinely within reach');
+}
+
+// ── thin-wall doors (fixture) ────────────────────────────────────────────────
+// A door slab stands at the tile CENTRE, not on the boundary the DDA crosses,
+// so castGrid replaces the march's own hit with an explicit mid-plane crossing.
+// The shipped floors would exercise this, but a two-tile corridor makes the
+// arithmetic exact: every distance below is a whole or half tile, checked to
+// 1e-6 rather than to a tolerance that would survive the bug.
+group('thin-wall doors (fixture)');
+{
+  // East-west corridor. The door at (4,1) is flanked north and south, so it is
+  // walked through along x and its slab stands at x = 4.5.
+  const f = loadWithLevel([
+    '##########',
+    '#@..D...g#',
+    '##########',
+  ], { htmlPath: process.env.WOLF3D_HTML });
+  const F = f.P;
+  const d = F.doors()[0];
+
+  ok(d.axis === 0, `a door flanked north and south faces along x (axis=${d.axis})`);
+
+  // ── the mid-plane. This is the assertion that dies if the half-tile step is
+  //    dropped: a full-tile door reports 2.5u from x=1.5, a thin one 3.0u.
+  const head = F.castRay(1.5, 1.25, 0);
+  ok(head.cell === d, 'a head-on ray reaches the door');
+  ok(Math.abs(head.dist - 3.0) < 1e-6,
+     `and stops at its mid-plane x=4.5, not its face x=4 ` +
+     `(${head.dist.toFixed(4)}u from x=1.5, not 2.5)`);
+  const back = F.castRay(8.5, 1.25, Math.PI);
+  ok(Math.abs(back.dist - 4.0) < 1e-6,
+     `the same slab is 4.0u from x=8.5 on the other side (${back.dist.toFixed(4)}u) — ` +
+     `both sides agree on where the plane is`);
+
+  // ── the recess is not drawn, it falls out of the geometry: a ray steep
+  //    enough to leave the tile before x=4.5 hits the flanking wall INSIDE the
+  //    door's own column, which is the jamb standing proud of the slab.
+  const oblique = F.castRay(3.6, 1.5, -0.6);
+  ok(oblique.cell !== d && oblique.mapX === 4 && oblique.mapY === 0,
+     `a ray that slips past the slab hits the jamb above it, not the door ` +
+     `(${oblique.cell && oblique.cell.tag}@${oblique.mapX},${oblique.mapY})`);
+  // Both ways past the slab, and the southward one is the half that matters.
+  // A ray leaving northward lands at lat < 0, which `lat < c.open` would skip
+  // anyway; only a ray leaving SOUTHWARD lands at lat > 1, where nothing else
+  // catches it. Deleting the range rejection survived a green suite until this
+  // line existed, and the symptom was a door hit reported at a point that is
+  // not on the door, handing the renderer a wallX above 1.
+  const obliqueS = F.castRay(3.6, 1.5, 0.6);
+  ok(obliqueS.cell !== d && obliqueS.mapX === 4 && obliqueS.mapY === 2,
+     `and one slipping the other way hits the jamb below it ` +
+     `(${obliqueS.cell && obliqueS.cell.tag}@${obliqueS.mapX},${obliqueS.mapY})`);
+  // the invariant behind both: a door hit is always ON the slab
+  let offSlab = 0, doorHits = 0;
+  for (let i = 0; i < 400; i++) {
+    const h = F.castRay(3.6, 1.5, -1.2 + i * (2.4 / 400));
+    if (h.cell !== d) continue;
+    doorHits++;
+    if (!(h.wallX >= 0 && h.wallX < 1)) offSlab++;
+  }
+  ok(doorHits > 50 && offSlab === 0,
+     `every door hit across a 138° sweep lands on the slab ` +
+     `(${doorHits} hits, ${offSlab} with wallX outside [0,1))`);
+  const jN = F.cellAt(4, 0), jS = F.cellAt(4, 2);
+  ok(jN && jN.jamb && jS && jS.jamb,
+     'and both cells the slab retracts into are flagged as reveal');
+
+  // ── the slice. `wallX` runs along the door's own axis, so the same physical
+  //    point on the slab reads the same from either side — measured through
+  //    castRay rather than reasoned about, which is the standing rule here.
+  d.open = 0.5; d.phase = 'open';
+  const inSlice  = [F.castRay(1.5, 1.25, 0), F.castRay(8.5, 1.25, Math.PI)];
+  const onSlab   = [F.castRay(1.5, 1.75, 0), F.castRay(8.5, 1.75, Math.PI)];
+  ok(inSlice.every(h => h.cell !== d),
+     'a half-open door lets both sides see through its retracted half');
+  ok(onSlab.every(h => h.cell === d),
+     'and stops both sides on the half that is still slab');
+  ok(Math.abs(onSlab[0].wallX - onSlab[1].wallX) < 1e-6,
+     `both sides report the same wallX on the same point of the slab ` +
+     `(${onSlab[0].wallX.toFixed(4)} / ${onSlab[1].wallX.toFixed(4)})`);
+
+  // ── collision stayed tile-granular on purpose: the thin slab is a rendering
+  //    change, and blockAt's 0.65 walk-through threshold is untouched.
+  d.open = 0; d.phase = 'closed';
+  ok(F.blockAt(4.5, 1.5), 'a closed thin door still blocks the whole tile');
+  d.open = 0.7;
+  ok(!F.blockAt(4.5, 1.5), 'and still opens to bodies at 0.65, not at the slab');
+  d.open = 1; d.phase = 'open';
+  const thru = F.castRay(1.5, 1.5, 0);
+  ok(thru.cell !== d && thru.mapX === 9,
+     `a fully open door is see-through to the far wall (hit ${thru.mapX},${thru.mapY})`);
+}
+
+{
+  // The other orientation, because axis 1 is a different pair of terms in
+  // castGrid and a fixture with only east-west doors would never run it.
+  //
+  // The door has to be genuinely FLANKED east and west (`##D##`), not merely
+  // sitting in a north-south corridor. The first draft of this fixture wrote
+  // `#.D.#`, which is a free-standing door: axis fell through to its default
+  // of 1, every assertion below passed, and none of them was testing the
+  // derivation they claimed to. It is the same false pass as the push-wall
+  // test that stood a secret against solid rock.
+  const f = loadWithLevel([
+    '#####',
+    '#.@.#',
+    '#...#',
+    '##D##',
+    '#...#',
+    '#####',
+  ], { htmlPath: process.env.WOLF3D_HTML });
+  const F = f.P;
+  const d = F.doors()[0];
+  ok(d.axis === 1, `a door flanked east and west faces along y (axis=${d.axis})`);
+  const down = F.castRay(2.25, 1.5, Math.PI / 2);
+  ok(down.cell === d && Math.abs(down.dist - 2.0) < 1e-6,
+     `its slab stands at y=3.5 (${down.dist.toFixed(4)}u from y=1.5, not 1.5)`);
+  const up = F.castRay(2.25, 4.9, -Math.PI / 2);
+  ok(up.cell === d && Math.abs(up.dist - 1.4) < 1e-6,
+     `and reads the same plane from below (${up.dist.toFixed(4)}u from y=4.9)`);
+  const jW = F.cellAt(1, 3), jE = F.cellAt(3, 3);
+  ok(jW && jW.jamb && jE && jE.jamb, 'its reveal is the pair east and west of it');
+}
+
+// ── the music scheduler (audio fixture) ──────────────────────────────────────
+// Everything above about music tested the TABLE and the track choice, because
+// the harness has no AudioContext and the scheduler's loops therefore never
+// execute. `load({ audio: true })` installs a recording stand-in so they do —
+// otherwise the one piece of new code containing while-loops over an
+// externally-driven clock would be the one piece nobody had ever run.
+//
+// Last, with the fixtures, because loading replaces process globals.
+group('music scheduler (audio fixture)');
+{
+  const f = load({ audio: true, htmlPath: process.env.WOLF3D_HTML });
+  const F = f.P;
+  const A = f.audio;
+  // drive audio time forward in 50ms slices, stepping the scheduler each time
+  const play = (seconds) => {
+    const n0 = A.scheduled.length;
+    for (let i = 0; i < seconds / 0.05; i++) { A.tick(0.05); F.stepMusic(); }
+    return A.scheduled.length - n0;
+  };
+
+  F.startLevel(0);
+  const first = play(4);
+  ok(first > 0, `the scheduler queues notes once the game is playing (${first} in 4s)`);
+  ok(F.musicNow() !== null && F.musicNow().name === 'ATRIUM',
+     `and it is floor 1's march (${F.musicNow() && F.musicNow().name})`);
+
+  // ── the lookahead is a window, not a runaway. A scheduler that advanced its
+  //    cursor without respect to the clock would empty its whole bar into the
+  //    first call and then either stall or spin against its guard.
+  const rate4 = play(4) / 4, rate12 = play(12) / 12;
+  ok(Math.abs(rate4 - rate12) < rate4 * 0.5,
+     `notes arrive at a steady rate rather than in a burst ` +
+     `(${rate4.toFixed(1)}/s over 4s vs ${rate12.toFixed(1)}/s over 12s)`);
+  const voices = F.musicVoices();
+  ok(voices && voices.every(v => v.t <= A.currentTime + 1.0),
+     'and no voice has run further ahead than its lookahead window');
+
+  // ── a track change waits for the bar line. The boardroom march taking over
+  //    mid-note is the failure this defers; the pending track is held until
+  //    the bass voice — which is one bar — wraps.
+  F.startLevel(F.levels().length - 1);
+  play(2);
+  const floorTrack = F.musicNow();
+  const ceo = F.boss();
+  ceo.state = 'chase';
+  A.tick(0.05); F.stepMusic();
+  ok(F.musicNow() === floorTrack,
+     'waking the CEO does not cut the current bar off mid-note');
+  play(8);
+  ok(F.musicNow() === F.music()[F.music().length - 1],
+     `and the boardroom march has taken over by the next bar (${F.musicNow().name})`);
+
+  // ── muted keeps the clock but schedules nothing, so unmuting drops back
+  //    into the bar rather than restarting it.
+  F.setMuted(true);
+  const tBefore = F.musicVoices()[0].t;
+  const whileMuted = play(4);
+  ok(whileMuted === 0, `muted schedules no notes (${whileMuted})`);
+  ok(F.musicVoices()[0].t > tBefore,
+     'but the beat clock keeps running underneath it');
+  F.setMuted(false);
+  ok(play(4) > 0, 'and unmuting brings the march back');
+
+  // ── paused is silent, and drops the voices so a resume starts clean.
+  F.pauseGame();
+  const whilePaused = play(4);
+  ok(whilePaused === 0, `a paused game schedules no music (${whilePaused})`);
+  ok(F.musicNow() === null, 'and the scheduler lets go of its track');
+  F.resumeGame();
+  ok(play(4) > 0, 'resuming starts it again');
+
+  // ── the tally screen keeps its march: cutting the audio the instant a floor
+  //    is cleared sounds like a crash rather than a reward.
+  F.player.hp = 100;
+  F.clearLevel();
+  ok(play(4) > 0, 'a cleared floor keeps playing');
 }
 
 // ── report ───────────────────────────────────────────────────────────────────

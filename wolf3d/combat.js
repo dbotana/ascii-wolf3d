@@ -135,6 +135,7 @@ function fire() {
     player.kills++;
     player.score += KILL_SCORE[best.type] || 150;
     dropLoot(best);
+    spillBlood(best);
     sfx('kill');
     syncHud();
   } else {

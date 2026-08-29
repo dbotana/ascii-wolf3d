@@ -61,6 +61,7 @@ function parseLevel(src) {
   MAP_W = src[0].length;
   grid = [];
   enemies = []; items = []; doorList = []; secretList = []; movingSecrets = [];
+  decals = [];
   totalTreasure = 0; treasureFound = 0;
   boss = null;
   const spawns = [];
@@ -102,6 +103,33 @@ function parseLevel(src) {
     }
     grid.push(row);
   }
+  // A door is a thin slab standing at the tile CENTRE, so it has to know which
+  // way it faces. Solid cells north and south mean you walk through east-west:
+  // the plane sits at constant x (axis 0) and the slab retracts along y, into
+  // one of those two walls. This runs after the grid is built rather than
+  // inside the loop above because cellAt has to be able to see the row below.
+  //
+  // Deriving the axis here is also what fixes the view-dependent slide.
+  // `wallX` taken along the door's own axis is a world coordinate, the same
+  // from either side; taken from the hit face — which is what castGrid used to
+  // do — it ran along opposite axes depending on which way you approached, so
+  // the same door appeared to retract left from one side and right from the
+  // other. validate-level.js enforces exactly one flanked axis per door: a
+  // free-standing one would default to 1 and be see-through from oblique
+  // angles while blockAt still held the whole tile.
+  for (const d of doorList) {
+    d.axis = (cellAt(d.gx, d.gy - 1) && cellAt(d.gx, d.gy + 1)) ? 0 : 1;
+    // The two cells it retracts into are the reveal you see once it opens.
+    // Flagging them lets drawWalls tint them steel so the recess reads as a
+    // frame. A secret push-wall beside a door keeps its panelling — a jamb
+    // tint would give away that it is not an ordinary wall.
+    const jx = d.axis === 0 ? 0 : 1, jy = d.axis === 0 ? 1 : 0;
+    for (const s of [-1, 1]) {
+      const n = cellAt(d.gx + jx * s, d.gy + jy * s);
+      if (n && n.tag === 'panel' && !n.secret) n.jamb = true;
+    }
+  }
+
   populateEnemies(spawns);
   totalEnemies = enemies.length;
   totalSecrets = secretList.length;

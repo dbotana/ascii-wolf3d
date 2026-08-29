@@ -61,23 +61,24 @@ the bundler and the harness both read it rather than keeping their own list.
 
 | file | lines | what |
 |---|---|---|
-| `wolf3d/style.css` | 378 | all CSS |
-| `wolf3d/config.js` | 110 | screen/projection constants, `DIFFICULTY`, palette + fog cache, distance ramps, faces |
+| `wolf3d/style.css` | 410 | all CSS |
+| `wolf3d/config.js` | 111 | screen/projection constants, `DIFFICULTY`, `DEATH_TIME`, palette + fog cache, distance ramps, faces |
 | `wolf3d/levels.js` | 149 | the three floors, `FLOOR_NAMES`, `PAR_TIME` |
 | `wolf3d/art.js` | 307 | `SPR` sprite table, the pistol's `GUN_*` view-model frames |
+| `wolf3d/gore.js` | 107 | `DEATH_SEQ` death-frame sequences, `DECAL_SPR` blood splats |
 | `wolf3d/weapons.js` | 202 | knife / SMG / chaingun art, and the `WEAPONS` table |
 | `wolf3d/gfx.js` | 94 | glyph atlas, `drawChar`, wall shading |
-| `wolf3d/audio.js` | 130 | the whole Web Audio graph |
-| `wolf3d/input.js` | 50 | keyboard, mouse-look, pointer lock |
-| `wolf3d/world.js` | 267 | grid + entities, difficulty, grid queries, doors, push-walls |
-| `wolf3d/level.js` | 154 | `populateEnemies`, `parseLevel`, `startLevel`, `nextLevel` |
-| `wolf3d/raycast.js` | 54 | DDA raycast, `hasLOS`, `spriteSpan` |
+| `wolf3d/audio.js` | 289 | the Web Audio graph, and the `MUSIC` table + its scheduler |
+| `wolf3d/input.js` | 57 | keyboard, mouse-look, pointer lock, the pause hooks |
+| `wolf3d/world.js` | 305 | grid + entities, difficulty, pause, grid queries, doors, push-walls |
+| `wolf3d/level.js` | 182 | `populateEnemies`, `parseLevel` (incl. the door-axis pass), `startLevel`, `nextLevel` |
+| `wolf3d/raycast.js` | 85 | DDA raycast incl. thin-wall doors, `hasLOS`, `spriteSpan` |
 | `wolf3d/nav.js` | 103 | the BFS flow field |
-| `wolf3d/enemies.js` | 356 | FSM, steering, patrols, separation, loot, the CEO |
-| `wolf3d/combat.js` | 246 | the roster lookup, firing, the magazine cycle, damage numbers, pickups |
-| `wolf3d/render.js` | 366 | `drawWalls`, sprites, the weapon view-model, crosshair, the damage arc |
+| `wolf3d/enemies.js` | 379 | FSM, steering, patrols, separation, loot, blood, the CEO |
+| `wolf3d/combat.js` | 247 | the roster lookup, firing, the magazine cycle, damage numbers, pickups |
+| `wolf3d/render.js` | 392 | `drawWalls`, sprites, decals, the weapon view-model, crosshair, the damage arc |
 | `wolf3d/hud.js` | 323 | toasts, banners, status bar, health bar, the tally screen |
-| `wolf3d/main.js` | 161 | `updatePlayer`, `frame`, boot |
+| `wolf3d/main.js` | 172 | `updatePlayer`, `frame`, boot |
 
 **Order matters only for top-level execution.** Function declarations hoist
 across the whole shared scope, so a function body may call anything in any file
@@ -89,6 +90,11 @@ loaded four tags later, and it is fine. What genuinely needs ordering is small:
 - `weapons.js` must follow **`art.js`**, not merely `config.js`: the pistol's
   row in `WEAPONS` points straight at `GUN_IDLE`/`GUN_FIRE`/`GUN_RECOIL`, and
   it reads `CLIP_SIZE`, `RELOAD_TIME` and `MAX_DEPTH` from `config.js`;
+- `gore.js` must follow **`art.js`** for the same reason: `DEATH_SEQ` holds
+  sprite *objects*, and frame 0 of every sequence is the existing
+  `SPR[type + 'Die']`. Holding objects rather than names is what lets
+  `enemySprite` index a table instead of building a string, and it is why the
+  death-frame assertion that predates the sequences still passes untouched;
 - the handful of statements that touch the DOM at load — `gfx.js` grabs the
   canvas, `input.js` binds listeners to it (so it must follow `gfx.js`),
   `hud.js` caches elements, and `main.js` registers the splash handlers.
@@ -114,6 +120,11 @@ same problem in fifteen pieces.
    `wolf3d/weapons.js` rather than into `art.js` as this note originally said:
    nine more art tables would have put `art.js` past the 400-line budget, and
    rule 4 outranks the filename.
+
+   Phase 4 made the same call twice more. The death sequences and blood splats
+   went to `wolf3d/gore.js` (art.js would have landed at ~397, which is
+   *filling* the budget, not staying under it), and the whole of the music is
+   the `MUSIC` table plus one scheduler — four tracks, no per-floor branch.
 2. **Data files hold data only.** No functions in `levels.js` or `art.js`.
 3. **No file calls a game function at top level.** Only `main.js` boots. This is
    what keeps load order a short list of real constraints rather than a
@@ -168,12 +179,16 @@ the emptiness test throughout — `if (c)` means "there is a wall here".
   seed,                  // stable per-tile RNG, drives lit windows and sign text
   signColor,             // 'neon' only
   lock, open, phase,     // 'door' only
-  gx, gy }               // 'door' only — its own coordinates
+  axis,                  // 'door' only — 0: plane at constant x, 1: constant y
+  gx, gy,                // 'door' only — its own coordinates
+  jamb }                 // 'panel' only — a reveal beside a door, tinted steel
 ```
 
 Doors carry `gx/gy` because `stepDoors` needs to know where a door is without
 scanning the map. An early version scanned all 1600 tiles per door per frame;
-don't reintroduce that.
+don't reintroduce that. `axis` and the neighbours' `jamb` flags are both
+derived once in `parseLevel`, after the grid is built — `cellAt` has to be able
+to see the row below.
 
 ## Render pipeline
 
@@ -207,23 +222,69 @@ silently degrades to the `fillText` path once full.
 
 ## The door trick
 
-Doors are the one genuinely subtle piece. `castRay` returns `wallX` — where
-along the struck wall face the ray landed, 0 to 1 — and then:
+Doors are the one genuinely subtle piece, and the only cell the tile grid
+cannot express on its own: the slab hangs at the **tile centre**, not on a
+boundary the DDA crosses. So `castGrid` throws away the march's own hit for a
+door and computes an explicit mid-plane crossing instead.
+
+Every door carries an `axis`, derived once in `parseLevel` from its flanking
+walls: solid north and south means you walk through east-west, so the plane
+sits at constant x (`axis: 0`) and the slab retracts along y into one of those
+two walls. Then, on stepping into a door cell:
 
 ```js
-if (c.tag === 'door' && wx < c.open) continue;   // ray keeps marching
+const t   = c.axis === 0 ? (mapX + 0.5 - px) / cosA : (mapY + 0.5 - py) / sinA;
+if (t < perp || t > limit) continue;      // behind the entry face, or too far
+const lat = c.axis === 0 ? (py + t * sinA) - mapY : (px + t * cosA) - mapX;
+if (lat < 0 || lat >= 1) continue;        // slipped past the slab — see below
+if (lat < c.open) continue;               // through the retracted slice
 ```
 
-The opened slice of a door is simply not there as far as the ray is concerned,
-so a half-open shutter really does show the room behind it, with correct
-distance shading, rather than a black gap. Collision uses a separate threshold
-(`blockAt` lets bodies through at `open > 0.65`) so you can walk through a door
-slightly before it looks fully open, which feels better than the reverse.
+**The frame is not drawn.** A ray steep enough to leave the tile before
+reaching the mid-plane falls through the `lat` range test, the DDA carries on,
+and it hits the flanking wall's face at the tile boundary — half a tile proud
+of the slab. That is the recess. The flanking cells are flagged `jamb` at parse
+time only so `drawWalls` can tint them steel; the geometry was already correct
+without it.
 
-Known cosmetic flaw: `wallX` runs along opposite axes depending on which face
-you hit, so a door appears to retract left from one side and right from the
-other. Fixing it means deriving the slide axis from the door rather than the
-hit face.
+`lat` runs along the door's own axis, so it is a world coordinate: the same
+physical point on the slab reads the same from either side. The opened slice is
+simply not there as far as the ray is concerned, so a half-open shutter really
+does show the room behind it with correct distance shading rather than a black
+gap. Collision stays tile-granular and unchanged — `blockAt` lets bodies
+through at `open > 0.65`, so you walk through slightly before it looks fully
+open, which feels better than the reverse.
+
+### The view-dependent slide was a misdiagnosis
+
+The Phase 4 todo, and the paragraph that used to sit here, claimed `wallX` ran
+along opposite axes depending on which face you hit, so a door appeared to
+retract left from one side and right from the other. **It did not, and it
+could not.** A well-formed door is flanked by solid cells on the axis it slides
+into, so the DDA can only ever enter it through the two faces perpendicular to
+the traversal axis — which means `side` was *always* the same value for a given
+door, and `wallX` always ran along the same world axis.
+
+Measured, rather than argued, before any of this was written: rays fired at the
+same physical point on a slab from both sides returned `wallX = 0.2500` on the
+pre-Phase-4 build, for both door orientations, with the half-open slice passing
+and blocking identically from either side.
+
+The corollary is a mutation that **cannot be killed**: swapping `c.axis` for the
+DDA's `side` in the `lat` line above survives the full suite, because for any
+door the validator will accept, the two are equal. `c.axis` is kept anyway —
+`t` genuinely needs it, and using one source for both lines is the honest form
+— but nothing observable rests on the difference, and no test should claim to
+cover it.
+
+What a player actually sees, a door sliding toward world-north appearing to
+retract leftward from one side and rightward from the other, is what a real
+sliding door does. It was correct behaviour reported as a bug.
+
+**This is the second time in this repo a Phase todo has described a problem
+that did not exist** — the first was the Phase 3 melee cone, where the
+screen-space hit test turned out to be depth-independent all along. Both were
+found by measuring the shipped behaviour before changing it. Measure first.
 
 ## Push-walls
 
@@ -365,8 +426,8 @@ shoot.
 > `centerCol` actually drifts through the game's own projection — not by
 > reasoning about the sign of `atan2`, which is what produced the bug. The
 > rotation test does that same measurement, so the pair cannot silently flip
-> back. This is the same class of bug as the view-dependent door slide still
-> open in Phase 4.
+> back. The view-dependent door slide this note used to point at as a sibling
+> turned out not to be a bug at all — see **The door trick** above.
 
 ### The CEO
 
@@ -460,7 +521,7 @@ last floor sets `gameState = 'won'` and shows the OUT banner instead.
 Run all of these before shipping any change. None of them needs a browser.
 
 ```sh
-node reference/run-tests.js                              # 266 assertions against the real game loop
+node reference/run-tests.js                              # 350 assertions against the real game loop
 WOLF3D_HTML=dist/wolf3d.html node reference/run-tests.js # ...and against the shipped bundle
 node reference/validate-level.js                         # map geometry + key-gated reachability, all 3 floors
 node reference/bundle.js                                 # rebuild dist/wolf3d.html
@@ -480,6 +541,12 @@ code path really executed. It reads either representation — a manifest of
 script scope, so concatenation reproduces browser semantics exactly. Point it at
 another build with `load({ htmlPath })`, or
 `WOLF3D_HTML=path node reference/run-tests.js`.
+
+`load({ audio: true })` swaps the missing `AudioContext` for a recording
+stand-in whose clock the test drives with `ctx.tick(seconds)`. The harness runs
+silent by default and should — but silent also means the music scheduler's
+loops never execute, and a scheduler nobody has run is a scheduler nobody has
+tested. It records what was scheduled and when; it rasterises nothing.
 
 `assertProbe` runs on every load and throws naming anything the probe expected
 and did not get. That matters because `PROBE_SRC` `typeof`-guards ~30 names so
@@ -502,7 +569,9 @@ file has drifted past 400 lines.
 push-walls, death, restart, level clear, treasure counters, floor advance, the
 tally payout, the CEO fight, the Phase 2 movement systems (flow field,
 separation, patrols, rotations) and the Phase 3 combat systems (the weapon
-roster, spread, difficulty scaling, the damage arc).
+roster, spread, difficulty scaling, the damage arc) and the Phase 4
+presentation systems (thin-wall doors, pause, death frames, blood decals, the
+music table and its scheduler).
 
 Three ordering rules bite here. `startLevel()` with no argument restarts the
 **current** floor, so any test that has moved off floor 1 must reset explicitly
@@ -545,8 +614,13 @@ Two traps, both of which produced silent false passes:
   stepping. Call fixtures after the tests that use the shipped level.
 
 **`validate-level.js`** — row widths, sealed border, exactly one spawn, an exit
-exists, every locked door has its keycard placed, key-gated flood fill proving
-the exit is reachable, a stranded-entity report, and push-wall checks. Verified
+exists, every locked door has its keycard placed, **every door flanked by solid
+cells on exactly one axis**, key-gated flood fill proving the exit is
+reachable, a stranded-entity report, and push-wall checks. The door-flanking
+rule exists because the engine will not tell you: a free-standing door falls
+back to a default axis, renders correctly head-on, and lets rays slip past its
+slab at oblique angles while `blockAt` still holds the whole tile. Same silence
+as the wedged push-wall. Verified
 against seeded faults including two subtle ones: a keycard locked behind the
 door it opens, and a push-wall with a free neighbour that still cannot be
 shoved because there is nowhere to stand on the opposite face.
@@ -609,6 +683,20 @@ Every tool here exits non-zero on failure, so they drop straight into CI.
   `freezeEnemies()` in `run-tests.js` parks the roster for tests that are about
   something other than where enemies walk. Expect any test that waits several
   seconds and assumes empty geometry to need the same treatment.
+- A Phase 4 fixture for the north-south door orientation wrote `#.D.#` — a
+  door standing in a corridor but flanked by *nothing*. `axis` fell through to
+  its default of 1, which happened to be the right answer, so the assertion
+  `d.axis === 1` passed while testing nothing at all, and the three distance
+  assertions under it passed for the same reason. `##D##` is the fixture that
+  actually exercises the derivation. Identical in shape to the push-wall test
+  that stood a secret against solid rock: **when a default and a correct answer
+  coincide, the test proves nothing.** Pick fixture geometry where they differ.
+- Phase 4's plan asserted the atlas was still under the boot-time `< 500` bound
+  from inside a group that runs near the END of the suite, by which point the
+  arcs, the damage pops and eight hundred shots have legitimately grown the
+  palette to ~580. The assertion measured which groups happen to run first, not
+  the feature under test. Bounds have a place in the run; re-asserting a
+  boot-time one later is a unit mismatch.
 - That fix immediately failed three of the shipped level's own push-walls, whose
   treasure pockets were one-wide dead ends — geometry in which a two-tile slide
   can *never* leave the loot reachable, whatever the guard does. `todo.md` had

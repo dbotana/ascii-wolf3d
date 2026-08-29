@@ -15,6 +15,29 @@ function dropLoot(e) {
   items.push(mkItem('ammo', e.x, e.y));
 }
 
+// Blood where a body fell. Splats are jittered off the corpse so a kill does
+// not read as one stamp, but a jittered point can land in a wall and render
+// half-buried — so each one is checked and folded back onto the corpse's own
+// tile if it does. That is the same question `itemAt` exists to ask about
+// push-walls: anything placed in the world has to ask what else owns the tile.
+//
+// Drones bleed nothing. They are drones.
+const DECAL_CAP = 64;
+function spillBlood(e) {
+  if (e.type === 'drone') return;
+  const n = e.type === 'ceo' ? 3 : (Math.random() < 0.4 ? 2 : 1);
+  for (let i = 0; i < n; i++) {
+    let x = e.x + (Math.random() - 0.5) * 0.7;
+    let y = e.y + (Math.random() - 0.5) * 0.7;
+    if (cellAt(x | 0, y | 0)) { x = e.x; y = e.y; }
+    decals.push({ x, y, spr: DECAL_SPR[(Math.random() * DECAL_SPR.length) | 0] });
+  }
+  // corpses persist and so do their splats, so the list needs a ceiling: a
+  // long floor is a few hundred kills and every one of them is drawn, sorted
+  // and depth-tested every frame.
+  while (decals.length > DECAL_CAP) decals.shift();
+}
+
 function alertNear(x, y, radius) {
   for (const e of enemies) {
     if (!e.alive) continue;
@@ -268,7 +291,7 @@ function stepEnemies(dt) {
     if (!e.alive) {
       if (e.state === 'dying') {
         e.stateT += dt;
-        if (e.stateT > 0.45) e.state = 'dead';
+        if (e.stateT > DEATH_TIME) e.state = 'dead';
       }
       continue;
     }

@@ -43,34 +43,45 @@ let last = performance.now(), hudTick = 0, animT = 0;
 function frame(now) {
   const dt = Math.min(0.05, (now - last) / 1000);
   last = now;
-  animT += dt;
+  // A paused frame still renders — the frozen scene is what sits under the
+  // banner — but nothing advances, animT included, so the neon flicker and the
+  // rain on the windows hold still with everything else.
+  const paused = gameState === 'paused';
+  if (!paused) animT += dt;
   if (gameState === 'playing') levelTime += dt;
 
   const trigger = keys.has(' ') || mouseHeld;
-  stepSpin(dt, trigger);
+  if (!paused) stepSpin(dt, trigger);
 
   if (firePressed) {
     firePressed = false;
-    if (gameState === 'cleared') advanceFromTally();
+    if (paused)                       resumeGame();
+    else if (gameState === 'cleared') advanceFromTally();
     else fire();
   }
-  // Hold to repeat, but only for weapons that repeat. The pistol is one shot
-  // per press — it reaches fire() through the edge above and nowhere else.
-  if (trigger && gameState === 'playing' && curWeapon().auto) fire();
 
-  updatePlayer(dt);
-  stepDoors(dt);
-  stepSecrets(dt);
-  stepEnemies(dt);
-  stepItems(dt);
-  stepGun(dt);
-  stepReload(dt);
-  stepDmgPops(dt);
-  stepHitDirs(dt);
-  stepHpBar(dt);
-  stepTally(dt);
-  stepToast(dt);
+  if (!paused) {
+    // Hold to repeat, but only for weapons that repeat. The pistol is one shot
+    // per press — it reaches fire() through the edge above and nowhere else.
+    if (trigger && gameState === 'playing' && curWeapon().auto) fire();
+
+    updatePlayer(dt);
+    stepDoors(dt);
+    stepSecrets(dt);
+    stepEnemies(dt);
+    stepItems(dt);
+    stepGun(dt);
+    stepReload(dt);
+    stepDmgPops(dt);
+    stepHitDirs(dt);
+    stepHpBar(dt);
+    stepTally(dt);
+    stepToast(dt);
+  }
   updatePrompt();
+  // Outside the pause block on purpose: stepMusic reads gameState itself, and
+  // going silent under the banner is one of the things it has to do.
+  stepMusic();
 
   // ── clear
   ctx.fillStyle = COLOR.fog;

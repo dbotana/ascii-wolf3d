@@ -88,6 +88,23 @@ const PROBE_SRC = `global.__PROBE = {
   hitDirCell:    (typeof hitDirCell   !== "undefined" ? hitDirCell : null),
   cellSize:      () => ({ w: CELL_W, h: CELL_H }),
   enemyShot:     (typeof enemyShot   !== "undefined" ? enemyShot : null),
+  // Phase 4: pause, thin-wall doors, gore and music.
+  pauseGame:     (typeof pauseGame    !== "undefined" ? pauseGame : null),
+  resumeGame:    (typeof resumeGame   !== "undefined" ? resumeGame : null),
+  togglePause:   (typeof togglePause  !== "undefined" ? togglePause : null),
+  decals:        () => (typeof decals !== "undefined" ? decals : []),
+  spillBlood:    (typeof spillBlood !== "undefined" ? spillBlood : null),
+  deathSeq:      () => (typeof DEATH_SEQ !== "undefined" ? DEATH_SEQ : {}),
+  decalSpr:      () => (typeof DECAL_SPR !== "undefined" ? DECAL_SPR : []),
+  deathTime:     () => (typeof DEATH_TIME !== "undefined" ? DEATH_TIME : 0.45),
+  decalCap:      () => (typeof DECAL_CAP !== "undefined" ? DECAL_CAP : 0),
+  music:         () => (typeof MUSIC !== "undefined" ? MUSIC : []),
+  musicTrackFor: (typeof musicTrackFor !== "undefined" ? musicTrackFor : null),
+  stepMusic:     (typeof stepMusic !== "undefined" ? stepMusic : null),
+  musicNow:      () => (typeof musicTrack !== "undefined" ? musicTrack : null),
+  musicVoices:   () => (typeof musicVoices !== "undefined" && musicVoices
+                          ? musicVoices.map(v => ({ i: v.i, t: v.t })) : null),
+  setMuted:      (v) => { muted = !!v; },
 };`;
 
 // Names the probe exposes as direct function references. Every one of them is
@@ -103,6 +120,8 @@ const REQUIRED_FNS = [
   'moveEnemy', 'openDoorAhead', 'separate', 'enemySprite', 'spriteSpan',
   'curWeapon', 'selectWeapon', 'startReload', 'setDifficulty', 'populate',
   'hurtPlayer', 'hitDirAngle', 'hitDirCell', 'enemyShot',
+  'pauseGame', 'resumeGame', 'togglePause', 'spillBlood',
+  'musicTrackFor', 'stepMusic',
 ];
 
 function assertProbe(P, htmlPath) {
@@ -120,6 +139,9 @@ function assertProbe(P, htmlPath) {
   // emptiness checks exist to prevent.
   if (!P.weapons || P.weapons().length === 0) missing.push('WEAPONS (weapon table)');
   if (!P.difficulties || P.difficulties().length === 0) missing.push('DIFFICULTY');
+  if (!P.deathSeq || Object.keys(P.deathSeq()).length === 0) missing.push('DEATH_SEQ (gore.js)');
+  if (!P.decalSpr || P.decalSpr().length === 0) missing.push('DECAL_SPR (gore.js)');
+  if (!P.music || P.music().length === 0) missing.push('MUSIC (track table)');
   if (missing.length) {
     throw new Error(
       'incomplete game load from ' + htmlPath + ' — missing: ' + missing.join(', ') +
@@ -161,6 +183,53 @@ function collectSources(htmlPath) {
 /** Concatenate sources into one program, with the probe appended in scope. */
 function buildProgram(sources) {
   return sources.map(s => s.code).join('\n;\n') + '\n' + PROBE_SRC;
+}
+
+/**
+ * A minimal Web Audio stand-in, for `load({ audio: true })`.
+ *
+ * The harness runs silent by default and that is the right default: initAudio
+ * fails its try/catch, `sfx()` becomes a no-op, and no test pays for a graph it
+ * does not look at. But "silent" also means the music scheduler's loops — the
+ * bar wrap, the track hand-over, the lookahead window — never execute at all,
+ * and a scheduler that never runs is a scheduler nobody has tested.
+ *
+ * This records what was scheduled and when, rather than rendering anything.
+ * `ctx.tick(seconds)` advances the clock the scheduler reads.
+ */
+function fakeAudio() {
+  const scheduled = [];
+  const param = (v) => ({
+    value: v,
+    setValueAtTime() { return this; },
+    exponentialRampToValueAtTime() { return this; },
+    linearRampToValueAtTime() { return this; },
+    setTargetAtTime() { return this; },
+    cancelScheduledValues() { return this; },
+  });
+  const node = (kind) => ({
+    kind,
+    type: '', buffer: null, loop: false,
+    gain: param(1), frequency: param(440), Q: param(1),
+    playbackRate: param(1), detune: param(0),
+    connect() {}, disconnect() {},
+    start(at) { scheduled.push({ kind, at: at === undefined ? ctx.currentTime : at, node: this }); },
+    stop() {},
+  });
+  const ctx = {
+    currentTime: 0,
+    sampleRate: 44100,
+    destination: node('destination'),
+    createGain:          () => node('gain'),
+    createOscillator:    () => node('osc'),
+    createBufferSource:  () => node('src'),
+    createBiquadFilter:  () => node('filter'),
+    createBuffer: (ch, len) => ({ getChannelData: () => new Float32Array(len) }),
+    // test-only handles
+    scheduled,
+    tick(sec) { ctx.currentTime += sec; },
+  };
+  return ctx;
 }
 
 function load(opts) {
@@ -213,7 +282,11 @@ function load(opts) {
   let now = 0;
   let rafCb = null;
 
-  global.window = {};                       // no AudioContext -> audio disabled
+  // No AudioContext by default -> initAudio fails its try/catch and the game
+  // runs silent. `load({ audio: true })` installs the stand-in above instead,
+  // for the tests that need the music scheduler to actually execute.
+  const actx = o.audio ? fakeAudio() : null;
+  global.window = actx ? { AudioContext: function () { return actx; } } : {};
   global.document = {
     getElementById(id) { return (els[id] || (els[id] = mkEl())); },
     createElement() { return mkEl(); },
@@ -240,6 +313,7 @@ function load(opts) {
   return {
     P,
     els,
+    audio: actx,
     /** Safe element accessor — creates on demand, exactly like getElementById.
      *  Prefer this over reaching into `els`, which is only populated once the
      *  game has actually asked for a given id. */

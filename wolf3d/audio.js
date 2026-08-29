@@ -7,7 +7,7 @@
 
 // ─── AUDIO (procedural, CSP-safe) ───────────────────────────
 let audio = null, audioReady = false, muted = false;
-let masterGain, sfxGain, noiseBuf;
+let masterGain, sfxGain, musicGain, noiseBuf;
 
 function initAudio() {
   if (audioReady) return;
@@ -22,6 +22,13 @@ function initAudio() {
     sfxGain = audio.createGain();
     sfxGain.gain.value = 0.9;
     sfxGain.connect(masterGain);
+
+    // Music hangs off masterGain rather than sfxGain: `M` already ramps
+    // masterGain, so muting covers the march for free, and the march does not
+    // duck every time a gunshot pushes sfxGain around.
+    musicGain = audio.createGain();
+    musicGain.gain.value = 0.16;
+    musicGain.connect(masterGain);
 
     // shared white-noise buffer (rain bed + every noise-based SFX)
     const sr = audio.sampleRate;
@@ -127,4 +134,156 @@ function toggleMute() {
   muted = !muted;
   masterGain.gain.setTargetAtTime(muted ? 0 : 0.55, audio.currentTime, 0.05);
   toast(muted ? 'AUDIO MUTED' : 'AUDIO ON');
+}
+
+// ─── MUSIC (procedural chiptune march) ──────────────────────
+//
+// A lookahead scheduler, not a setInterval: every frame it schedules whatever
+// falls inside the next MUSIC_LOOKAHEAD seconds against `audio.currentTime`,
+// so the beat is on the audio clock rather than the frame clock and a dropped
+// frame does not drop a note.
+//
+// The notes want absolute start times, which `blip` and `noiseBurst` cannot
+// give — both schedule relative to currentTime the moment they are called.
+// Rather than grow those to seven positional parameters, the two voices below
+// are their own dozen lines. It is the one place in the audio graph where a
+// one-shot helper genuinely did not fit.
+
+// Each voice is a list of [semitone-from-root, beats]; null is a rest. The
+// bass list is one bar, and its wrap is where a track change lands. `drum` is
+// one bar of eighths: x kick, s snare, . rest. New content is a table row.
+const MUSIC = [
+  { name: 'ATRIUM', bpm: 130, root: 43,           // G2 — plodding, corporate
+    bass: [[0, 1], [0, 0.5], [7, 0.5], [0, 1], [-2, 1]],
+    lead: [[12, 0.5], [15, 0.5], [12, 1], [10, 0.5], [7, 0.5], [null, 1]],
+    drum: 'x..s..x.' },
+  { name: 'SERVERS', bpm: 142, root: 41,          // F2 — colder, busier
+    bass: [[0, 0.5], [0, 0.5], [12, 0.5], [0, 0.5], [3, 0.5], [3, 0.5], [10, 1]],
+    lead: [[15, 0.5], [14, 0.5], [12, 0.5], [10, 0.5], [8, 1], [null, 1]],
+    drum: 'x.xs.xx.' },
+  { name: 'EXEC', bpm: 150, root: 39,             // Eb2 — the top floor
+    bass: [[0, 0.5], [7, 0.5], [0, 0.5], [10, 0.5], [0, 1], [-1, 1]],
+    lead: [[19, 0.5], [17, 0.5], [15, 1], [12, 0.5], [15, 0.5], [17, 1]],
+    drum: 'xxs.xxs.' },
+  // The boardroom. Last row by convention — musicTrackFor() reaches for it by
+  // position, so the floor tracks stay the first LEVELS-many rows.
+  { name: 'BOARDROOM', bpm: 168, root: 37,        // Db2 — faster, meaner
+    bass: [[0, 0.25], [0, 0.25], [0, 0.5], [6, 0.5], [0, 0.5], [8, 0.5], [7, 0.5]],
+    lead: [[12, 0.25], [13, 0.25], [12, 0.5], [8, 0.5], [6, 0.5], [12, 1]],
+    drum: 'xxsxxxsx' },
+];
+
+const MUSIC_LOOKAHEAD = 0.25;   // seconds of notes queued ahead of the clock
+
+let musicVoices = null, musicDrumV = null, musicTrack = null, musicPending = null;
+
+/**
+ * Which march is playing. The boardroom track takes over the moment the CEO
+ * has actually noticed you — the same liveness test the boss bar uses, so the
+ * music and the health bar arrive together rather than one spoiling the other.
+ */
+function musicTrackFor() {
+  if (boss && boss.alive && boss.state !== 'idle') return MUSIC[MUSIC.length - 1];
+  return MUSIC[levelIndex % (MUSIC.length - 1)];
+}
+
+function midiHz(n) { return 440 * Math.pow(2, (n - 69) / 12); }
+
+/** One pitched note, at an absolute time on the audio clock. */
+function musicNote(hz, dur, type, gain, at) {
+  const o = audio.createOscillator();
+  const g = audio.createGain();
+  o.type = type;
+  o.frequency.setValueAtTime(hz, at);
+  g.gain.setValueAtTime(0.0001, at);
+  g.gain.exponentialRampToValueAtTime(gain, at + 0.012);
+  g.gain.exponentialRampToValueAtTime(0.0001, at + dur);
+  o.connect(g); g.connect(musicGain);
+  o.start(at); o.stop(at + dur + 0.02);
+}
+
+/** One drum hit, at an absolute time. Kick is a pitch drop, snare is noise. */
+function musicHit(kind, at) {
+  if (kind === 'x') {
+    const o = audio.createOscillator(), g = audio.createGain();
+    o.type = 'sine';
+    o.frequency.setValueAtTime(120, at);
+    o.frequency.exponentialRampToValueAtTime(38, at + 0.11);
+    g.gain.setValueAtTime(0.5, at);
+    g.gain.exponentialRampToValueAtTime(0.0001, at + 0.13);
+    o.connect(g); g.connect(musicGain);
+    o.start(at); o.stop(at + 0.16);
+  } else {
+    const sN = audio.createBufferSource(), f = audio.createBiquadFilter(), g = audio.createGain();
+    sN.buffer = noiseBuf;
+    f.type = 'highpass'; f.frequency.value = 1400;
+    g.gain.setValueAtTime(0.28, at);
+    g.gain.exponentialRampToValueAtTime(0.0001, at + 0.09);
+    sN.connect(f); f.connect(g); g.connect(musicGain);
+    sN.start(at); sN.stop(at + 0.12);
+  }
+}
+
+function startTrack(tr, when) {
+  musicTrack = tr;
+  musicVoices = [
+    { seq: tr.bass, i: 0, t: when, type: 'triangle', gain: 0.30, oct: 0 },
+    { seq: tr.lead, i: 0, t: when, type: 'square',   gain: 0.13, oct: 12 },
+  ];
+  musicDrumV = { i: 0, t: when };
+}
+
+/**
+ * Called once a frame from frame(). Silent — and clockless — while paused,
+ * dead or won: a march under a pause banner is worse than quiet. The tally
+ * screen keeps it, because a floor-cleared screen with the music cut sounds
+ * like a crash rather than a reward.
+ */
+function stepMusic() {
+  if (!audioReady) return;
+  const live = gameState === 'playing' || gameState === 'cleared';
+  if (!live) { musicVoices = null; musicDrumV = null; musicTrack = null; musicPending = null; return; }
+
+  const want = musicTrackFor();
+  const now = audio.currentTime;
+  if (!musicVoices) startTrack(want, now + 0.05);
+  else if (want !== musicTrack && want !== musicPending) musicPending = want;
+
+  const spb = 60 / musicTrack.bpm;
+  const horizon = now + MUSIC_LOOKAHEAD;
+
+  for (let vi = 0; vi < musicVoices.length; vi++) {
+    const v = musicVoices[vi];
+    let guard = 0;
+    while (v.t < horizon && guard++ < 64) {
+      const step = v.seq[v.i];
+      const dur = step[1] * spb;
+      // While muted the clock still runs but nothing is scheduled, so unmuting
+      // drops you back into the bar rather than restarting it.
+      if (step[0] !== null && !muted) {
+        musicNote(midiHz(musicTrack.root + step[0] + v.oct), dur * 0.92, v.type, v.gain, v.t);
+      }
+      v.t += dur;
+      v.i++;
+      if (v.i >= v.seq.length) {
+        v.i = 0;
+        // The bass list is one bar, so its wrap is the bar line — the one
+        // place a track change can land without cutting a note in half.
+        if (vi === 0 && musicPending) {
+          startTrack(musicPending, v.t);
+          musicPending = null;
+          return;
+        }
+      }
+    }
+  }
+
+  const dv = musicDrumV, pat = musicTrack.drum, eighth = spb * 0.5;
+  let guard = 0;
+  while (dv.t < horizon && guard++ < 64) {
+    const k = pat[dv.i % pat.length];
+    if (k !== '.' && !muted) musicHit(k, dv.t);
+    dv.t += eighth;
+    dv.i++;
+  }
 }

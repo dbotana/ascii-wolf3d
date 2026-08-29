@@ -49,6 +49,12 @@
     image-rendering: crisp-edges;
     filter: contrast(1.05) saturate(1.1);
   }
+  /* The CRT treatment. Both overlays sit ABOVE the diegetic HUD — header,
+     status bar, boss bar, prompt and toast are all z-index 3 — so the
+     scanlines and the vignette fall across the bar exactly the way they fall
+     across the viewport. The bar used to be at 7 and escaped both. The modal
+     screens (#banner / #tally at 8, #splash at 10) stay above them on
+     purpose: those are read, not inhabited. */
   #stage::before {
     content: '';
     position: absolute; inset: 0;
@@ -71,7 +77,7 @@
   header {
     position: absolute;
     top: 14px; left: 20px;
-    z-index: 7;
+    z-index: 3;
     display: flex;
     align-items: baseline;
     gap: 12px;
@@ -96,7 +102,7 @@
   #statusbar {
     position: absolute;
     left: 0; right: 0; bottom: 0;
-    z-index: 7;
+    z-index: 3;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -190,7 +196,7 @@
     position: absolute;
     top: 54px; left: 50%;
     transform: translateX(-50%);
-    z-index: 7;
+    z-index: 3;
     width: min(60%, 520px);
     text-align: center;
     pointer-events: none;
@@ -231,7 +237,7 @@
     position: absolute;
     top: 60%; left: 50%;
     transform: translate(-50%, -50%);
-    z-index: 7;
+    z-index: 3;
     font-family: 'VT323', monospace;
     font-size: 22px;
     letter-spacing: 0.12em;
@@ -251,7 +257,7 @@
     position: absolute;
     top: 20%; left: 50%;
     transform: translate(-50%, -50%);
-    z-index: 7;
+    z-index: 3;
     font-family: 'VT323', monospace;
     font-size: 20px;
     letter-spacing: 0.14em;
@@ -483,7 +489,7 @@
       <kbd>Space</kbd> / click fire &nbsp;
       <kbd>E</kbd> use door &middot; switch &middot; search walls &nbsp;
       <kbd>R</kbd> reload<br>
-      <kbd>P</kbd> restart floor &nbsp; <kbd>M</kbd> mute &nbsp; <kbd>Esc</kbd> release mouse
+      <kbd>P</kbd> restart floor &nbsp; <kbd>M</kbd> mute &nbsp; <kbd>Esc</kbd> pause &middot; release mouse
     </div>
     <small>click to enter</small>
   </div>
@@ -510,6 +516,7 @@ const FOCAL = COLS / (2 * Math.tan(FOV / 2));
 const CLIP_SIZE = 8;          // rounds per magazine before a reload cycle
 const KILL_SCORE = { guard: 200, drone: 150, ceo: 5000 };
 const RELOAD_TIME = 1.05;     // seconds for the full reload animation
+const DEATH_TIME = 0.45;      // the 'dying' window, subdivided across DEATH_SEQ
 
 // ─── DIFFICULTY ─────────────────────────────────────────────
 // Wolf3D's four, and its philosophy: the enemies do not get tougher, they get
@@ -1064,6 +1071,115 @@ const RELOAD_ACCENT = '▖▗▘▓▄';
 ;
 'use strict';
 
+// Death animation frames and floor decals. Data only, per rule 2.
+//
+// This is its own file rather than more rows in `art.js` because art.js was
+// already 307 lines and this is ~90 more: rule 4 says a file past 400 is a
+// signal to split, not a target to fill, and 397 is filling it. Same call
+// `weapons.js` made in the Phase 3 pass.
+//
+// It must load AFTER art.js — the sequences below hold sprite OBJECTS, not
+// names, and frame 0 of each one is the existing `SPR[type + 'Die']`. That is
+// deliberate twice over: it means enemySprite indexes a table instead of
+// building a string and looking it up, and it means the first frame of every
+// death is still exactly the frame that shipped before this file existed.
+
+// ─── DEATH SEQUENCES ────────────────────────────────────────
+// A death is subdivided across DEATH_TIME, never lengthened — stepEnemies
+// still flips to 'dead' on the same clock, so nothing in the FSM's timing
+// moves and this stays a purely visual change. Each sequence collapses: the
+// body gets shorter and wider frame by frame, landing on the corpse sprite.
+const DEATH_SEQ = {
+  guard: [
+    SPR.guardDie,
+    {
+      rows: [
+        '  ▄  ',
+        '▄███▄',
+        '█▀x▀█',
+        '▀▀▀▀▀',
+      ],
+      wW: 1.5, wH: 0.80, foot: 0.0,
+      base: 'guardSuit', accent: 'x', accentColor: 'blood',
+    },
+    {
+      rows: [
+        '▄▄▄▄▄',
+        '███▛█',
+        '▀▀▀▀▀',
+      ],
+      wW: 1.55, wH: 0.55, foot: 0.0,
+      base: 'guardSuit', accent: '', accentColor: 'blood',
+    },
+  ],
+  // A drone has further to fall and less to fall with, so two frames read as
+  // a drop rather than a collapse.
+  drone: [
+    SPR.droneDie,
+    {
+      rows: [
+        ' ▄▄▄ ',
+        '▄▀x▀▄',
+        '▀▀▀▀▀',
+      ],
+      wW: 1.2, wH: 0.50, foot: 0.0,
+      base: 'steelD', accent: 'x', accentColor: 'muzzle',
+    },
+  ],
+  ceo: [
+    SPR.ceoDie,
+    {
+      rows: [
+        '   ▄███▄   ',
+        ' ▄███x███▄ ',
+        '███████████',
+        '▀▀▀▀▀▀▀▀▀▀▀',
+      ],
+      wW: 2.9, wH: 1.00, foot: 0.0,
+      base: 'ceoSuit', accent: 'x', accentColor: 'blood',
+    },
+    {
+      rows: [
+        ' ▄███████▄ ',
+        '███████████',
+        '▀▀▀▀▀▀▀▀▀▀▀',
+      ],
+      wW: 2.95, wH: 0.70, foot: 0.0,
+      base: 'ceoSuit', accent: '', accentColor: 'blood',
+    },
+  ],
+};
+
+// ─── FLOOR DECALS ───────────────────────────────────────────
+// Not a decal in the projection sense. The floor is drawn per row off a
+// distance ramp rather than per world position, so a true floor decal would
+// need per-column floor casting — a renderer this does not have. These are
+// flat sprites sitting at foot height, which is exactly what a corpse frame
+// already is, so drawSprite blits them with no new code path.
+const DECAL_SPR = [
+  {
+    rows: ['▗▄▄▖'],
+    wW: 0.85, wH: 0.16, foot: 0.0,
+    base: 'blood', accent: '', accentColor: 'blood',
+  },
+  {
+    rows: ['▖▄▄▄▗'],
+    wW: 1.00, wH: 0.14, foot: 0.0,
+    base: 'blood', accent: '', accentColor: 'blood',
+  },
+  {
+    rows: [
+      ' ▄▄ ',
+      '▝▀▀▘',
+    ],
+    wW: 0.70, wH: 0.20, foot: 0.0,
+    base: 'blood', accent: '', accentColor: 'blood',
+  },
+];
+
+;
+'use strict';
+
 // The weapon roster: view-model art for everything that is not the pistol,
 // and the WEAPONS table that drives fire(), drawGun() and the HUD.
 //
@@ -1159,11 +1275,11 @@ const SMG_RECOIL = [
 // caps rather than dropping the whole model: at a 0.07s cooldown the
 // idle/fire/recoil cycle repeats fast enough to read as rotation.
 const CHAIN_IDLE = [
-  '  ▄  ▄  ▄    ',
-  '  █  █  █    ',
-  ' ▟█▙▟█▙▟█▙   ',
-  ' █████████   ',
-  ' █████████   ',
+  '   ▄  ▄  ▄   ',
+  '   █  █  █   ',
+  '  ▟█▙▟█▙▟█▙  ',
+  '  █████████  ',
+  '  █████████  ',
   '▗███████████▖',
   '▐███████████▌',
   '▐███████████▌',
@@ -1171,11 +1287,11 @@ const CHAIN_IDLE = [
   '  ▜███████▛  ',
 ];
 const CHAIN_FIRE = [
-  ' ╲▲╱╲▲╱╲▲╱   ',
-  ' ▄█▄▄█▄▄█▄   ',
-  ' ▟█▙▟█▙▟█▙   ',
-  ' █████████   ',
-  ' █████████   ',
+  '  ╲▲╱╲▲╱╲▲╱  ',
+  '  ▄█▄▄█▄▄█▄  ',
+  '  ▟█▙▟█▙▟█▙  ',
+  '  █████████  ',
+  '  █████████  ',
   '▗███████████▖',
   '▐███████████▌',
   '▐███████████▌',
@@ -1183,11 +1299,11 @@ const CHAIN_FIRE = [
   '  ▜███████▛  ',
 ];
 const CHAIN_RECOIL = [
-  '  ▄  ▄  ▄    ',
-  ' ▟█▙▟█▙▟█▙   ',
-  ' ▜█▛▜█▛▜█▛   ',
-  ' █████████   ',
-  ' █████████   ',
+  '   ▄  ▄  ▄   ',
+  '  ▟█▙▟█▙▟█▙  ',
+  '  ▜█▛▜█▛▜█▛  ',
+  '  █████████  ',
+  '  █████████  ',
   '▗███████████▖',
   '▐███████████▌',
   '▐███████████▌',
@@ -1371,7 +1487,7 @@ function wallBase(cell) {
 
 // ─── AUDIO (procedural, CSP-safe) ───────────────────────────
 let audio = null, audioReady = false, muted = false;
-let masterGain, sfxGain, noiseBuf;
+let masterGain, sfxGain, musicGain, noiseBuf;
 
 function initAudio() {
   if (audioReady) return;
@@ -1386,6 +1502,13 @@ function initAudio() {
     sfxGain = audio.createGain();
     sfxGain.gain.value = 0.9;
     sfxGain.connect(masterGain);
+
+    // Music hangs off masterGain rather than sfxGain: `M` already ramps
+    // masterGain, so muting covers the march for free, and the march does not
+    // duck every time a gunshot pushes sfxGain around.
+    musicGain = audio.createGain();
+    musicGain.gain.value = 0.16;
+    musicGain.connect(masterGain);
 
     // shared white-noise buffer (rain bed + every noise-based SFX)
     const sr = audio.sampleRate;
@@ -1493,6 +1616,158 @@ function toggleMute() {
   toast(muted ? 'AUDIO MUTED' : 'AUDIO ON');
 }
 
+// ─── MUSIC (procedural chiptune march) ──────────────────────
+//
+// A lookahead scheduler, not a setInterval: every frame it schedules whatever
+// falls inside the next MUSIC_LOOKAHEAD seconds against `audio.currentTime`,
+// so the beat is on the audio clock rather than the frame clock and a dropped
+// frame does not drop a note.
+//
+// The notes want absolute start times, which `blip` and `noiseBurst` cannot
+// give — both schedule relative to currentTime the moment they are called.
+// Rather than grow those to seven positional parameters, the two voices below
+// are their own dozen lines. It is the one place in the audio graph where a
+// one-shot helper genuinely did not fit.
+
+// Each voice is a list of [semitone-from-root, beats]; null is a rest. The
+// bass list is one bar, and its wrap is where a track change lands. `drum` is
+// one bar of eighths: x kick, s snare, . rest. New content is a table row.
+const MUSIC = [
+  { name: 'ATRIUM', bpm: 130, root: 43,           // G2 — plodding, corporate
+    bass: [[0, 1], [0, 0.5], [7, 0.5], [0, 1], [-2, 1]],
+    lead: [[12, 0.5], [15, 0.5], [12, 1], [10, 0.5], [7, 0.5], [null, 1]],
+    drum: 'x..s..x.' },
+  { name: 'SERVERS', bpm: 142, root: 41,          // F2 — colder, busier
+    bass: [[0, 0.5], [0, 0.5], [12, 0.5], [0, 0.5], [3, 0.5], [3, 0.5], [10, 1]],
+    lead: [[15, 0.5], [14, 0.5], [12, 0.5], [10, 0.5], [8, 1], [null, 1]],
+    drum: 'x.xs.xx.' },
+  { name: 'EXEC', bpm: 150, root: 39,             // Eb2 — the top floor
+    bass: [[0, 0.5], [7, 0.5], [0, 0.5], [10, 0.5], [0, 1], [-1, 1]],
+    lead: [[19, 0.5], [17, 0.5], [15, 1], [12, 0.5], [15, 0.5], [17, 1]],
+    drum: 'xxs.xxs.' },
+  // The boardroom. Last row by convention — musicTrackFor() reaches for it by
+  // position, so the floor tracks stay the first LEVELS-many rows.
+  { name: 'BOARDROOM', bpm: 168, root: 37,        // Db2 — faster, meaner
+    bass: [[0, 0.25], [0, 0.25], [0, 0.5], [6, 0.5], [0, 0.5], [8, 0.5], [7, 0.5]],
+    lead: [[12, 0.25], [13, 0.25], [12, 0.5], [8, 0.5], [6, 0.5], [12, 1]],
+    drum: 'xxsxxxsx' },
+];
+
+const MUSIC_LOOKAHEAD = 0.25;   // seconds of notes queued ahead of the clock
+
+let musicVoices = null, musicDrumV = null, musicTrack = null, musicPending = null;
+
+/**
+ * Which march is playing. The boardroom track takes over the moment the CEO
+ * has actually noticed you — the same liveness test the boss bar uses, so the
+ * music and the health bar arrive together rather than one spoiling the other.
+ */
+function musicTrackFor() {
+  if (boss && boss.alive && boss.state !== 'idle') return MUSIC[MUSIC.length - 1];
+  return MUSIC[levelIndex % (MUSIC.length - 1)];
+}
+
+function midiHz(n) { return 440 * Math.pow(2, (n - 69) / 12); }
+
+/** One pitched note, at an absolute time on the audio clock. */
+function musicNote(hz, dur, type, gain, at) {
+  const o = audio.createOscillator();
+  const g = audio.createGain();
+  o.type = type;
+  o.frequency.setValueAtTime(hz, at);
+  g.gain.setValueAtTime(0.0001, at);
+  g.gain.exponentialRampToValueAtTime(gain, at + 0.012);
+  g.gain.exponentialRampToValueAtTime(0.0001, at + dur);
+  o.connect(g); g.connect(musicGain);
+  o.start(at); o.stop(at + dur + 0.02);
+}
+
+/** One drum hit, at an absolute time. Kick is a pitch drop, snare is noise. */
+function musicHit(kind, at) {
+  if (kind === 'x') {
+    const o = audio.createOscillator(), g = audio.createGain();
+    o.type = 'sine';
+    o.frequency.setValueAtTime(120, at);
+    o.frequency.exponentialRampToValueAtTime(38, at + 0.11);
+    g.gain.setValueAtTime(0.5, at);
+    g.gain.exponentialRampToValueAtTime(0.0001, at + 0.13);
+    o.connect(g); g.connect(musicGain);
+    o.start(at); o.stop(at + 0.16);
+  } else {
+    const sN = audio.createBufferSource(), f = audio.createBiquadFilter(), g = audio.createGain();
+    sN.buffer = noiseBuf;
+    f.type = 'highpass'; f.frequency.value = 1400;
+    g.gain.setValueAtTime(0.28, at);
+    g.gain.exponentialRampToValueAtTime(0.0001, at + 0.09);
+    sN.connect(f); f.connect(g); g.connect(musicGain);
+    sN.start(at); sN.stop(at + 0.12);
+  }
+}
+
+function startTrack(tr, when) {
+  musicTrack = tr;
+  musicVoices = [
+    { seq: tr.bass, i: 0, t: when, type: 'triangle', gain: 0.30, oct: 0 },
+    { seq: tr.lead, i: 0, t: when, type: 'square',   gain: 0.13, oct: 12 },
+  ];
+  musicDrumV = { i: 0, t: when };
+}
+
+/**
+ * Called once a frame from frame(). Silent — and clockless — while paused,
+ * dead or won: a march under a pause banner is worse than quiet. The tally
+ * screen keeps it, because a floor-cleared screen with the music cut sounds
+ * like a crash rather than a reward.
+ */
+function stepMusic() {
+  if (!audioReady) return;
+  const live = gameState === 'playing' || gameState === 'cleared';
+  if (!live) { musicVoices = null; musicDrumV = null; musicTrack = null; musicPending = null; return; }
+
+  const want = musicTrackFor();
+  const now = audio.currentTime;
+  if (!musicVoices) startTrack(want, now + 0.05);
+  else if (want !== musicTrack && want !== musicPending) musicPending = want;
+
+  const spb = 60 / musicTrack.bpm;
+  const horizon = now + MUSIC_LOOKAHEAD;
+
+  for (let vi = 0; vi < musicVoices.length; vi++) {
+    const v = musicVoices[vi];
+    let guard = 0;
+    while (v.t < horizon && guard++ < 64) {
+      const step = v.seq[v.i];
+      const dur = step[1] * spb;
+      // While muted the clock still runs but nothing is scheduled, so unmuting
+      // drops you back into the bar rather than restarting it.
+      if (step[0] !== null && !muted) {
+        musicNote(midiHz(musicTrack.root + step[0] + v.oct), dur * 0.92, v.type, v.gain, v.t);
+      }
+      v.t += dur;
+      v.i++;
+      if (v.i >= v.seq.length) {
+        v.i = 0;
+        // The bass list is one bar, so its wrap is the bar line — the one
+        // place a track change can land without cutting a note in half.
+        if (vi === 0 && musicPending) {
+          startTrack(musicPending, v.t);
+          musicPending = null;
+          return;
+        }
+      }
+    }
+  }
+
+  const dv = musicDrumV, pat = musicTrack.drum, eighth = spb * 0.5;
+  let guard = 0;
+  while (dv.t < horizon && guard++ < 64) {
+    const k = pat[dv.i % pat.length];
+    if (k !== '.' && !muted) musicHit(k, dv.t);
+    dv.t += eighth;
+    dv.i++;
+  }
+}
+
 ;
 'use strict';
 
@@ -1516,6 +1791,12 @@ addEventListener('keydown', e => {
   if (k === ' ')     firePressed = true;
   if (k === 'e')     use();
   if (k === 'm')     toggleMute();
+  // Esc both pauses and, as its browser default action, exits pointer lock —
+  // which pauses too, through pointerlockchange below. The default action runs
+  // AFTER dispatch, so this lands first and that handler then finds a floor
+  // already paused and no-ops. Chrome swallows the keydown entirely, which is
+  // exactly why the lock handler carries the same call.
+  if (k === 'escape') togglePause();
   if (k === 'r')     { if (gameState === 'playing') startReload(); }
   if (k === 'p')     startLevel(gameState === 'won' ? 0 : levelIndex);
   if (k >= '1' && k <= '4') selectWeapon(+k - 1);
@@ -1535,10 +1816,11 @@ canvas.addEventListener('mousedown', e => {
 // every way the button can stop being down, including the ones that never
 // deliver a mouseup: releasing the pointer lock with Esc, and losing focus
 addEventListener('mouseup', e => { if (e.button === 0) mouseHeld = false; });
-addEventListener('blur', () => { mouseHeld = false; keys.clear(); });
+addEventListener('blur', () => { mouseHeld = false; keys.clear(); pauseGame(); });
 document.addEventListener('pointerlockchange', () => {
   mouseLocked = document.pointerLockElement === canvas;
-  if (!mouseLocked) mouseHeld = false;
+  if (!mouseLocked) { mouseHeld = false; pauseGame(); }
+  else resumeGame();
 });
 addEventListener('mousemove', e => {
   if (!mouseLocked || gameState !== 'playing') return;
@@ -1584,8 +1866,40 @@ const player = {
 let dmgPops = [];
 // where the shots that hit US came from, for the direction arc
 let hitDirs = [];
+// blood left where a body fell — see spillBlood in enemies.js
+let decals = [];
 
-let gameState = 'playing';   // playing | dead | cleared
+let gameState = 'playing';   // playing | paused | dead | cleared | won
+
+// ─── PAUSE ──────────────────────────────────────────────────
+// Nearly free, because movement, firing, enemies, items, nav, mouse-look and
+// the gun view-model already gate on gameState. What pause adds on top is
+// frame()'s skip of the handful of steppers that never checked anything —
+// doors, secrets, the gun, the reload cycle, the damage pops and the hp chip.
+//
+// Only a floor in play can be paused. Pausing a dead or cleared one would
+// bury the banner that state is already showing, and resuming would hand
+// control back to a game that has none.
+function pauseGame() {
+  if (gameState !== 'playing') return false;
+  gameState = 'paused';
+  // Releasing the mouse is the point of pausing for most players. It also
+  // re-enters through pointerlockchange below, which is harmless: that handler
+  // only ever pauses a floor that is still 'playing'.
+  if (document.exitPointerLock) document.exitPointerLock();
+  showBanner('PAUSED', 'THE MEETING IS ON HOLD',
+             'press ESC · E · SPACE to resume', false);
+  return true;
+}
+function resumeGame() {
+  if (gameState !== 'paused') return false;
+  gameState = 'playing';
+  hideBanner();
+  return true;
+}
+function togglePause() {
+  return gameState === 'paused' ? resumeGame() : pauseGame();
+}
 
 // Chosen once on the splash and then left alone. This is a RUN-level setting,
 // not player state: startLevel deliberately does not reset it, on either the
@@ -1600,8 +1914,13 @@ let levelTime = 0;
 let levelIndex = 0;          // which floor of LEVELS we are on
 let boss = null;             // the CEO, once a floor places one
 
+// `axis` is which way the slab faces: 0 puts its plane at constant x, so you
+// walk through east-west and the door retracts along y; 1 is the other way
+// round. parseLevel derives it from the flanking walls — the 1 here is only
+// what a door built outside a level would get.
 function mkDoor(lock) {
-  return { tag: 'door', h: WALL_H, lock, open: 0, phase: 'closed', timer: 0, seed: 7 };
+  return { tag: 'door', h: WALL_H, lock, open: 0, phase: 'closed', timer: 0,
+           seed: 7, axis: 1 };
 }
 // a push-wall is an ordinary panel until someone leans on it: same seed, same
 // colour, same glyph ramp, so it is indistinguishable from the wall it sits in
@@ -1793,6 +2112,7 @@ function frontCell() {
 }
 
 function use() {
+  if (gameState === 'paused')  { resumeGame(); return; }
   if (gameState === 'cleared') { advanceFromTally(); return; }
   if (gameState === 'won')     { startLevel(0); return; }
   if (gameState === 'dead')    { startLevel(levelIndex); return; }
@@ -1878,6 +2198,7 @@ function parseLevel(src) {
   MAP_W = src[0].length;
   grid = [];
   enemies = []; items = []; doorList = []; secretList = []; movingSecrets = [];
+  decals = [];
   totalTreasure = 0; treasureFound = 0;
   boss = null;
   const spawns = [];
@@ -1919,6 +2240,33 @@ function parseLevel(src) {
     }
     grid.push(row);
   }
+  // A door is a thin slab standing at the tile CENTRE, so it has to know which
+  // way it faces. Solid cells north and south mean you walk through east-west:
+  // the plane sits at constant x (axis 0) and the slab retracts along y, into
+  // one of those two walls. This runs after the grid is built rather than
+  // inside the loop above because cellAt has to be able to see the row below.
+  //
+  // Deriving the axis here is also what fixes the view-dependent slide.
+  // `wallX` taken along the door's own axis is a world coordinate, the same
+  // from either side; taken from the hit face — which is what castGrid used to
+  // do — it ran along opposite axes depending on which way you approached, so
+  // the same door appeared to retract left from one side and right from the
+  // other. validate-level.js enforces exactly one flanked axis per door: a
+  // free-standing one would default to 1 and be see-through from oblique
+  // angles while blockAt still held the whole tile.
+  for (const d of doorList) {
+    d.axis = (cellAt(d.gx, d.gy - 1) && cellAt(d.gx, d.gy + 1)) ? 0 : 1;
+    // The two cells it retracts into are the reveal you see once it opens.
+    // Flagging them lets drawWalls tint them steel so the recess reads as a
+    // frame. A secret push-wall beside a door keeps its panelling — a jamb
+    // tint would give away that it is not an ordinary wall.
+    const jx = d.axis === 0 ? 0 : 1, jy = d.axis === 0 ? 1 : 0;
+    for (const s of [-1, 1]) {
+      const n = cellAt(d.gx + jx * s, d.gy + jy * s);
+      if (n && n.tag === 'panel' && !n.secret) n.jamb = true;
+    }
+  }
+
   populateEnemies(spawns);
   totalEnemies = enemies.length;
   totalSecrets = secretList.length;
@@ -1976,8 +2324,13 @@ function nextLevel() {
 // The DDA raycaster. Returns perpendicular distance, the cell struck, which
 // face, and wallX — where along that face the ray landed — which is what makes
 // the door slip-through and the sprite projection agree with each other.
+//
+// Doors are the one cell the tile grid cannot express on its own: the slab
+// hangs at the tile centre rather than on a boundary, so the DDA's hit has to
+// be replaced by an explicit mid-plane crossing. That is the only place in
+// here that does not simply report where the march stopped.
 
-// ─── DDA RAYCAST (with wallX + door slip-through) ───────────
+// ─── DDA RAYCAST (thin-wall doors + wallX) ──────────────────
 function castGrid(px, py, angle, maxD) {
   const limit = maxD || MAX_DEPTH;
   const sinA = Math.sin(angle), cosA = Math.cos(angle);
@@ -1997,10 +2350,36 @@ function castGrid(px, py, angle, maxD) {
     if (!c) continue;
     const perp = side === 0 ? (sideDistX - deltaX) : (sideDistY - deltaY);
     if (perp > limit) break;
+    if (c.tag === 'door') {
+      // Thin wall. The slab stands at the tile CENTRE, not on the tile
+      // boundary the DDA just crossed, so step on to its mid-plane and test
+      // there — half a tile further in. That half tile is the whole effect:
+      // the door renders set back, and the flanking walls a ray reaches
+      // instead at oblique angles are the frame standing proud of it.
+      const t = c.axis === 0 ? (mapX + 0.5 - px) / cosA
+                             : (mapY + 0.5 - py) / sinA;
+      // `perp` is where the ray entered this cell, so this rejects a crossing
+      // that is behind us. Only a door with an open flank can produce one, and
+      // validate-level.js refuses to ship those. An axis-aligned ray divides
+      // by ~6e-17 rather than 0 and lands here too, as a huge t.
+      if (t < perp || t > limit) continue;
+      // `lat` runs along the door's OWN fixed axis, so it is a world
+      // coordinate and not a face-relative one: the same physical point on the
+      // slab reads the same from either side, and the slice retracts one way
+      // for everybody. Deriving it from the hit face is what mirrored it.
+      const lat = c.axis === 0 ? (py + t * sinA) - mapY
+                               : (px + t * cosA) - mapX;
+      // Landing outside the tile is not a failure, it is the jamb: the ray
+      // crossed into a flanking wall before it reached the mid-plane. Marching
+      // on lets the DDA hit that wall's face at the tile boundary, which IS
+      // the recess — nothing draws it.
+      if (lat < 0 || lat >= 1) continue;
+      // the opened slice of a door is empty space — keep marching through it
+      if (lat < c.open) continue;
+      return { dist: t, cell: c, side: c.axis, mapX, mapY, wallX: lat };
+    }
     let wx = side === 0 ? (py + perp * sinA) : (px + perp * cosA);
     wx -= Math.floor(wx);
-    // the opened slice of a door is empty space — keep marching through it
-    if (c.tag === 'door' && wx < c.open) continue;
     return { dist: perp, cell: c, side, mapX, mapY, wallX: wx };
   }
   return { dist: limit, cell: null, side: 0, mapX, mapY, wallX: 0 };
@@ -2147,6 +2526,29 @@ function dropLoot(e) {
   const chance = e.type === 'guard' ? 0.55 : 0.30;
   if (Math.random() > chance) return;
   items.push(mkItem('ammo', e.x, e.y));
+}
+
+// Blood where a body fell. Splats are jittered off the corpse so a kill does
+// not read as one stamp, but a jittered point can land in a wall and render
+// half-buried — so each one is checked and folded back onto the corpse's own
+// tile if it does. That is the same question `itemAt` exists to ask about
+// push-walls: anything placed in the world has to ask what else owns the tile.
+//
+// Drones bleed nothing. They are drones.
+const DECAL_CAP = 64;
+function spillBlood(e) {
+  if (e.type === 'drone') return;
+  const n = e.type === 'ceo' ? 3 : (Math.random() < 0.4 ? 2 : 1);
+  for (let i = 0; i < n; i++) {
+    let x = e.x + (Math.random() - 0.5) * 0.7;
+    let y = e.y + (Math.random() - 0.5) * 0.7;
+    if (cellAt(x | 0, y | 0)) { x = e.x; y = e.y; }
+    decals.push({ x, y, spr: DECAL_SPR[(Math.random() * DECAL_SPR.length) | 0] });
+  }
+  // corpses persist and so do their splats, so the list needs a ceiling: a
+  // long floor is a few hundred kills and every one of them is drawn, sorted
+  // and depth-tested every frame.
+  while (decals.length > DECAL_CAP) decals.shift();
 }
 
 function alertNear(x, y, radius) {
@@ -2402,7 +2804,7 @@ function stepEnemies(dt) {
     if (!e.alive) {
       if (e.state === 'dying') {
         e.stateT += dt;
-        if (e.stateT > 0.45) e.state = 'dead';
+        if (e.stateT > DEATH_TIME) e.state = 'dead';
       }
       continue;
     }
@@ -2627,6 +3029,7 @@ function fire() {
     player.kills++;
     player.score += KILL_SCORE[best.type] || 150;
     dropLoot(best);
+    spillBlood(best);
     sfx('kill');
     syncHud();
   } else {
@@ -2793,7 +3196,17 @@ function drawSprite(spec, wx, wy, zbuf, horizon, bobOffset) {
  * it means the guard is walking away and we see its back.
  */
 function enemySprite(e) {
-  if (!e.alive) return e.state === 'dying' ? SPR[e.type + 'Die'] : SPR[e.type + 'Dead'];
+  if (!e.alive) {
+    if (e.state !== 'dying') return SPR[e.type + 'Dead'];
+    // The death window is DEATH_TIME either way — it is subdivided here, not
+    // lengthened, so stepEnemies flips to 'dead' on exactly the clock it
+    // always did and nothing in the FSM's timing moves. Frame 0 of every
+    // sequence is still SPR[type + 'Die'], the frame that shipped before the
+    // sequences existed, which is why the death-frame assertion predating
+    // them keeps passing unchanged.
+    const seq = DEATH_SEQ[e.type];
+    return seq[Math.min(seq.length - 1, (e.stateT / DEATH_TIME * seq.length) | 0)];
+  }
   if (e.state === 'attack') return SPR[e.type + 'Fire'];
   if (e.type !== 'guard') return SPR[e.type];
   const view = Math.atan2(e.y - player.y, e.x - player.x);
@@ -2821,12 +3234,22 @@ function drawSprites(zbuf, horizon) {
     const d = (it.x - player.x) * cosA + (it.y - player.y) * sinA;
     if (d > 0.32 && d < MAX_DEPTH) list.push({ d, kind: 'i', ref: it });
   }
+  // Sorted with a small depth bias so a splat always lands BEHIND the corpse
+  // lying on it. Both sit at foot height on nearly the same tile, and
+  // drawSprite writes cells without depth-testing within a sprite, so equal
+  // depths would let the draw order decide which one wins per frame.
+  for (const p of decals) {
+    const d = (p.x - player.x) * cosA + (p.y - player.y) * sinA;
+    if (d > 0.32 && d < MAX_DEPTH) list.push({ d: d + 0.02, kind: 'p', ref: p });
+  }
   list.sort((a, b) => b.d - a.d);      // back to front
   for (const s of list) {
     if (s.kind === 'e') {
       const e = s.ref;
       const bob = e.alive && e.type === 'drone' ? Math.sin(e.bob) * 0.12 : 0;
       drawSprite(enemySprite(e), e.x, e.y, zbuf, horizon, bob);
+    } else if (s.kind === 'p') {
+      drawSprite(s.ref.spr, s.ref.x, s.ref.y, zbuf, horizon, 0);
     } else {
       const it = s.ref;
       drawSprite(SPR[it.kind], it.x, it.y, zbuf, horizon, Math.sin(it.bob) * 0.06);
@@ -3091,6 +3514,12 @@ function drawWalls(zbuf, horizon, animT) {
         } else {
           color = fade(COLOR.steelD, dist);
         }
+      } else if (cell.tag === 'panel' && cell.jamb) {
+        // The reveal a door retracts into. Steel rather than concrete, so the
+        // recess a thin door sits in reads as a frame around it instead of as
+        // more corridor. Flagged at parse time; see the jamb pass in level.js.
+        ch = (row & 1) ? '\u258A' : '\u258C';
+        color = fade(mix(COLOR.steel, COLOR.steelD, 0.55), dist);
       } else if (cell.tag === 'panel') {
         // lit office windows punched into the panelling
         const band = Math.floor(v * 6);
@@ -3476,34 +3905,45 @@ let last = performance.now(), hudTick = 0, animT = 0;
 function frame(now) {
   const dt = Math.min(0.05, (now - last) / 1000);
   last = now;
-  animT += dt;
+  // A paused frame still renders — the frozen scene is what sits under the
+  // banner — but nothing advances, animT included, so the neon flicker and the
+  // rain on the windows hold still with everything else.
+  const paused = gameState === 'paused';
+  if (!paused) animT += dt;
   if (gameState === 'playing') levelTime += dt;
 
   const trigger = keys.has(' ') || mouseHeld;
-  stepSpin(dt, trigger);
+  if (!paused) stepSpin(dt, trigger);
 
   if (firePressed) {
     firePressed = false;
-    if (gameState === 'cleared') advanceFromTally();
+    if (paused)                       resumeGame();
+    else if (gameState === 'cleared') advanceFromTally();
     else fire();
   }
-  // Hold to repeat, but only for weapons that repeat. The pistol is one shot
-  // per press — it reaches fire() through the edge above and nowhere else.
-  if (trigger && gameState === 'playing' && curWeapon().auto) fire();
 
-  updatePlayer(dt);
-  stepDoors(dt);
-  stepSecrets(dt);
-  stepEnemies(dt);
-  stepItems(dt);
-  stepGun(dt);
-  stepReload(dt);
-  stepDmgPops(dt);
-  stepHitDirs(dt);
-  stepHpBar(dt);
-  stepTally(dt);
-  stepToast(dt);
+  if (!paused) {
+    // Hold to repeat, but only for weapons that repeat. The pistol is one shot
+    // per press — it reaches fire() through the edge above and nowhere else.
+    if (trigger && gameState === 'playing' && curWeapon().auto) fire();
+
+    updatePlayer(dt);
+    stepDoors(dt);
+    stepSecrets(dt);
+    stepEnemies(dt);
+    stepItems(dt);
+    stepGun(dt);
+    stepReload(dt);
+    stepDmgPops(dt);
+    stepHitDirs(dt);
+    stepHpBar(dt);
+    stepTally(dt);
+    stepToast(dt);
+  }
   updatePrompt();
+  // Outside the pause block on purpose: stepMusic reads gameState itself, and
+  // going silent under the banner is one of the things it has to do.
+  stepMusic();
 
   // ── clear
   ctx.fillStyle = COLOR.fog;

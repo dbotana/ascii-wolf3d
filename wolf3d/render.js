@@ -53,7 +53,17 @@ function drawSprite(spec, wx, wy, zbuf, horizon, bobOffset) {
  * it means the guard is walking away and we see its back.
  */
 function enemySprite(e) {
-  if (!e.alive) return e.state === 'dying' ? SPR[e.type + 'Die'] : SPR[e.type + 'Dead'];
+  if (!e.alive) {
+    if (e.state !== 'dying') return SPR[e.type + 'Dead'];
+    // The death window is DEATH_TIME either way — it is subdivided here, not
+    // lengthened, so stepEnemies flips to 'dead' on exactly the clock it
+    // always did and nothing in the FSM's timing moves. Frame 0 of every
+    // sequence is still SPR[type + 'Die'], the frame that shipped before the
+    // sequences existed, which is why the death-frame assertion predating
+    // them keeps passing unchanged.
+    const seq = DEATH_SEQ[e.type];
+    return seq[Math.min(seq.length - 1, (e.stateT / DEATH_TIME * seq.length) | 0)];
+  }
   if (e.state === 'attack') return SPR[e.type + 'Fire'];
   if (e.type !== 'guard') return SPR[e.type];
   const view = Math.atan2(e.y - player.y, e.x - player.x);
@@ -81,12 +91,22 @@ function drawSprites(zbuf, horizon) {
     const d = (it.x - player.x) * cosA + (it.y - player.y) * sinA;
     if (d > 0.32 && d < MAX_DEPTH) list.push({ d, kind: 'i', ref: it });
   }
+  // Sorted with a small depth bias so a splat always lands BEHIND the corpse
+  // lying on it. Both sit at foot height on nearly the same tile, and
+  // drawSprite writes cells without depth-testing within a sprite, so equal
+  // depths would let the draw order decide which one wins per frame.
+  for (const p of decals) {
+    const d = (p.x - player.x) * cosA + (p.y - player.y) * sinA;
+    if (d > 0.32 && d < MAX_DEPTH) list.push({ d: d + 0.02, kind: 'p', ref: p });
+  }
   list.sort((a, b) => b.d - a.d);      // back to front
   for (const s of list) {
     if (s.kind === 'e') {
       const e = s.ref;
       const bob = e.alive && e.type === 'drone' ? Math.sin(e.bob) * 0.12 : 0;
       drawSprite(enemySprite(e), e.x, e.y, zbuf, horizon, bob);
+    } else if (s.kind === 'p') {
+      drawSprite(s.ref.spr, s.ref.x, s.ref.y, zbuf, horizon, 0);
     } else {
       const it = s.ref;
       drawSprite(SPR[it.kind], it.x, it.y, zbuf, horizon, Math.sin(it.bob) * 0.06);
@@ -351,6 +371,12 @@ function drawWalls(zbuf, horizon, animT) {
         } else {
           color = fade(COLOR.steelD, dist);
         }
+      } else if (cell.tag === 'panel' && cell.jamb) {
+        // The reveal a door retracts into. Steel rather than concrete, so the
+        // recess a thin door sits in reads as a frame around it instead of as
+        // more corridor. Flagged at parse time; see the jamb pass in level.js.
+        ch = (row & 1) ? '\u258A' : '\u258C';
+        color = fade(mix(COLOR.steel, COLOR.steelD, 0.55), dist);
       } else if (cell.tag === 'panel') {
         // lit office windows punched into the panelling
         const band = Math.floor(v * 6);

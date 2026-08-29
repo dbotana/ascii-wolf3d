@@ -41,6 +41,12 @@
     image-rendering: crisp-edges;
     filter: contrast(1.05) saturate(1.1);
   }
+  /* The CRT treatment. Both overlays sit ABOVE the diegetic HUD — header,
+     status bar, boss bar, prompt and toast are all z-index 3 — so the
+     scanlines and the vignette fall across the bar exactly the way they fall
+     across the viewport. The bar used to be at 7 and escaped both. The modal
+     screens (#banner / #tally at 8, #splash at 10) stay above them on
+     purpose: those are read, not inhabited. */
   #stage::before {
     content: '';
     position: absolute; inset: 0;
@@ -63,7 +69,7 @@
   header {
     position: absolute;
     top: 14px; left: 20px;
-    z-index: 7;
+    z-index: 3;
     display: flex;
     align-items: baseline;
     gap: 12px;
@@ -88,7 +94,7 @@
   #statusbar {
     position: absolute;
     left: 0; right: 0; bottom: 0;
-    z-index: 7;
+    z-index: 3;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -182,7 +188,7 @@
     position: absolute;
     top: 54px; left: 50%;
     transform: translateX(-50%);
-    z-index: 7;
+    z-index: 3;
     width: min(60%, 520px);
     text-align: center;
     pointer-events: none;
@@ -223,7 +229,7 @@
     position: absolute;
     top: 60%; left: 50%;
     transform: translate(-50%, -50%);
-    z-index: 7;
+    z-index: 3;
     font-family: 'VT323', monospace;
     font-size: 22px;
     letter-spacing: 0.12em;
@@ -243,7 +249,7 @@
     position: absolute;
     top: 20%; left: 50%;
     transform: translate(-50%, -50%);
-    z-index: 7;
+    z-index: 3;
     font-family: 'VT323', monospace;
     font-size: 20px;
     letter-spacing: 0.14em;

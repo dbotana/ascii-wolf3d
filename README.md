@@ -47,7 +47,8 @@ keycards, and an elevator out.
 | `E`             | open door / use switch / search walls |
 | `R`             | reload                            |
 | `P`             | restart floor                     |
-| `M`             | mute audio                        |
+| `Esc`           | pause (also releases the mouse)   |
+| `M`             | mute audio and music              |
 
 ### What it reuses
 
