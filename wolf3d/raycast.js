@@ -41,6 +41,13 @@ function castGrid(px, py, angle, maxD) {
       // that is behind us. Only a door with an open flank can produce one, and
       // validate-level.js refuses to ship those. An axis-aligned ray divides
       // by ~6e-17 rather than 0 and lands here too, as a huge t.
+      //
+      // Kept for the intent, not because anything rests on it: the `lat` range
+      // test below subsumes it. A crossing behind the entry face is outside the
+      // cell laterally, which that test already rejects. The only rays where
+      // the two differ are exact 45-degree corner grazes decided by one ULP,
+      // and they need geometry no floor can ship. See ray-door-behind-face in
+      // reference/mutations.js for the measurement.
       if (t < perp || t > limit) continue;
       // `lat` runs along the door's OWN fixed axis, so it is a world
       // coordinate and not a face-relative one: the same physical point on the

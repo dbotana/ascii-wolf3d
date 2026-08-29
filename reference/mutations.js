@@ -54,7 +54,7 @@ module.exports = [
   { id: 'ray-door-behind-face', group: 'MVP core', file: 'wolf3d/raycast.js',
     find: 'if (t < perp || t > limit) continue;',
     replace: 'if (t > limit) continue;',
-    gap: 'a fixture with a door whose flank is deliberately open, so a ray can reach the mid-plane from behind the entry face — validate-level.js refuses to ship that geometry, so it has to be built by hand',
+    unkillable: 'The lat range test on the next line subsumes it for every ray that is not a degenerate corner graze. t is defined so the crossing sits ON the mid-plane in one axis, so a crossing behind the entry face is outside the cell in the OTHER axis, which `lat < 0 || lat >= 1` already rejects. Measured on hand-built open-flank geometry the validator refuses to ship: 400,000 off-grid rays, ZERO differences; 1.4M rays on a grid, five \u2014 all of them exactly 45 degrees through a tile corner, where lat lands on exactly 0 (in range, by the half-open interval) and `t < perp` is decided by a single ULP between two different expressions. Pinning that in the suite would assert a rounding accident, not a behaviour, and no shipped floor can contain the geometry: validate-level.js requires every door to be flanked on exactly one axis. The guard is kept \u2014 it states the intent and costs nothing.',
     note: 'a door mid-plane crossing BEHIND the entry face is accepted, so a door can be hit through its own tile from the wrong side' },
 
   { id: 'ray-perp-off-by-a-tile', group: 'MVP core', file: 'wolf3d/raycast.js',
@@ -310,7 +310,6 @@ module.exports = [
   { id: 'nav-ignores-slab', group: 'Phase 2', file: 'wolf3d/nav.js',
     find: 'if (movingSecrets.length && inSlab(gx + 0.5, gy + 0.5)) return false;',
     replace: 'if (false) return false;',
-    gap: 'a fixture where the only route runs through a push-wall mid-slide, asserting navPassable refuses it for the ~1.1s it is in transit',
     note: 'the flow field routes straight through a push-wall in transit' },
 
   { id: 'nav-seed-not-player', group: 'Phase 2', file: 'wolf3d/nav.js',
@@ -321,7 +320,6 @@ module.exports = [
   { id: 'nav-stale-until-timer', group: 'Phase 2', file: 'wolf3d/nav.js',
     find: 'if (navRebuildT > 0 && (player.x | 0) === navSeedX && (player.y | 0) === navSeedY) return;',
     replace: 'if (navRebuildT > 0) return;',
-    gap: 'walk the player across a tile line and assert navSeedX/navSeedY follow within one frame rather than waiting out NAV_REBUILD',
     note: 'the field is never rebuilt on a tile crossing, only on the 0.35s timer — enemies chase where you were' },
 
   { id: 'nav-step-uphill', group: 'Phase 2', file: 'wolf3d/nav.js',
@@ -386,7 +384,6 @@ module.exports = [
     if (!a.alive) continue;`,
     replace: `    const a = enemies[i];
     if (false) continue;`,
-    gap: 'kill a body, record where it fell, crowd it with live ones and assert it has not moved — corpses are scenery',
     note: 'separation acts on corpses, so bodies creep away from where they fell and drift out from under their own blood' },
 
   { id: 'separate-through-walls', group: 'Phase 2', file: 'wolf3d/enemies.js',
@@ -421,19 +418,16 @@ module.exports = [
   if (c) return false;`,
     replace: `  const c = cellAt(gx, gy);
   if (c && c.tag !== 'door') return false;`,
-    gap: 'a corridor fixture with a closed door on the patrol route, asserting an idle guard turns back rather than opening it',
     note: 'bored guards patrol into closed doors, so a floor of them cycles every door on it' },
 
   { id: 'patrol-ceo-paces', group: 'Phase 2', file: 'wolf3d/enemies.js',
     find: "if (e.type === 'ceo') return;",
     replace: 'if (false) return;',
-    gap: 'park the CEO idle with no sightline to the player and assert it has not moved after several seconds; needs a floor-3 spot with provably no LOS',
     note: 'the CEO patrols the boardroom instead of waiting, and can wander off its own arena' },
 
   { id: 'patrol-never-straight', group: 'Phase 2', file: 'wolf3d/enemies.js',
     find: '&& Math.random() < 0.72) return;',
     replace: '&& Math.random() < 0.0) return;',
-    gap: 'a long corridor fixture measuring how far one guard covers in a fixed window: a re-roll at every tile reads as a shuffle and covers about a third of the beat',
     note: 'a patrol re-rolls its direction at every tile, so a corridor reads as a shuffle rather than a route' },
 
   { id: 'sprite-back-view', group: 'Phase 2', file: 'wolf3d/render.js',
@@ -454,7 +448,7 @@ module.exports = [
   { id: 'fire-span-follows-rotation', group: 'Phase 2', file: 'wolf3d/combat.js',
     find: 'const { centerCol, halfW } = spriteSpan(depth, lateral, SPR[e.type].wW);',
     replace: 'const { centerCol, halfW } = spriteSpan(depth, lateral, enemySprite(e).wW);',
-    gap: 'stand a guard sideways and assert its hit span is unchanged — fire() measures against SPR[e.type] on purpose, so turning never makes a body harder to shoot',
+    unkillable: 'Every LIVE view of every type keeps the base sprite\u2019s wW on purpose (art.js: \u201cEvery rotation keeps the front sprite\u2019s wW/wH/foot\u201d) \u2014 guard/Back/Left/Right/Fire are all 1.15, drone and droneFire 1.2, ceo and ceoFire 2.5. The only frames that differ are Die and Dead, and fire() skips !e.alive before it measures, so they are unreachable. Swept exhaustively over every heading x relative bearing x live state: the two expressions are equal for every input fire() can see. The base sprite is still the honest form \u2014 turning must never make a body harder to shoot \u2014 and the invariant that makes this unkillable is now asserted in the enemy facing group, so the day a rotation is given its own width the suite goes red and this becomes killable again.',
     note: 'the hit span follows the rotated sprite, so turning sideways makes a guard measurably harder to shoot' },
 
   // ══ PHASE 3 ════════════════════════════════════════════════════════════════
@@ -580,13 +574,11 @@ module.exports = [
   { id: 'arc-alpha-unquantised', group: 'Phase 3', file: 'wolf3d/render.js',
     find: 'const a = Math.round(fade * (1 - Math.abs(k) / 5) * 4) / 4;',
     replace: 'const a = fade * (1 - Math.abs(k) / 5);',
-    gap: 'an A/B on atlas growth over equal frame counts with the arc up; the neon flicker and the rain mint entries too, so a naive before/after bills those to the feature',
     note: 'every frame of every arc fade mints a fresh (glyph, colour) atlas entry — unbounded growth toward the silent fillText degradation' },
 
   { id: 'dmgpop-alpha-unquantised', group: 'Phase 3', file: 'wolf3d/combat.js',
     find: 'const alpha = Math.round((u < 0.7 ? 1 : 1 - (u - 0.7) / 0.3) * 8) / 8;',
     replace: 'const alpha = (u < 0.7 ? 1 : 1 - (u - 0.7) / 0.3);',
-    gap: 'the same A/B over a fixed number of shots — the boot-time atlas bound cannot be re-asserted late in the run, which is a unit mismatch CLAUDE.md already records',
     note: 'damage numbers mint an atlas entry per frame per fade — 454 entries over a few hundred shots, against a suite bound of 500' },
 
   { id: 'arc-cell-aspect', group: 'Phase 3', file: 'wolf3d/render.js',
@@ -628,7 +620,6 @@ module.exports = [
   { id: 'jamb-tints-secrets', group: 'Phase 4', file: 'wolf3d/level.js',
     find: "if (n && n.tag === 'panel' && !n.secret) n.jamb = true;",
     replace: "if (n && n.tag === 'panel') n.jamb = true;",
-    gap: 'a fixture with a secret push-wall flanking a door, asserting the secret keeps its panelling while the ordinary neighbour is flagged jamb',
     note: 'a secret push-wall beside a door is tinted as a jamb and gives itself away — a secret that looks different is not a secret' },
 
   { id: 'pause-steps-world', group: 'Phase 4', file: 'wolf3d/main.js',
@@ -641,7 +632,6 @@ module.exports = [
   { id: 'pause-animates', group: 'Phase 4', file: 'wolf3d/main.js',
     find: 'if (!paused) animT += dt;',
     replace: 'animT += dt;',
-    gap: 'expose animT on the probe and assert it holds still under the banner; nothing reads it today',
     note: 'the neon flicker and the rain keep moving on a paused screen' },
 
   { id: 'pause-any-state', group: 'Phase 4', file: 'wolf3d/world.js',
@@ -657,7 +647,6 @@ module.exports = [
   { id: 'pause-keeps-mouse', group: 'Phase 4', file: 'wolf3d/world.js',
     find: 'if (document.exitPointerLock) document.exitPointerLock();',
     replace: 'void 0;',
-    gap: 'count document.exitPointerLock() calls by replacing it on the stub after load, then assert pauseGame() makes one',
     note: 'pausing does not release the mouse, which is the point of pausing for most players' },
 
   { id: 'death-one-frame', group: 'Phase 4', file: 'wolf3d/render.js',
@@ -668,7 +657,6 @@ module.exports = [
   { id: 'death-window-stretched', group: 'Phase 4', file: 'wolf3d/enemies.js',
     find: 'if (e.stateT > DEATH_TIME) e.state = \'dead\';',
     replace: 'if (e.stateT > DEATH_TIME * 4) e.state = \'dead\';',
-    gap: 'assert the dying -> dead transition lands on DEATH_TIME to within a frame; the death-frame test reads the sprite sequence, not the clock that drives it',
     note: 'the dying window runs four times as long, so a corpse sits in its animation state for nearly two seconds' },
 
   { id: 'decal-buried-in-walls', group: 'Phase 4', file: 'wolf3d/enemies.js',
@@ -689,7 +677,6 @@ module.exports = [
   { id: 'decal-no-depth-bias', group: 'Phase 4', file: 'wolf3d/render.js',
     find: "list.push({ d: d + 0.02, kind: 'p', ref: p });",
     replace: "list.push({ d: d, kind: 'p', ref: p });",
-    gap: 'assert the sort key of a splat exceeds that of the corpse on the same tile — drawSprites builds the list internally, so this needs the list exposed or the bias asserted directly',
     note: 'a splat and the corpse lying on it sort at equal depth, so draw order decides which one wins per frame and the body flickers behind its own blood' },
 
   { id: 'music-lookahead-runaway', group: 'Phase 4', file: 'wolf3d/audio.js',

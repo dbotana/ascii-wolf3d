@@ -10,7 +10,8 @@ direction arc. Phase 4 is the presentation pass: thin-wall doors with frames,
 pause, music, death frames and blood, and a HUD that no longer escapes the CRT
 overlay. Phase 5 is the infrastructure pass: CI, the mutation battery kept as
 a tool rather than rebuilt every time, persistent high scores, touch controls
-and a deployment story. Open work is
+and a deployment story. Phase 6 closed every coverage gap the battery had
+triaged, and the battery now reports none. Open work is
 ordered roughly by value per hour of work; everything finished is collected
 under **Completed** at the bottom.
 
@@ -20,55 +21,32 @@ number — line numbers drift with every edit, and the file map in
 
 ---
 
-## Phase 6 — closing the coverage gaps
-
-`node reference/mutate.js` runs 147 injected bugs against the suite. **15 of
-them survive a fully green 463-assertion run**, and every one is a real
-behaviour with no assertion behind it. (Three more survive on purpose and are
-marked `unkillable` — they cannot be observed at all, so they are not on this
-list.) Each carries a `gap:` line in
-`reference/mutations.js` saying what it would take to close, so this is a work
-list rather than a failure — the battery is a ratchet, green while the list
-holds steady and red the moment it grows or one is closed without its marker
-being dropped.
-
-Ordered by how much the behaviour would cost a player if it broke.
-
-- [ ] **Enemies route through moving push-walls** (`nav-ignores-slab`) and
-  **never re-seed the flow field on a tile crossing** (`nav-stale-until-timer`).
-  Both need a fixture: one where the only route runs through a slab mid-slide,
-  and one that walks the player across a tile line and watches `navSeedX`.
-- [ ] **A rotated guard is not harder to shoot** (`fire-span-follows-rotation`).
-  `fire()` measures against `SPR[e.type]` on purpose. Nothing asserts it, so
-  the deliberate choice looks like an oversight to the next reader.
-- [ ] **Corpses are scenery** (`separate-shoves-corpses`). Kill a body, crowd it
-  with live ones, assert it has not moved off its own blood.
-- [ ] **Patrol rules.** A closed door is a wall on patrol
-  (`patrol-through-doors`), the CEO does not pace (`patrol-ceo-paces`), and the
-  0.72 straight-line bias is what makes a corridor read as a route rather than
-  a shuffle (`patrol-never-straight`).
-- [ ] **The atlas bounds on the two quantised fades**
-  (`arc-alpha-unquantised`, `dmgpop-alpha-unquantised`). Both need an A/B over
-  equal frame counts — the neon flicker and the rain mint entries as the clock
-  runs, and a naive before/after bills those to the feature under test. Note
-  the boot-time `< 500` bound cannot simply be re-asserted late in the run;
-  that unit mismatch is already recorded in `reference/CLAUDE.md`.
-- [ ] **A secret beside a door keeps its panelling** (`jamb-tints-secrets`). A
-  secret that looks different is not a secret, and the `!n.secret` clause in
-  the jamb pass is the only thing enforcing it.
-- [ ] **Pause holds the clock and releases the mouse** (`pause-animates`,
-  `pause-keeps-mouse`). The first needs `animT` on the probe; the second needs
-  a call count on `document.exitPointerLock`, which the stub can carry.
-- [ ] **The dying window is `DEATH_TIME`** (`death-window-stretched`). The
-  death-frame test reads the sprite sequence, not the clock driving it.
-- [ ] **A splat sorts behind the corpse on it** (`decal-no-depth-bias`).
-  `drawSprites` builds its list internally, so this needs the list exposed or
-  the bias asserted directly.
-- [ ] **A door hit behind the entry face** (`ray-door-behind-face`). Needs a
-  door with a deliberately open flank — geometry `validate-level.js` refuses to
-  ship, so the fixture has to build it by hand.
-
 ## Also open
+
+- [ ] **The third atlas A/B is still on the shape that could not fail, and it is
+  the only thing standing between the game and an unbounded palette.** The
+  decal measurement in the `gore` group is the one Phase 6 did not rebuild: it
+  still reads a running total mid-suite rather than an arm per `load()`, and it
+  is still unseeded. It measures 18 entries against an idle 1, bound at 60,
+  taken 576 entries deep — so it works today only because no earlier group
+  happens to draw a splat. That is precisely the dependency that made the arc
+  and damage-pop versions unfalsifiable from Phase 3 to Phase 6, and it will
+  collapse silently the first time a decal is drawn earlier in the run.
+
+  What makes it urgent rather than tidy: **`mix()`'s `Math.round(t * 7)` is the
+  choke point for every colour in the game** — walls, sprites, decals and the
+  HUD all arrive through `fade()` → `mix()` — and unquantising it was measured
+  against the suite: `522 passed, 1 failed`, and the one failure is this
+  assertion (125 entries against its bound of 60). Not the boot `< 500` bound,
+  not the late distance-to-cap check, not either of the two new fade A/Bs, which
+  inflate both of their arms equally and so cancel it out. The single guard on
+  the atlas staying bounded is the single guard still built the wrong way.
+
+  Three things, in order: rebuild it as a seeded load-per-arm A/B like the other
+  two; add `mix-unquantised` to `reference/mutations.js` so this is a ratchet
+  fact rather than something re-derived by hand every few phases; then check
+  whether the boot bound *should* have caught it, because a `< 500` check that
+  sails through an unbounded palette is measuring the wrong thing.
 
 - [ ] **`separateEnemies` shoves exactly-coincident bodies the wrong way, once.**
   The coincident branch substitutes `d = 1` as a direction magnitude, and that
@@ -130,6 +108,95 @@ Ordered by how much the behaviour would cost a player if it broke.
 
 Newest first. Kept for the design notes — several record why an approach that
 looks obvious was not the one taken.
+
+- [x] **Phase 6 — closing the coverage gaps.** All fifteen, in one pass. The
+  suite went 463 assertions → 523 and the battery now reports **0 known gaps**:
+  thirteen closed by assertion, two reclassified `unkillable` because the
+  behaviour turned out not to be observable at all. Two of the fifteen were not
+  missing tests — they were tests that could not fail — and finding that out is
+  most of what this pass was.
+  - **The two atlas A/B tests had been green since Phase 3 and could not have
+    gone red.** They read exactly like what their `gap:` lines asked for: an
+    idle arm and an active arm over the same number of frames, so the neon
+    flicker and the rain are not billed to the feature. What they missed is that
+    **an unquantised fade converges too.** `h.t` and `p.t` advance in fixed 16ms
+    steps, so the alpha space is finite either way — ~150 entries for the arc
+    against ~6 — and by the time either measurement ran, earlier groups had
+    already minted every one of them. Both arms were measuring marginal growth
+    after saturation, which is zero under either variant. The fix is not a
+    tighter bound: it is that **each arm needs its own `load()`**, so the two
+    start from equally cold atlases.
+  - *And the rebuilt arms had to be seeded, which was nearly the next bug.* The
+    first version measured 6 for the arc — but `mkEnemy` seeds every body's
+    `bob` and `patrolT` from `Math.random`, so two loads put their enemies in
+    different places and draw different sprite-and-fog pairs. Over fifteen
+    trials the arc cost swung **between -1 and 13** against a bound of 24: noise
+    of the same order as the figure, and a bound that was one unlucky run from
+    flaking. A *constant* pin is the wrong fix — it collapses the damage-number
+    jitter to a single position and takes most of the bug with it, 33 against 65
+    where the real spread is 177 against 337. Seeded with an LCG both arms are
+    exact and repeat to the entry: **6 against 150 for the arc, 177 against 337
+    for the pop**, flat from 120 shots through 480.
+  - **`fire-span-follows-rotation` is unkillable, and this is the fourth Phase
+    todo in a row to describe a problem that was not there.** `fire()` measures
+    against `SPR[e.type]` on purpose so that turning never makes a body harder
+    to shoot — but every live view of every type already keeps the base width
+    (`art.js`: "Every rotation keeps the front sprite's wW/wH/foot"), and
+    `fire()` skips `!e.alive` before it measures, so the Die and Dead frames
+    that *do* differ are out of reach. Swept exhaustively over every heading ×
+    relative bearing × live state for all three types: the two expressions are
+    equal for every input `fire()` can see. So the deliverable is the invariant
+    rather than the test — the suite now asserts that every live view keeps the
+    base width, which is what would stop being true first, and the marker comes
+    back off the day someone gives a rotation its own.
+  - **`ray-door-behind-face` is unkillable because the `lat` range test subsumes
+    it** — the same shape as the two `scores.js` guards, where a broad catch
+    swallows its own early-out. `t` is defined so the crossing sits ON the
+    mid-plane in one axis, so a crossing behind the entry face is outside the
+    cell in the *other* axis, which `lat < 0 || lat >= 1` already rejects.
+    Measured against a real mutant on hand-built open-flank geometry: **400,000
+    off-grid rays, zero differences.** On a grid, five — every one of them
+    exactly 45° through a tile corner, where `lat` lands on exactly 0 (in range,
+    by the half-open interval) and `t < perp` is decided by a single ULP between
+    two different expressions. Pinning that would assert a rounding accident,
+    and no floor can ship the geometry anyway: `validate-level.js` requires
+    every door to be flanked on exactly one axis. The guard stays; it states
+    intent and costs nothing.
+  - *Four seams on the probe, and each one is a different kind of invisible.*
+    `navSeedX/navSeedY` and `animT` are plain module state nothing outside their
+    own file reads, so a stale flow field and a clock still running under the
+    pause banner were both unobservable. `patrolOpen` and a new `spriteList()`
+    are the other shape: the answer *is* the behaviour and the caller throws it
+    away. `spriteList()` is the one source change — the list build and its sort
+    lifted out of `drawSprites`, with the `d + 0.02` push left byte-identical so
+    the mutation's anchor still holds.
+  - **A plain corridor cannot test the 0.72 straight-line bias.** With the bias
+    gone, `fwd` still drops the way back, so the only remaining option is
+    straight ahead and both variants walk the same line — a default and a
+    correct answer coinciding, which is the third time this repo has shipped
+    that fixture. It needs junctions. And rather than sample a random walk and
+    tune a margin — the shape that already produced one flaky assertion here —
+    `Math.random` is pinned to 0.5 for the duration, which makes `< 0.72` true
+    and `< 0.0` false and nothing else. Exact both ways: the guard covers 4.31u
+    of its beat and never leaves the corridor line, against 1.0u and 302 frames
+    off it. `mkEnemy` seeds `patrolT` randomly, so that has to be zeroed too or
+    the "deterministic" fixture drifts by up to 0.65u.
+  - *A slab in transit is out of `grid` entirely*, so `inSlab` is the only thing
+    that knows it is there. The fixture asserts every frame of the whole slide,
+    because the slab covers its ORIGIN tile early and its DESTINATION tile late
+    and one sample can only ever catch one of the two — and it asserts that the
+    grid has *already* let go of the tile, which is what makes the rest of it
+    non-vacuous.
+  - *The CEO test needed a control.* "It has not moved" passes just as well on a
+    floor where nothing moves at all, so the fixture is three sealed corridors —
+    the player, the CEO, and a guard whose pacing is measured in the same
+    window. Same reason the jamb fixture asserts the ordinary neighbour IS
+    flagged, and the patrol-door fixture asserts the open direction IS open.
+  - *The death-frame test reads the sprite sequence; nothing read the clock.* It
+    sets `stateT` by hand, so a window four times as long shows the same frames
+    over the same fractions and passes unchanged. Counting frames to the
+    `dying → dead` transition lands on `DEATH_TIME` to within one, because `dt`
+    is exactly 16ms here.
 
 - [x] **Phase 5 — infrastructure.** All five items, shipped together. The suite
   went 350 assertions → 463, the mutation battery stopped being session scratch

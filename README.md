@@ -134,7 +134,7 @@ Nothing here needs a browser, and nothing needs `npm install` — there are no
 dependencies.
 
 ```sh
-node reference/run-tests.js                               # 463 assertions against the real game loop
+node reference/run-tests.js                               # 523 assertions against the real game loop
 WOLF3D_HTML=dist/wolf3d.html node reference/run-tests.js  # ...and against the shipped bundle
 node reference/validate-level.js                          # map geometry + key-gated reachability
 node reference/check-structure.js                         # src tags resolve, no ESM, dist current

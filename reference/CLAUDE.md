@@ -74,11 +74,11 @@ the bundler and the harness both read it rather than keeping their own list.
 | `wolf3d/touch.js` | 215 | the twin-stick overlay: stick math, look pad, buttons |
 | `wolf3d/world.js` | 305 | grid + entities, difficulty, pause, grid queries, doors, push-walls |
 | `wolf3d/level.js` | 182 | `populateEnemies`, `parseLevel` (incl. the door-axis pass), `startLevel`, `nextLevel` |
-| `wolf3d/raycast.js` | 85 | DDA raycast incl. thin-wall doors, `hasLOS`, `spriteSpan` |
+| `wolf3d/raycast.js` | 92 | DDA raycast incl. thin-wall doors, `hasLOS`, `spriteSpan` |
 | `wolf3d/nav.js` | 103 | the BFS flow field |
 | `wolf3d/enemies.js` | 379 | FSM, steering, patrols, separation, loot, blood, the CEO |
-| `wolf3d/combat.js` | 247 | the roster lookup, firing, the magazine cycle, damage numbers, pickups |
-| `wolf3d/render.js` | 392 | `drawWalls`, sprites, decals, the weapon view-model, crosshair, the damage arc |
+| `wolf3d/combat.js` | 250 | the roster lookup, firing, the magazine cycle, damage numbers, pickups |
+| `wolf3d/render.js` | 399 | `drawWalls`, sprites, decals, the weapon view-model, crosshair, the damage arc |
 | `wolf3d/hud.js` | 336 | toasts, banners, status bar, health bar, the tally screen |
 | `wolf3d/main.js` | 190 | `updatePlayer`, `frame`, boot |
 
@@ -535,7 +535,7 @@ last floor sets `gameState = 'won'` and shows the OUT banner instead.
 Run all of these before shipping any change. None of them needs a browser.
 
 ```sh
-node reference/run-tests.js                              # 463 assertions against the real game loop
+node reference/run-tests.js                              # 523 assertions against the real game loop
 WOLF3D_HTML=dist/wolf3d.html node reference/run-tests.js # ...and against the shipped bundle
 node reference/validate-level.js                         # map geometry + key-gated reachability, all 3 floors
 node reference/bundle.js                                 # rebuild dist/wolf3d.html
@@ -590,7 +590,11 @@ tally payout, the CEO fight, the Phase 2 movement systems (flow field,
 separation, patrols, rotations) and the Phase 3 combat systems (the weapon
 roster, spread, difficulty scaling, the damage arc) and the Phase 4
 presentation systems (thin-wall doors, pause, death frames, blood decals, the
-music table and its scheduler).
+music table and its scheduler). The Phase 6 pass added the assertions behind the
+battery's last fifteen triaged survivors: the flow field against a slab in
+transit and against a tile crossing, corpses as scenery, the three patrol rules,
+both quantised fades, the jamb clause, the pause clock and pointer lock, the
+death window, and the decal depth bias.
 
 Three ordering rules bite here. `startLevel()` with no argument restarts the
 **current** floor, so any test that has moved off floor 1 must reset explicitly
@@ -618,10 +622,21 @@ Three things about it are load-bearing:
   hunting a coverage gap that does not exist. A mismatch is a hard error, and
   `--list` alone is enough to tell you the catalog has rotted.
 - **`unkillable: '<reason>'` marks a mutation that cannot be observed at all** —
-  not merely uncovered. There is one, documented under "The view-dependent
-  slide" below. It is EXPECTED to survive, and a marked mutation that dies is a
+  not merely uncovered. There are five, and the reason strings carry the proof:
+  the view-dependent slide documented below, two `scores.js` early-outs an
+  enclosing `try/catch` subsumes, `fire-span-follows-rotation` (every live view
+  of every type keeps the base sprite's width, so the two expressions are equal
+  for every input `fire()` can see) and `ray-door-behind-face` (the `lat` range
+  test subsumes the entry-face guard for every ray that is not an exact corner
+  graze, and the geometry it would need is geometry `validate-level.js` refuses
+  to ship). It is EXPECTED to survive, and a marked mutation that dies is a
   failure too: it means a test is claiming coverage it cannot have.
-- **`gap: '<what it would take>'` marks a triaged survivor.** Real news the
+  **Reclassifying `gap:` to `unkillable:` is a real outcome**, not a retreat —
+  three of the five were found by trying to build the fixture and measuring
+  what came back.
+- **`gap: '<what it would take>'` marks a triaged survivor.** There are none
+  left as of Phase 6; the field stays because the next new system will need it.
+  Real news the
   first time and noise every run after, so it is reported loudly without
   failing the run. What fails is movement in either direction — a new survivor,
   or a gap closed without dropping its marker. That makes the battery a
@@ -689,6 +704,34 @@ wall — `place()` in `run-tests.js` exists to avoid that, checking both
 `g.els.id`; banner elements don't exist until the game first asks for them, and
 reaching into `els` directly will crash a failing test instead of reporting it.
 
+**Every fixture needs a control.** "The CEO has not moved" passes just as well
+on a floor where nothing moves at all, so the CEO fixture measures a guard
+pacing in the same window. "The secret is not tinted as a jamb" passes if the
+jamb pass never ran, so the jamb fixture asserts the ordinary neighbour IS
+flagged. "A patrol never crosses the door" passes if it never walks anywhere, so
+that fixture asserts the open direction IS open and that the guard did move.
+Write the assertion that fails when the fixture is wrong, next to the one that
+fails when the code is.
+
+**Pin `Math.random` rather than tuning a margin**, where the randomness is a
+single predicate. The 0.72 patrol bias needs junction geometry to be observable
+at all, and sampling a random walk over enough trials to beat the noise is the
+shape that already shipped one flaky assertion here. Pinning it to 0.5 makes
+`< 0.72` true and `< 0.0` false and changes nothing else, which turns the whole
+test into an exact one. Restore it in a `finally`, and remember `mkEnemy` seeds
+`patrolT` from `Math.random()` at spawn — before any pin — so that has to be
+zeroed too or the "deterministic" fixture drifts.
+
+**But a constant is the wrong pin when the randomness IS the variety.** The two
+atlas A/B arms shipped unseeded and swung between -1 and 13 entries against a
+bound of 24 — noise of the same order as the figure — because `mkEnemy` seeds
+every body's `bob` and `patrolT` from `Math.random`, so two loads draw different
+sprite-and-fog pairs. Pinning to 0.5 fixed the noise and broke the test: it
+collapses the damage-number jitter to one position and takes most of the bug
+with it, 33 against 65 where the honest spread is 177 against 337. Seed with an
+LCG instead. **Ask what the randomness is doing** — gating one predicate, or
+generating the spread you are measuring.
+
 **Make sure the assertion can fail for the reason you think.** The first
 single-use push-wall test stood a secret against solid rock and checked it did
 not move. It passed — but it would have passed with the phase guard deleted too,
@@ -748,6 +791,18 @@ Every tool here exits non-zero on failure, so they drop straight into CI.
   palette to ~580. The assertion measured which groups happen to run first, not
   the feature under test. Bounds have a place in the run; re-asserting a
   boot-time one later is a unit mismatch.
+- **And the A/B that replaced it could not fail either, for three phases.** It
+  did the right-looking thing — an idle arm and an active arm over the same
+  number of frames, so the neon flicker and the rain are not billed to the
+  feature — and it was still measuring nothing. **A fade driven by a fixed frame
+  clock has a FINITE alpha space whether or not it is quantised.** `h.t` advances
+  in 16ms steps, so an unquantised arc mints ~150 distinct entries rather than an
+  unbounded stream, and by the time a late group measures it, earlier groups have
+  already minted all 150. Marginal growth after saturation is zero under either
+  variant. When you A/B a cache, **the arms have to start from equally cold
+  state** — which here means a `load()` per arm, because a running total can
+  never be that. Same family as the unit mismatch above: both assertions were
+  reading a number that had already stopped moving.
 - **A test that measured time-to-death and called it a rate.** The Phase 3
   attack-delay assertion drove a guard through the FSM and counted entries into
   `attack` — but it re-armed the state by hand every time the guard left it,

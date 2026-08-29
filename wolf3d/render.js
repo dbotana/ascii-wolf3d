@@ -79,7 +79,10 @@ function enemySprite(e) {
   return rel > 0 ? SPR.guardLeft : SPR.guardRight;
 }
 
-function drawSprites(zbuf, horizon) {
+// Everything the sprite pass draws this frame, sorted back to front. Split out
+// of drawSprites because the ORDER is the behaviour and the blit is not: a list
+// built inside the draw loop can only be checked through pixels we never make.
+function spriteList() {
   const cosA = Math.cos(player.a), sinA = Math.sin(player.a);
   const list = [];
   for (const e of enemies) {
@@ -100,7 +103,11 @@ function drawSprites(zbuf, horizon) {
     if (d > 0.32 && d < MAX_DEPTH) list.push({ d: d + 0.02, kind: 'p', ref: p });
   }
   list.sort((a, b) => b.d - a.d);      // back to front
-  for (const s of list) {
+  return list;
+}
+
+function drawSprites(zbuf, horizon) {
+  for (const s of spriteList()) {
     if (s.kind === 'e') {
       const e = s.ref;
       const bob = e.alive && e.type === 'drone' ? Math.sin(e.bob) * 0.12 : 0;

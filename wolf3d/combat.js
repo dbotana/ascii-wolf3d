@@ -118,6 +118,9 @@ function fire() {
     // is not something you can stab, however far in front of you it projects.
     if (w.reach && Math.hypot(ex, ey) > w.reach) continue;
     const lateral = -ex * sinA + ey * cosA;
+    // SPR[e.type], not enemySprite(e): the hit span is the body's, not the
+    // view's, so turning sideways never makes a guard harder to shoot. Safe
+    // only while every live view keeps the base width — asserted in the suite.
     const { centerCol, halfW } = spriteSpan(depth, lateral, SPR[e.type].wW);
     if (Math.abs(centerCol - aimCol) > halfW) continue;
     if (!hasLOS(player.x, player.y, e.x, e.y)) continue;

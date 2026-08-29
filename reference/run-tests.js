@@ -251,6 +251,63 @@ P.startLevel();
   grid[seal[1]][seal[0]] = 0;
 }
 
+// ...and the other half of that rule: crossing a tile line re-seeds the field
+// IMMEDIATELY rather than waiting the 0.35s out. A field that only ever follows
+// its timer is stale by however far you have walked, which reads as a guard
+// chasing where you were. One frame is the whole test: 0.016s into a 0.35s
+// period, the timer clause cannot be what moved the seed.
+P.startLevel();
+{
+  P.player.x = 20.5; P.player.y = 38.5;
+  run(1);                                            // seeds, and arms a full period
+  const home = P.navSeed();
+  ok(home.x === 20 && home.y === 38,
+     `the field is seeded on the player's own tile (${home.x},${home.y})`);
+
+  const dir = [[1, 0], [-1, 0], [0, 1], [0, -1]].find(d => P.navPassable(20 + d[0], 38 + d[1]));
+  ok(dir !== undefined, 'test setup: the spawn tile has a passable neighbour to step onto');
+  P.player.x = 20.5 + dir[0]; P.player.y = 38.5 + dir[1];
+  run(1);
+  const moved = P.navSeed();
+  ok(moved.x === 20 + dir[0] && moved.y === 38 + dir[1],
+     `a tile crossing re-seeds within ONE frame, not after 0.35s ` +
+     `(${moved.x},${moved.y} after stepping to ${20 + dir[0]},${38 + dir[1]})`);
+  ok(P.navAt(moved.x, moved.y) === 0, 'and the new tile is the zero of the rebuilt field');
+}
+
+// corpses are scenery. Separation acts on the living only: a body that creeps
+// away from where it fell drifts out from under its own blood, and the splat
+// stays where the kill happened.
+P.startLevel();
+freezeEnemies();
+{
+  const es = P.enemies();
+  // The guard under test is the OUTER loop's `a`, so the crowd has to sit at
+  // HIGHER indices than the corpse — that is the pairing the missing
+  // `if (!a.alive) continue` would shove.
+  const corpse = es.find(e => e.alive && e.type !== 'ceo');
+  const at = es.indexOf(corpse);
+  const crowd = es.filter((e, j) => j > at && e.alive && e.type !== 'ceo').slice(0, 3);
+  ok(crowd.length === 3, `test setup: three live bodies follow the corpse in the roster`);
+
+  corpse.x = 20.5; corpse.y = 36.5;
+  corpse.hp = 0; corpse.alive = false; corpse.state = 'dead';
+  const fell = { x: corpse.x, y: corpse.y };
+  for (const e of crowd) { e.x = 20.5; e.y = 36.5; }
+
+  for (let n = 0; n < 24; n++) P.separate();
+  ok(corpse.x === fell.x && corpse.y === fell.y,
+     `a corpse crowded by three live bodies has not moved off its own blood ` +
+     `(${corpse.x.toFixed(3)},${corpse.y.toFixed(3)})`);
+  // ...and this can fail for the right reason: the living really did come apart
+  let closest = Infinity;
+  for (let a = 0; a < crowd.length; a++)
+    for (let b = a + 1; b < crowd.length; b++)
+      closest = Math.min(closest, Math.hypot(crowd[a].x - crowd[b].x, crowd[a].y - crowd[b].y));
+  ok(closest > 0.6,
+     `while the live bodies stacked on top of it did (closest pair ${closest.toFixed(3)}u)`);
+}
+
 // heading is written by moveEnemy — the one primitive every mover goes through
 {
   const e = firstGuard();
@@ -324,6 +381,45 @@ P.startLevel();
   ok([SPRT.guardBack, SPRT.guardLeft, SPRT.guardRight]
        .every(a => a.wW === SPRT.guard.wW && a.wH === SPRT.guard.wH && a.foot === SPRT.guard.foot),
      'every rotation keeps the front sprite\'s footprint, so turning never resizes a guard');
+}
+
+// ── and the reason that footprint rule matters, stated where it can go red.
+//    fire() measures a body's hit span against SPR[e.type] rather than against
+//    the view being drawn, on purpose: turning sideways must never make a guard
+//    harder to shoot. That choice is only SAFE because every live view of every
+//    type keeps the base width — so swapping the two expressions in fire() is
+//    unobservable today, and this is what would stop being true first. Driven
+//    through enemySprite on real poses rather than by indexing the table, so it
+//    covers the firing frame and the rotation branch alike.
+{
+  const SPRT = P.spr();
+  const pose = { x: 0, y: 0, alive: true, state: 'idle', heading: 0, stateT: 0 };
+  const off = [];
+  let poses = 0;
+  for (const type of ['guard', 'drone', 'ceo']) {
+    pose.type = type;
+    for (let k = 0; k < 24; k++) {
+      pose.x = P.player.x + Math.cos(k / 24 * Math.PI * 2) * 3;
+      pose.y = P.player.y + Math.sin(k / 24 * Math.PI * 2) * 3;
+      for (let h = 0; h < 24; h++) {
+        pose.heading = h / 24 * Math.PI * 2;
+        for (const st of ['idle', 'chase', 'attack', 'hurt']) {
+          pose.state = st;
+          poses++;
+          const w = P.enemySprite(pose).wW;
+          if (w !== SPRT[type].wW) off.push(`${type}/${st} ${w} != ${SPRT[type].wW}`);
+        }
+      }
+    }
+  }
+  ok(off.length === 0,
+     `every LIVE view of every type keeps the base sprite's width, which is what ` +
+     `lets fire() measure against SPR[e.type] (${off[0] || poses + ' poses'})`);
+  // ...and this is not vacuous: the frames that DO differ are the ones fire()
+  // cannot reach, because it skips !e.alive before it ever measures a span.
+  ok(SPRT.guardDie.wW !== SPRT.guard.wW && SPRT.guardDead.wW !== SPRT.guard.wW,
+     `while the death frames are deliberately wider (${SPRT.guardDie.wW} and ` +
+     `${SPRT.guardDead.wW} against ${SPRT.guard.wW}) — a body is out of reach of fire()`);
 }
 
 // ── combat ───────────────────────────────────────────────────────────────────
@@ -940,60 +1036,9 @@ ok(P.hitDirs().length === 2, 'but a shot from elsewhere adds its own');
 run(60);
 ok(P.hitDirs().length === 0, 'and they expire');
 
-// The arc redraws every frame it is alive, so its fade has to be quantised:
-// every distinct (glyph, colour) pair is an atlas entry, and a continuous
-// alpha stringified per frame mints a fresh one each time. The property that
-// matters is not a magic number, it is that the cost CONVERGES — so this
-// measures the atlas after a burst of arcs and again after five times as many.
-//
-// Measured as an A/B over the SAME number of frames, because ordinary
-// rendering — the neon flicker, the rain — mints entries of its own as the
-// clock advances, and a naive before/after would bill those to the arc.
-P.startLevel();
-run(600);                                  // let the background palette settle
-const settled = P.atlasSize();
-run(1000);                                 // 1000 quiet frames
-const quietCost = P.atlasSize() - settled;
-const beforeArcs = P.atlasSize();
-for (let i = 0; i < 200; i++) {            // 1000 frames, 200 arcs
-  P.player.hp = 100;
-  P.hurtPlayer(1, P.player.x + Math.cos(i) * 3, P.player.y + Math.sin(i) * 3);
-  run(5);
-}
-const arcCost = P.atlasSize() - beforeArcs;
-ok(arcCost - quietCost <= 8,
-   `200 arcs cost at most the 8 (glyph, colour) pairs a 4-step fade can make ` +
-   `(${arcCost} entries over 1000 frames vs ${quietCost} for the same frames idle)`);
-
-// The damage-number pop fade is the pre-existing sibling of the arc fade above
-// — the one that was found unquantised while fixing the arc — and it needs
-// its own assertion for the same reason: nothing else in the suite fires
-// enough shots to trip the boot-time `atlasSize() < 500` check before this
-// point, so a regression here would pass every other assertion clean.
-// Unquantised, 40 shots cost ~375 atlas entries; quantised to 8 steps it
-// converges. Same A/B shape as the arc, same reason: ordinary rendering
-// mints entries of its own as frames advance.
-P.startLevel();
-run(600);
-const popSettled = P.atlasSize();
-run(300);
-const popQuietCost = P.atlasSize() - popSettled;
-const popFoe = firstGuard();
-const beforePops = P.atlasSize();
-for (let i = 0; i < 40; i++) {
-  popFoe.hp = 1e9; popFoe.x = P.player.x + 2; popFoe.y = P.player.y; P.player.a = 0;
-  P.player.fireCd = 0; P.player.ammo = 500; P.player.clip = 8;
-  P.fire(); run(5);
-}
-const popCost = P.atlasSize() - beforePops;
-// Measured convergence at 8-step quantisation: ~293 entries flat through 320+
-// shots (hit/kill colour x jitter position x shadow row all multiply against
-// the 8 alpha steps). Unquantised the same 40 shots cost ~375 on their own and
-// never stop growing. 100 is comfortably below "never converges" and above
-// the honest quantised cost.
-ok(popCost - popQuietCost < 100,
-   `40 damage-number pops cost a bounded handful of (glyph, colour) pairs, ` +
-   `not an unbounded ~375 (${popCost} entries vs ${popQuietCost} idle)`);
+// The two quantised fades — the arc's and the damage pop's — are measured in
+// their own group at the end of the file. They need a load per arm, and a load
+// replaces process globals, so they cannot run from here.
 
 // ── music ────────────────────────────────────────────────────────────────────
 // The harness has no AudioContext, so initAudio fails its try/catch and every
@@ -1115,6 +1160,24 @@ P.startLevel();
   ok(P.enemySprite(foe) === SPRT.guardDead, 'then the corpse frame, as before');
   foe.alive = true; foe.state = 'chase'; foe.stateT = 0;
 
+  // ── ...and the CLOCK driving those frames is DEATH_TIME, which the sequence
+  //    test above cannot see: it sets stateT by hand, so a window four times
+  //    as long shows the same four frames over the same fractions and passes
+  //    unchanged. What a stretched window costs is a body left twitching in
+  //    its animation state for nearly two seconds. dt is exactly 16ms here,
+  //    so this lands to within one frame.
+  {
+    freezeEnemies();
+    const dying = firstGuard();
+    dying.hp = 0; dying.alive = false; dying.state = 'dying'; dying.stateT = 0;
+    let frames = 0;
+    while (dying.state === 'dying' && frames < 600) { run(1); frames++; }
+    const took = frames * 0.016;
+    ok(dying.state === 'dead', `the dying window ends (after ${frames} frames)`);
+    ok(took > DT && took - DT <= 0.017,
+       `and it ends ON DEATH_TIME, within a frame (${took.toFixed(3)}s against ${DT}s)`);
+  }
+
   // ── decals. A drone is machinery and leaves none; that asymmetry is the
   //    cheapest thing to get wrong by making spillBlood unconditional.
   P.startLevel();
@@ -1149,6 +1212,37 @@ P.startLevel();
      `the decal list is capped at ${P.decalCap()} (${P.decals().length} after 300 kills' worth)`);
   P.startLevel();
   ok(P.decals().length === 0, 'and a floor start wipes it');
+
+  // ── a splat sorts BEHIND the corpse lying on it. Both sit at foot height on
+  //    nearly the same tile, and drawSprite writes cells without depth-testing
+  //    WITHIN a sprite, so at equal depth the draw order decides which one wins
+  //    and the body flickers behind its own blood. The ordering is the whole
+  //    behaviour and the blit is not, which is why spriteList() is a seam.
+  freezeEnemies();
+  {
+    const body = firstGuard();
+    P.player.a = 0;
+    body.x = P.player.x + 3; body.y = P.player.y;
+    body.hp = 0; body.alive = false; body.state = 'dead';
+    P.decals().length = 0;
+    P.spillBlood(body);
+    ok(P.decals().length > 0, 'test setup: the corpse bled');
+    // park the splat exactly under the body — the +-0.35 jitter is a different
+    // test, and here it would be the thing being measured
+    const splat = P.decals()[P.decals().length - 1];
+    splat.x = body.x; splat.y = body.y;
+
+    const L = P.spriteList();
+    const se = L.find(x => x.kind === 'e' && x.ref === body);
+    const sp = L.find(x => x.kind === 'p' && x.ref === splat);
+    ok(se && sp, 'test setup: the corpse and its splat are both in the sprite list');
+    ok(sp.d > se.d,
+       `a splat sorts deeper than the corpse it lies under ` +
+       `(${sp.d.toFixed(4)} against ${se.d.toFixed(4)})`);
+    ok(L.indexOf(sp) < L.indexOf(se),
+       'so the back-to-front pass draws it first, which is behind');
+  }
+  P.startLevel();
 
   // ── atlas cost, as an A/B over the SAME number of frames — the neon flicker
   //    and the rain mint entries as the clock advances, and a naive
@@ -1215,6 +1309,7 @@ freezeEnemies();
   const before = {
     x: P.player.x, y: P.player.y, t: P.levelTime(),
     open: door.open, bob: foe.bob, hp: g.el('hpChip').style.width,
+    anim: P.animT(),
   };
 
   ok(P.togglePause() === true, 'togglePause() pauses a floor in play');
@@ -1231,6 +1326,12 @@ freezeEnemies();
      'and stepEnemies is skipped outright, not merely gated — e.bob is frozen');
   ok(g.el('hpChip').style.width === before.hp,
      'the health chip stops draining too');
+  // animT is the presentation clock: the neon flicker and the window rain are
+  // both driven off it, and a paused screen that keeps shimmering is a screen
+  // that never stopped. Nothing else in the game reads it, so nothing else
+  // would have noticed.
+  ok(P.animT() === before.anim,
+     `the animation clock holds too (${P.animT().toFixed(3)}s)`);
   ok(g.el('bTitle').textContent === 'PAUSED', 'the pause banner is up');
 
   // ── resume, and everything picks up where it left off
@@ -1242,6 +1343,22 @@ freezeEnemies();
   ok(P.levelTime() > before.t, 'the clock runs again');
   ok(door.open > before.open, `the door resumes opening (${door.open.toFixed(3)})`);
   ok(foe.bob > before.bob, 'and the enemy loop is stepping again');
+  ok(P.animT() > before.anim, 'and the neon starts flickering again');
+
+  // ── pausing releases the mouse, which is most of the point of pausing. The
+  //    stub is a no-op, so the only way to see the call is to count it.
+  {
+    const real = g.doc.exitPointerLock;
+    let unlocks = 0;
+    g.doc.exitPointerLock = () => { unlocks++; };
+    try {
+      ok(P.pauseGame() === true, 'test setup: the floor pauses');
+      ok(unlocks === 1, `pausing releases the pointer lock exactly once (${unlocks})`);
+      unlocks = 0;
+      ok(P.resumeGame() === true, 'test setup: and resumes');
+      ok(unlocks === 0, 'resuming does not touch the lock — the player re-grabs it by clicking');
+    } finally { g.doc.exitPointerLock = real; }
+  }
 
   // ── E resumes as well, which is the path that matters when a browser has
   //    swallowed the Esc keydown to exit pointer lock and Esc never arrives.
@@ -2635,6 +2752,336 @@ group('high scores (storage fixtures)');
   ok(f9.P.scores().length === 1, 'getting out does file one');
   ok(f9.P.scores()[0].won === true, 'marked as an escape');
   ok(f9.P.state() === 'won', 'and the floor is won');
+}
+
+// ── a slab in transit seals the route (fixture) ──────────────────────────────
+// A push-wall mid-slide is out of `grid` entirely — pushSecret hands the tile
+// back before the slab has gone anywhere — so `inSlab` is the ONLY thing that
+// knows it is there. blockAt already asks; navPassable has to ask too, or the
+// flow field routes a chaser straight through a moving wall for the ~1.1s it
+// is in transit.
+//
+// A sealed one-row corridor, so the secret is the only link between the two
+// halves and there is no way around for the field to find.
+group('the flow field and a moving slab (fixture)');
+{
+  const f = loadWithLevel([
+    '##########',
+    '#@..S...X#',
+    '##########',
+  ], { htmlPath: process.env.WOLF3D_HTML });
+  const F = f.P;
+  const s = F.secrets()[0];
+  ok(s && s.gx === 4 && s.gy === 1, `test setup: the secret is the corridor's only link (${s && s.gx},${s && s.gy})`);
+
+  F.player.x = 3.5; F.player.y = 1.5; F.player.a = 0;
+  f.run(2);
+  F.buildNav();
+  ok(F.navAt(7, 1) === -1, 'test setup: the far half is unreachable while the slab is seated');
+
+  F.use();
+  f.run(1);
+  ok(s.phase === 'moving', `the secret is mid-slide (phase=${s.phase}, span=${s.span})`);
+
+  // Sampled every frame of the whole transit rather than once: the slab covers
+  // its ORIGIN tile early in the slide and its DESTINATION tile late, so a
+  // single sample can only ever catch one of the two.
+  let frames = 0, gridReleased = 0, sealed = 0, routed = 0;
+  while (s.phase === 'moving' && frames < 200) {
+    const cx = (s.gx + s.dx * s.push + 0.5) | 0;
+    const cy = (s.gy + s.dy * s.push + 0.5) | 0;
+    // the grid has ALREADY let go of the origin tile — this is what makes the
+    // assertion below non-vacuous, because nothing but inSlab is holding it
+    if (F.cellAt(4, 1) === 0) gridReleased++;
+    if (!F.navPassable(cx, cy)) sealed++;
+    F.buildNav();
+    if (F.navAt(7, 1) === -1) routed++;
+    f.run(1); frames++;
+  }
+  ok(frames > 30, `the slide lasts a real window (${frames} frames, ~${(frames * 0.016).toFixed(2)}s)`);
+  ok(gridReleased === frames,
+     `the grid released the slab's tile the moment it was pushed (${gridReleased}/${frames} frames)`);
+  ok(sealed === frames,
+     `and navPassable refuses the tile the slab covers on every one of them (${sealed}/${frames})`);
+  ok(routed === frames,
+     `so the corridor stays severed for the whole slide (${routed}/${frames} frames unreachable)`);
+
+  // and once it lands, the ordinary grid path takes over again
+  ok(s.phase === 'done', `the slab landed (phase=${s.phase} at ${s.gx},${s.gy})`);
+  ok(!F.navPassable(s.gx, s.gy), 'a landed slab is impassable as an ordinary solid cell');
+}
+
+// ── a closed door is a wall on patrol (fixture) ──────────────────────────────
+// Only a CHASER opens doors: openDoorAhead is on the chase path and nowhere
+// else. Without the cell test in patrolOpen a floor of bored guards would pick
+// door tiles as destinations and lean on every door on it. The player sits
+// behind the closed door, which blocks line of sight, so the guard stays idle.
+group('patrols and doors (fixture)');
+{
+  const f = loadWithLevel([
+    '##########',
+    '#g..D..@.#',
+    '##########',
+  ], { htmlPath: process.env.WOLF3D_HTML });
+  const F = f.P;
+  const guard = F.enemies().find(e => e.type === 'guard');
+  const door = F.doors()[0];
+  ok(guard && door, 'test setup: a guard and a door');
+  ok(door.lock === null && door.phase === 'closed' && door.open === 0,
+     `test setup: the door is closed and unlocked (${door.phase})`);
+  ok(!F.hasLOS(F.player.x, F.player.y, guard.x, guard.y),
+     'test setup: the closed door hides the player, so the guard stays idle');
+
+  // the predicate itself, from the tile beside the door, where the two answers
+  // differ — one direction is open floor and the other is the door
+  guard.x = 3.5; guard.y = 1.5;
+  ok(F.patrolOpen(guard, [-1, 0]) === true, 'open floor is open to a patrol');
+  ok(F.patrolOpen(guard, [1, 0]) === false, 'and a closed door is not — it is a wall');
+
+  // ...and the behaviour that rests on it: a destination is never latched on
+  // the door's tile, so the guard turns back instead of leaning on it
+  guard.x = 1.5; guard.y = 1.5;
+  let onDoor = 0, moved = 0;
+  const from = { x: guard.x, y: guard.y };
+  for (let i = 0; i < 600; i++) {
+    f.run(1);
+    if (Math.abs(guard.patrolTX - 4.5) < 1e-9 && Math.abs(guard.patrolTY - 1.5) < 1e-9) onDoor++;
+    if (Math.hypot(guard.x - from.x, guard.y - from.y) > 0.25) moved = 1;
+  }
+  ok(guard.state === 'idle', `the guard never woke (state=${guard.state})`);
+  ok(moved === 1, 'test setup: it did patrol, so this can fail for the right reason');
+  ok(onDoor === 0, `it never aims at the door's tile over 10s (${onDoor} frames)`);
+  ok(guard.x < 4, `and never gets past it (x=${guard.x.toFixed(2)})`);
+  ok(door.phase === 'closed' && door.open === 0,
+     `the door is untouched — only a chaser opens one (${door.phase})`);
+}
+
+// ── the board does not pace the halls (fixture) ──────────────────────────────
+// Three sealed corridors: the player, the CEO, and a guard as the control. The
+// CEO has to be measured against something that DOES patrol, or the assertion
+// passes just as well on a floor where nothing moves at all.
+group('the CEO does not patrol (fixture)');
+{
+  const f = loadWithLevel([
+    '##########',
+    '#@.......#',
+    '##########',
+    '#..C.....#',
+    '##########',
+    '#..g.....#',
+    '##########',
+  ], { htmlPath: process.env.WOLF3D_HTML });
+  const F = f.P;
+  const ceo = F.boss();
+  const guard = F.enemies().find(e => e.type === 'guard');
+  ok(ceo && ceo.type === 'ceo', 'test setup: the CEO is on the floor');
+  ok(guard, 'test setup: and a guard, walled off from it, as the control');
+  ok(!F.hasLOS(F.player.x, F.player.y, ceo.x, ceo.y),
+     'test setup: the CEO has no sightline to the player');
+  ok(Math.hypot(ceo.x - guard.x, ceo.y - guard.y) > 1.5,
+     'test setup: the two are far enough apart that separation never touches them');
+
+  const c0 = { x: ceo.x, y: ceo.y }, g0 = { x: guard.x, y: guard.y };
+  f.run(500);                                        // 8s
+  ok(ceo.state === 'idle', `the CEO stayed idle (state=${ceo.state})`);
+  ok(ceo.x === c0.x && ceo.y === c0.y,
+     `and has not moved a millimetre (${ceo.x.toFixed(3)},${ceo.y.toFixed(3)})`);
+  ok(Math.hypot(guard.x - g0.x, guard.y - g0.y) > 0.25,
+     `while the guard beneath it paced ${Math.hypot(guard.x - g0.x, guard.y - g0.y).toFixed(2)}u`);
+}
+
+// ── a corridor reads as a route, not a shuffle (fixture) ─────────────────────
+// The 0.72 straight-line bias is the whole difference between a guard walking
+// a beat and one milling about: without it a direction is re-rolled at every
+// tile, and each re-roll that turns costs a 0.6-2.0s dwell on top.
+//
+// Two things this fixture has to get right. A plain one-wide corridor does NOT
+// discriminate — with the bias gone, `fwd` still drops the way back, so the
+// only remaining option is straight ahead and both variants walk the same line.
+// It needs JUNCTIONS. And Math.random is pinned for the duration, so this is an
+// exact assertion rather than a sampled one: a margin tuned against a random
+// walk is the shape that already shipped one flaky assertion here.
+//
+//   row 3/5:  ##.#.#.###   stubs at x=2, 4, 6 — the junctions
+//   row 4:    #g.......#   the beat; x=1 is a dead end, so the first pick is
+//                          forced east and never depends on the pinned value
+group('the patrol straight-line bias (fixture)');
+{
+  const f = loadWithLevel([
+    '##########',
+    '#@.......#',
+    '##########',
+    '##.#.#.###',
+    '#g.......#',
+    '##.#.#.###',
+    '##########',
+  ], { htmlPath: process.env.WOLF3D_HTML });
+  const F = f.P;
+  const gd = F.enemies().find(e => e.type === 'guard');
+  ok(gd && gd.spawnX === 1.5 && gd.spawnY === 4.5,
+     `test setup: the guard starts in the corridor's west dead end (${gd && gd.spawnX},${gd && gd.spawnY})`);
+  ok(!F.hasLOS(F.player.x, F.player.y, gd.x, gd.y),
+     'test setup: it is sealed away from the player, so it patrols rather than chases');
+  // the dead end forces the opening move, and the junction is a real junction
+  ok(F.patrolOpen(gd, [1, 0]) && !F.patrolOpen(gd, [-1, 0])
+     && !F.patrolOpen(gd, [0, 1]) && !F.patrolOpen(gd, [0, -1]),
+     'test setup: east is the only way out of the dead end');
+  const at2 = { x: 2.5, y: 4.5, spawnX: gd.spawnX, spawnY: gd.spawnY };
+  ok(F.patrolOpen(at2, [1, 0]) && F.patrolOpen(at2, [0, 1]) && F.patrolOpen(at2, [0, -1]),
+     'test setup: and the second tile is a three-way junction to be tempted by');
+
+  gd.patrolT = 0; gd.patrolDir = null;               // mkEnemy seeds patrolT randomly
+  const realRandom = Math.random;
+  Math.random = () => 0.5;                           // 0.5 < 0.72 holds; 0.5 < 0.0 does not
+  let strayed = 0;
+  try {
+    for (let i = 0; i < 500; i++) { f.run(1); if (Math.abs(gd.y - 4.5) > 1e-9) strayed++; }
+  } finally { Math.random = realRandom; }
+
+  ok(gd.state === 'idle', `the guard patrolled the whole window (state=${gd.state})`);
+  ok(strayed === 0,
+     `a guard that CAN keep going straight does — it never left the corridor line ` +
+     `in 500 frames (${strayed} frames off it, ${gd.y.toFixed(3)})`);
+  ok(gd.x - gd.spawnX > 3.5,
+     `and covers its beat rather than a third of it ` +
+     `(${(gd.x - gd.spawnX).toFixed(3)}u east of spawn; a re-roll at every junction manages 1.0)`);
+}
+
+// ── a secret beside a door keeps its panelling (fixture) ─────────────────────
+// The two cells a door retracts into are flagged `jamb` so drawWalls tints them
+// steel and the recess reads as a frame. A push-wall is byte-for-byte an
+// ordinary panel by design — same seed, same colour, same glyph ramp — so
+// tinting one would announce it. The `!n.secret` clause is the only thing
+// stopping that, and no shipped floor happens to stand a secret beside a door.
+//
+//   row 1:  a secret directly north of the door
+//   row 3:  an ordinary panel directly south of it, as the control
+group('secrets beside doors keep their panelling (fixture)');
+{
+  const f = loadWithLevel([
+    '##########',
+    '#...S....#',
+    '#@..D...X#',
+    '#...#....#',
+    '##########',
+  ], { htmlPath: process.env.WOLF3D_HTML });
+  const F = f.P;
+  const d = F.doors()[0];
+  ok(d && d.gx === 4 && d.gy === 2, `test setup: the door is at 4,2 (${d && d.gx},${d && d.gy})`);
+  ok(d.axis === 0,
+     `test setup: it is flanked north and south, so those two ARE its jambs (axis=${d.axis})`);
+
+  const north = F.cellAt(4, 1), south = F.cellAt(4, 3);
+  ok(north && north.tag === 'panel' && north.secret === true,
+     'test setup: the north neighbour is a push-wall');
+  ok(south && south.tag === 'panel' && !south.secret,
+     'test setup: and the south neighbour is an ordinary panel');
+
+  ok(south.jamb === true,
+     'the ordinary neighbour is flagged as the jamb, so the pass really ran');
+  ok(north.jamb !== true,
+     `and the secret is not — a secret that looks different is not a secret ` +
+     `(jamb=${north.jamb})`);
+}
+
+// ── the two quantised fades, as a real A/B (fixtures) ───────────────────────
+// Every distinct (glyph, colour) pair is an atlas entry, and a fade stringified
+// per frame mints a fresh one each time — unbounded growth toward the silent
+// fillText degradation. Both fades are quantised on purpose: the arc to 4
+// steps, the damage pop to 8.
+//
+// The obvious test — measure the atlas before and after a burst — does not
+// work, and the version that shipped from Phase 3 to Phase 6 could not fail.
+// Two reasons, and the second is the one that bites:
+//
+//   1. Ordinary rendering mints entries of its own as the clock advances (the
+//      neon flicker, the rain), so a naive before/after bills those to the
+//      feature. That is what the idle arm is for.
+//   2. An UNQUANTISED fade converges too. h.t and p.t advance in fixed 16ms
+//      steps, so the alpha space is finite either way — ~150 entries for the
+//      arc instead of ~6 — and by the time a late group measures it, earlier
+//      groups have already minted every one of them. Marginal growth after
+//      saturation is zero under both variants. The measurement has to start
+//      from an atlas that has not seen the effect yet.
+//
+// So each arm is its own load: same build, same frame count, one idle and one
+// driving the effect, compared at the end. Fixtures, because a load replaces
+// process globals.
+group('quantised fades (atlas fixtures)');
+{
+  const HTML = process.env.WOLF3D_HTML;
+  const BURST = 120, PER = 5, FRAMES = BURST * PER;
+
+  // Both arms run under a SEEDED stream, because Math.random is load-bearing
+  // here in a way that is easy to miss: mkEnemy seeds every body's `bob` and
+  // `patrolT` from it, so two loads put their enemies in different places and
+  // draw different sprite-and-fog pairs. Measured unseeded, the arc cost swung
+  // between -1 and 13 over fifteen trials — noise of the same order as the
+  // honest figure. A constant is the wrong pin here: it would collapse the
+  // damage-number jitter to one position and take most of the bug with it
+  // (33 against 65, where a seeded stream reads 177 against 337). Seeded, both
+  // arms are exact and repeat to the entry.
+  const lcg = () => { let s = 987654321; return () => (s = (s * 1103515245 + 12345) & 0x7fffffff) / 0x80000000; };
+  const seeded = (fn) => {
+    const real = Math.random;
+    Math.random = lcg();
+    try { return fn(); } finally { Math.random = real; }
+  };
+
+  const idleArm = () => seeded(() => {
+    const a = load({ htmlPath: HTML });
+    a.P.startLevel(); a.run(FRAMES);
+    return a.P.atlasSize();
+  });
+
+  // ── the damage arc: a 4-step fade over two glyphs
+  {
+    const quiet = idleArm();
+    const cost = seeded(() => {
+      const b = load({ htmlPath: HTML });
+      const B = b.P;
+      B.startLevel();
+      for (let i = 0; i < BURST; i++) {
+        B.player.hp = 100;                   // topped up, so no sample can kill
+        B.hurtPlayer(1, B.player.x + Math.cos(i) * 3, B.player.y + Math.sin(i) * 3);
+        b.run(PER);
+      }
+      return B.atlasSize();
+    }) - quiet;
+    // Measured, and repeatable to the entry: 6 quantised, 150 unquantised, over
+    // the same 600 frames from the same cold atlas. 24 is four times the honest
+    // cost and a sixth of the bug.
+    ok(cost < 24,
+       `${BURST} arcs cost the handful of (glyph, colour) pairs a 4-step fade can make ` +
+       `(${cost} entries over ${FRAMES} frames against an idle load's ${quiet})`);
+  }
+
+  // ── the damage-number pop: an 8-step fade, multiplied by the digit glyphs,
+  //    the jitter positions, the hit/kill colour and the shadow row
+  {
+    const quiet = idleArm();
+    const cost = seeded(() => {
+      const b = load({ htmlPath: HTML });
+      const B = b.P;
+      B.startLevel();
+      const foe = B.enemies().find(e => e.type === 'guard');
+      for (let i = 0; i < BURST; i++) {
+        foe.hp = 1e9;                        // never dies, so every shot pops
+        foe.x = B.player.x + 2; foe.y = B.player.y; B.player.a = 0;
+        B.player.fireCd = 0; B.player.ammo = 500; B.player.clip = 8;
+        B.fire(); b.run(PER);
+      }
+      return B.atlasSize();
+    }) - quiet;
+    // Measured: 177 quantised against 337 unquantised, both exact and both flat
+    // from 120 shots through 480. The honest cost is large because of what the
+    // 8 steps multiply against — the digit glyphs, the jitter positions, the
+    // hit/kill colour and the shadow row — which is exactly why the bound has
+    // to be measured rather than guessed. 260 sits between the two.
+    ok(cost < 260,
+       `${BURST} damage pops cost a bounded set of pairs, not half again as many ` +
+       `(${cost} entries over ${FRAMES} frames against an idle load's ${quiet})`);
+  }
 }
 
 // ── report ───────────────────────────────────────────────────────────────────

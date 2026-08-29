@@ -2929,6 +2929,13 @@ function castGrid(px, py, angle, maxD) {
       // that is behind us. Only a door with an open flank can produce one, and
       // validate-level.js refuses to ship those. An axis-aligned ray divides
       // by ~6e-17 rather than 0 and lands here too, as a huge t.
+      //
+      // Kept for the intent, not because anything rests on it: the `lat` range
+      // test below subsumes it. A crossing behind the entry face is outside the
+      // cell laterally, which that test already rejects. The only rays where
+      // the two differ are exact 45-degree corner grazes decided by one ULP,
+      // and they need geometry no floor can ship. See ray-door-behind-face in
+      // reference/mutations.js for the measurement.
       if (t < perp || t > limit) continue;
       // `lat` runs along the door's OWN fixed axis, so it is a world
       // coordinate and not a face-relative one: the same physical point on the
@@ -3579,6 +3586,9 @@ function fire() {
     // is not something you can stab, however far in front of you it projects.
     if (w.reach && Math.hypot(ex, ey) > w.reach) continue;
     const lateral = -ex * sinA + ey * cosA;
+    // SPR[e.type], not enemySprite(e): the hit span is the body's, not the
+    // view's, so turning sideways never makes a guard harder to shoot. Safe
+    // only while every live view keeps the base width — asserted in the suite.
     const { centerCol, halfW } = spriteSpan(depth, lateral, SPR[e.type].wW);
     if (Math.abs(centerCol - aimCol) > halfW) continue;
     if (!hasLOS(player.x, player.y, e.x, e.y)) continue;
@@ -3789,7 +3799,10 @@ function enemySprite(e) {
   return rel > 0 ? SPR.guardLeft : SPR.guardRight;
 }
 
-function drawSprites(zbuf, horizon) {
+// Everything the sprite pass draws this frame, sorted back to front. Split out
+// of drawSprites because the ORDER is the behaviour and the blit is not: a list
+// built inside the draw loop can only be checked through pixels we never make.
+function spriteList() {
   const cosA = Math.cos(player.a), sinA = Math.sin(player.a);
   const list = [];
   for (const e of enemies) {
@@ -3810,7 +3823,11 @@ function drawSprites(zbuf, horizon) {
     if (d > 0.32 && d < MAX_DEPTH) list.push({ d: d + 0.02, kind: 'p', ref: p });
   }
   list.sort((a, b) => b.d - a.d);      // back to front
-  for (const s of list) {
+  return list;
+}
+
+function drawSprites(zbuf, horizon) {
+  for (const s of spriteList()) {
     if (s.kind === 'e') {
       const e = s.ref;
       const bob = e.alive && e.type === 'drone' ? Math.sin(e.bob) * 0.12 : 0;

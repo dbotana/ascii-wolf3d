@@ -127,6 +127,16 @@ const PROBE_SRC = `global.__PROBE = {
   addTouchLook:  (typeof addTouchLook  !== "undefined" ? addTouchLook : null),
   touchVec:      () => (typeof touchMove !== "undefined" ? { x: touchMove.x, y: touchMove.y } : null),
   touchRunning:  () => (typeof touchRun  !== "undefined" ? touchRun : false),
+  // Phase 6: the seams the coverage pass needed. navSeedX/navSeedY and animT
+  // are plain module state that nothing outside their own file reads, so a
+  // stale flow field and a clock that keeps running under the pause banner
+  // were both invisible. patrolOpen and spriteList are the other shape: the
+  // ANSWER is the behaviour and the caller throws it away, so the only way to
+  // assert on it is to ask the same question the game asks.
+  navSeed:       () => (typeof navSeedX !== "undefined" ? { x: navSeedX, y: navSeedY } : null),
+  animT:         () => (typeof animT !== "undefined" ? animT : null),
+  patrolOpen:    (typeof patrolOpen !== "undefined" ? patrolOpen : null),
+  spriteList:    (typeof spriteList !== "undefined" ? spriteList : null),
 };`;
 
 // Names the probe exposes as direct function references. Every one of them is
@@ -146,6 +156,7 @@ const REQUIRED_FNS = [
   'musicTrackFor', 'stepMusic',
   'loadScores', 'saveScores', 'recordScore', 'paintScores', 'winGame', 'killPlayer',
   'stickVector', 'setTouchMove', 'addTouchLook',
+  'patrolOpen', 'spriteList',
 ];
 
 function assertProbe(P, htmlPath) {
@@ -387,6 +398,9 @@ function load(opts) {
     P,
     els,
     audio: actx,
+    /** The document stub itself, for tests that need to count what the game
+     *  calls on it — document.exitPointerLock is the one that matters. */
+    doc: global.document,
     /** The backing store, or null where reading it throws. */
     get storage() { try { return global.localStorage || null; } catch (e) { return null; } },
     /** Safe element accessor — creates on demand, exactly like getElementById.
