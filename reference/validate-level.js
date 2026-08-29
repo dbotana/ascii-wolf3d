@@ -18,6 +18,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const { collectSources } = require('./harness');
 
 const WALK   = '.@gdC+ar b$';       // tiles a body can stand on
 const ITEMS  = 'gdC+arb$';          // entities that must be reachable
@@ -26,12 +27,23 @@ const SECRET = 'S';                 // push-wall: solid until shoved, then passa
 const PICKUP = '+arb$';             // pushSecret() also stops short of these
 const KEYCH  = { r: 'red', b: 'blue' };
 
-function extractLevels(htmlPath) {
-  const html = fs.readFileSync(htmlPath, 'utf8');
+/**
+ * Scrape the floors out of a build without booting it.
+ *
+ * Levels are found by the token `const LEVEL_* = [`, which is why CLAUDE.md
+ * requires each floor to stay a top-level array under that name. The search
+ * covers every script the page loads — the split tree's wolf3d/levels.js and
+ * the bundled single file alike — via the harness's one shared walk. Point it
+ * at a .js file directly and it reads that instead.
+ */
+function extractLevels(target) {
+  const text = /\.js$/i.test(target)
+    ? fs.readFileSync(target, 'utf8')
+    : collectSources(target).map(s => s.code).join('\n');
   const out = [];
   const re = /const (LEVEL_\w+) = \[([\s\S]*?)\n\s*\];/g;
   let m;
-  while ((m = re.exec(html)) !== null) {
+  while ((m = re.exec(text)) !== null) {
     const rows = m[2].split('\n')
       .map(s => s.trim())
       .filter(Boolean)

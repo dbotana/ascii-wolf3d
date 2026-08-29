@@ -3,13 +3,15 @@
 Roadmap for `wolf3d.html`. Three floors, the CEO fight, core combat, sliding
 doors + keycards, secret push-walls, the magazine/feedback pass and the
 end-of-floor tally are in — Phase 1 is done. Phase 2 closed the enemy engine
-gaps: pathfinding, separation, patrols and rotations. Open work is ordered
-roughly by value per hour of work; everything finished is collected under
-**Completed** at the bottom.
+gaps: pathfinding, separation, patrols and rotations. The restructure pass then
+split the single file into `wolf3d/*.js` and gave it a bundler. Open work is
+ordered roughly by value per hour of work; everything finished is collected
+under **Completed** at the bottom.
 
-File references are to `wolf3d.html` unless noted, and they drift every time the
-file grows — grep the function name if one looks wrong. Line numbers below
-predate the combat-feedback pass and have all shifted; treat them as hints.
+**The line numbers below are stale.** They were written against the single-file
+build and every one of them has moved into some `wolf3d/*.js` — grep the
+function name instead, and see the file map in `reference/CLAUDE.md` for which
+file to look in.
 
 ---
 
@@ -60,11 +62,11 @@ predate the combat-feedback pass and have all shifted; treat them as hints.
 
 ## Phase 5 — infrastructure
 
-- [ ] **Wire the harness and validator into CI.** Both are built (see
-  **Completed**) and both exit non-zero already; nothing runs them
-  automatically. A pre-commit hook or a GitHub action calling
-  `node reference/run-tests.js && node reference/validate-level.js` is the whole
-  job.
+- [ ] **Wire the tools into CI.** All four are built and all four exit non-zero
+  already; nothing runs them automatically. A pre-commit hook or a GitHub action
+  calling `node reference/run-tests.js && node reference/validate-level.js &&
+  node reference/check-structure.js` — plus the same suite against
+  `WOLF3D_HTML=dist/wolf3d.html` — is the whole job.
 - [ ] **Keep the mutation battery.** The suite has been mutation-tested three
   times by injecting bugs into copies of the game: 16 at the MVP, 20 more over
   the Phase 1 systems, 14 over the Phase 2 movement systems — of which **five
@@ -75,12 +77,6 @@ predate the combat-feedback pass and have all shifted; treat them as hints.
   suite honest as it grows, and this is now the highest-value item in Phase 5:
   the Phase 1 pass had to rebuild the harness from nothing to check its own
   work.
-- [ ] **Move levels out of the source file.** All three floors are inline and
-  are now ~120 of `wolf3d.html`'s lines. Load them from a separate `levels.js` —
-  still CSP-safe, still no build step, but the game file stops growing. Note
-  that both tools find floors by the `const LEVEL_*` name: `validate-level.js`
-  regexes them out of the HTML and `harness.js` substitutes fixtures into
-  `LEVEL_1`. Moving them means teaching both where to look.
 - [ ] **Persist high scores.** `localStorage`, guarded by try/catch — it throws
   in some privacy contexts.
 - [ ] **Touch / mobile controls.** Currently keyboard + pointer-lock mouse only;
@@ -134,6 +130,58 @@ predate the combat-feedback pass and have all shifted; treat them as hints.
 
 Newest first. Kept for the design notes — several record why an approach that
 looks obvious was not the one taken.
+
+- [x] **The restructure — split to develop, bundle to ship.** 2,883 lines of
+  single-file HTML became a 91-line manifest, `wolf3d/style.css`, and fourteen
+  `wolf3d/*.js` files, none over 343 lines. `node reference/bundle.js` collapses
+  them back into `dist/wolf3d.html`, which is what deploys. The suite ran green
+  after every single file moved, and runs against both representations now.
+  - *Classic scripts, not ES modules, and that decision paid for everything
+    else.* Top-level `let`/`const` in a classic script live in the shared
+    script-level scope and function declarations hoist into it, so N scripts on
+    one page are exactly one scope — semantically identical to the IIFE they
+    replaced. So **no call site changed**: no namespace object, no import lists,
+    every one of the ~2,400 lines moved verbatim. It also makes the bundler
+    forty lines of string joining rather than a real bundler, keeps `file://`
+    working, and keeps the harness's `eval` honest. ESM would have cost all
+    four. The long-term collapse back to one file is `cp dist/wolf3d.html
+    wolf3d.html`; `check-structure.js` fails the build if anyone introduces
+    `import`/`export` and makes that one-way.
+  - *The tooling had to move first, as its own step.* `harness.js` matched one
+    attribute-less `<script>` and spliced its probe before the last `})();`;
+    `validate-level.js` regexed levels out of the HTML text. Both now walk every
+    `<script src>` through one shared `collectSources()`. `loadWithLevel` also
+    stopped writing a temp file per fixture — it patches the collected sources
+    in memory, which is faster and, more to the point, a temp file in
+    `os.tmpdir()` would have resolved its relative `src` paths against the wrong
+    directory.
+  - **The probe's `typeof` guards would have hidden a broken split.** ~30 names
+    in `PROBE_SRC` degrade to `null` for builds that predate them. A build that
+    failed to load a file degrades the same way — to silent false passes rather
+    than an honest failure. `assertProbe` now checks a manifest on every load and
+    throws naming what is missing; verified by deleting a function and watching
+    it fire. This was the single highest-value line in the pass.
+  - *`drawWalls` came out of `frame()`.* 103 lines of column loop — ceiling,
+    floor, wall, EXIT lettering, neon flicker, rain, lit windows — were inlined
+    in the main loop with no function boundary. `frame()` is 61 lines now, down
+    from 167, and `render.js` could not have existed without the extraction.
+  - *`spriteSpan` moved to `raycast.js`.* It lived in COMBAT, but both `fire()`'s
+    hit test and `drawSprite()` measure against it. Leaving projection math
+    inside one of its two consumers is how they drift, and drift there means
+    shooting things you cannot see.
+  - *Cross-file writes got names.* `combat.js` assigned `gunFrame`/`gunT` —
+    renderer state — and `enemies.js` assigned `hpShown`. Shared scope means you
+    *can* write anything from anywhere; `triggerGunFire()` and `chipHpFromNow()`
+    are how the next reader finds out that you did.
+  - *Verified by line-set identity, not just by green.* Stages 3-5 were pure
+    relocations, so the multiset of non-blank source lines had to be unchanged.
+    Comparing sorted line sets before and after showed **zero lines lost** — a
+    stronger claim than "the tests still pass" for a mechanical move, and it
+    costs one shell pipeline.
+  - `README.md` was repaired: an unquoted-heredoc accident had spliced a copy of
+    its own first 33 lines into the middle of the level legend, mid-sentence.
+    That is the exact mistake `reference/CLAUDE.md` warns about in its own
+    "bugs already made here" list.
 
 - [x] **Phase 2 — the enemy engine gaps.** All four items, shipped together. The
   suite went 145 assertions → 191, and a 14-bug mutation battery covers the new

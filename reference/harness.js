@@ -8,6 +8,13 @@
 // This is not a mock of the game. It is the actual shipped source, evaluated.
 // If a test passes here, that code path really ran.
 //
+// It loads either representation of the game: the development manifest
+// (wolf3d.html + wolf3d/*.js, a list of <script src> tags) or the bundled
+// single file (dist/wolf3d.html, one inline block). Classic scripts share one
+// script scope, so concatenating them in document order and eval'ing the result
+// is the same program either way — which is what lets the same suite run
+// against both and mean something.
+//
 //   const { load } = require('./harness');
 //   const g = load();
 //   g.step(16, ['w']);          // one 16ms frame with W held
@@ -20,7 +27,6 @@
 'use strict';
 
 const fs = require('fs');
-const os = require('os');
 const path = require('path');
 
 const DEFAULT_GAME = path.join(__dirname, '..', 'wolf3d.html');
@@ -69,22 +75,76 @@ const PROBE_SRC = `global.__PROBE = {
   spr:           () => SPR,
 };`;
 
-function extractScript(htmlPath) {
+// Names the probe exposes as direct function references. Every one of them is
+// `typeof`-guarded in PROBE_SRC so the harness can still load an older build —
+// which means a BROKEN LOAD degrades to a pile of nulls and silent false passes
+// rather than an honest failure. assertProbe is what makes the guards safe: a
+// current build must supply all of these, and a split that drops a file fails
+// here with the names it lost instead of somewhere deep in a test.
+const REQUIRED_FNS = [
+  'startLevel', 'fire', 'use', 'castRay', 'blockAt', 'hasLOS', 'cellAt',
+  'pushSecret', 'nextLevel', 'clearLevel', 'itemAt',
+  'navAt', 'buildNav', 'navStep', 'navPassable',
+  'moveEnemy', 'openDoorAhead', 'separate', 'enemySprite', 'spriteSpan',
+];
+
+function assertProbe(P, htmlPath) {
+  if (!P) throw new Error('the game did not install its probe — nothing evaluated?');
+  const missing = REQUIRED_FNS.filter(k => typeof P[k] !== 'function');
+  // The thunks can't be checked by type (they all return something), so spot
+  // check the three whose emptiness would mean a data file failed to load.
+  if (!P.spr || Object.keys(P.spr()).length === 0) missing.push('SPR (sprite art)');
+  if (!P.levels || P.levels().length === 0) missing.push('LEVELS (level data)');
+  if (!P.ceoPhases || P.ceoPhases().length === 0) missing.push('CEO_PHASES');
+  if (missing.length) {
+    throw new Error(
+      'incomplete game load from ' + htmlPath + ' — missing: ' + missing.join(', ') +
+      '\n(a source file failed to load, or a name moved out of the shared script scope)');
+  }
+}
+
+/**
+ * Every script this page runs, in document order, as `{ path, code }`.
+ *
+ * Handles both shapes the game ships in: the development manifest, which is a
+ * list of `<script src>` tags, and the bundled single file, which is one inline
+ * block. They are the same program — classic scripts share one script scope, so
+ * concatenating them reproduces browser semantics exactly.
+ *
+ * External (http/https) scripts are skipped; there are none, and eval'ing one
+ * would be a network dependency the game does not have.
+ */
+function collectSources(htmlPath) {
   const html = fs.readFileSync(htmlPath, 'utf8');
-  const m = html.match(/<script>\n([\s\S]*)\n<\/script>/);
-  if (!m) throw new Error('no <script> block found in ' + htmlPath);
-  const src = m[1];
-  // The game is one IIFE ending in `})();`. Splice the probe in just before it
-  // closes, so tests get the real bindings rather than copies.
-  const tail = '})();';
-  const at = src.lastIndexOf(tail);
-  if (at < 0) throw new Error('could not find the closing `})();` of the game IIFE');
-  return src.slice(0, at) + PROBE_SRC + '\n' + src.slice(at);
+  const dir = path.dirname(htmlPath);
+  const out = [];
+  const re = /<script\b([^>]*)>([\s\S]*?)<\/script>/g;
+  let m;
+  while ((m = re.exec(html)) !== null) {
+    const src = (m[1].match(/\bsrc\s*=\s*["']([^"']+)["']/) || [])[1];
+    if (!src) { out.push({ path: htmlPath, code: m[2] }); continue; }
+    if (/^https?:/i.test(src)) continue;
+    const file = path.resolve(dir, src);
+    if (!fs.existsSync(file)) {
+      throw new Error('script src "' + src + '" in ' + htmlPath + ' does not exist (' + file + ')');
+    }
+    out.push({ path: file, code: fs.readFileSync(file, 'utf8') });
+  }
+  if (!out.length) throw new Error('no script sources found in ' + htmlPath);
+  return out;
+}
+
+/** Concatenate sources into one program, with the probe appended in scope. */
+function buildProgram(sources) {
+  return sources.map(s => s.code).join('\n;\n') + '\n' + PROBE_SRC;
 }
 
 function load(opts) {
   const o = opts || {};
   const htmlPath = o.htmlPath || DEFAULT_GAME;
+  // `sources` lets loadWithLevel hand over a rewritten tree without ever
+  // touching the filesystem.
+  const sources = o.sources || collectSources(htmlPath);
 
   // ── canvas stub: count draws, rasterise nothing
   let drawCalls = 0;
@@ -145,11 +205,13 @@ function load(opts) {
   global.requestAnimationFrame = cb => { rafCb = cb; };
 
   // eslint-disable-next-line no-eval
-  eval(extractScript(htmlPath));
+  eval(buildProgram(sources));
+
+  const P = global.__PROBE;
+  assertProbe(P, htmlPath);
 
   // Boot the game the way a player does: click the splash.
   els.splash._handlers.click();
-  const P = global.__PROBE;
 
   return {
     P,
@@ -184,8 +246,6 @@ function load(opts) {
   };
 }
 
-let fixtureN = 0;
-
 /**
  * Load the real game with LEVEL_1 swapped for a purpose-built map, so a test
  * can construct geometry the shipped level does not happen to contain (a
@@ -196,19 +256,28 @@ let fixtureN = 0;
  *
  * NOTE: loading replaces process globals, so the previously loaded instance
  * stops stepping. Call this after the tests that use the shipped level.
+ *
+ * The substitution happens on the collected sources in memory rather than on a
+ * temp copy of the HTML. That matters once the game is split across files: a
+ * temp file written elsewhere would resolve its relative `src` paths against
+ * the wrong directory. It is also faster — no filesystem write per fixture.
  */
 function loadWithLevel(rows, opts) {
   const o = opts || {};
   const htmlPath = o.htmlPath || DEFAULT_GAME;
-  const html = fs.readFileSync(htmlPath, 'utf8');
+  const sources = collectSources(htmlPath);
   const body = rows.map(r => "    '" + r + "',").join('\n');
-  const out = html.replace(/const LEVEL_1 = \[[\s\S]*?\n\s*\];/,
-                           'const LEVEL_1 = [\n' + body + '\n  ];');
-  if (out === html) throw new Error('could not substitute LEVEL_1 into ' + htmlPath);
-  const tmp = path.join(os.tmpdir(), `wolf3d-fixture-${process.pid}-${fixtureN++}.html`);
-  fs.writeFileSync(tmp, out);
-  try { return load({ htmlPath: tmp }); }
-  finally { try { fs.unlinkSync(tmp); } catch (e) { /* best effort */ } }
+  let done = false;
+  const patched = sources.map(s => {
+    if (done) return s;
+    const code = s.code.replace(/const LEVEL_1 = \[[\s\S]*?\n\s*\];/,
+                                'const LEVEL_1 = [\n' + body + '\n  ];');
+    if (code === s.code) return s;
+    done = true;
+    return { path: s.path, code };
+  });
+  if (!done) throw new Error('could not substitute LEVEL_1 into ' + htmlPath);
+  return load({ htmlPath, sources: patched });
 }
 
-module.exports = { load, loadWithLevel, DEFAULT_GAME };
+module.exports = { load, loadWithLevel, collectSources, DEFAULT_GAME };

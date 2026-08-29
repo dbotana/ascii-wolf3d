@@ -1,0 +1,378 @@
+  :root {
+    --ink:        #02030A;
+    --sodium:     #FF9500;
+    --crt:        #7FFF6B;
+    --slate:      #3A4A5C;
+    --window:     #FFD07A;
+    --neon-pink:  #FF3B7C;
+    --neon-cyan:  #55E6E6;
+    --fog:        #0A1A2E;
+    --hud-ink:    rgba(127,255,107,0.85);
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; overflow: hidden; }
+  body {
+    background: var(--ink);
+    color: var(--hud-ink);
+    font-family: 'IBM Plex Mono', ui-monospace, Menlo, monospace;
+    font-size: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    -webkit-user-select: none;
+    user-select: none;
+    cursor: crosshair;
+  }
+  #stage {
+    position: relative;
+    width: min(100vw, 100vh * 1.4);
+    height: min(100vh, 100vw / 1.4);
+    max-width: 1400px;
+    max-height: 1000px;
+    background: var(--ink);
+    box-shadow: 0 0 120px rgba(255,149,0,0.05), 0 0 40px rgba(127,255,107,0.03) inset;
+    overflow: hidden;
+  }
+  canvas#screen {
+    display: block;
+    width: 100%;
+    height: 100%;
+    image-rendering: pixelated;
+    image-rendering: crisp-edges;
+    filter: contrast(1.05) saturate(1.1);
+  }
+  #stage::before {
+    content: '';
+    position: absolute; inset: 0;
+    background: repeating-linear-gradient(
+      to bottom,
+      rgba(0,0,0,0) 0px,
+      rgba(0,0,0,0) 2px,
+      rgba(0,0,0,0.10) 3px
+    );
+    pointer-events: none;
+    z-index: 6;
+  }
+  #stage::after {
+    content: '';
+    position: absolute; inset: 0;
+    background: radial-gradient(ellipse at center, transparent 55%, rgba(2,3,10,0.6) 100%);
+    pointer-events: none;
+    z-index: 5;
+  }
+  header {
+    position: absolute;
+    top: 14px; left: 20px;
+    z-index: 7;
+    display: flex;
+    align-items: baseline;
+    gap: 12px;
+    color: var(--sodium);
+    pointer-events: none;
+  }
+  header h1 {
+    font-family: 'VT323', monospace;
+    font-size: 26px;
+    font-weight: normal;
+    letter-spacing: 0.05em;
+    text-shadow: 0 0 8px rgba(255,149,0,0.5);
+  }
+  header .meta {
+    font-size: 10px;
+    letter-spacing: 0.18em;
+    color: rgba(255,208,122,0.55);
+    text-transform: uppercase;
+  }
+
+  /* ── Wolf3D-style status bar ─────────────────────────────── */
+  #statusbar {
+    position: absolute;
+    left: 0; right: 0; bottom: 0;
+    z-index: 7;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 26px;
+    padding: 6px 18px;
+    background: linear-gradient(to bottom, rgba(2,3,10,0.0), rgba(2,3,10,0.82) 35%);
+    font-family: 'IBM Plex Mono', monospace;
+    font-variant-numeric: tabular-nums;
+    pointer-events: none;
+  }
+  #statusbar .slot { text-align: center; line-height: 1.25; }
+  #statusbar .lbl {
+    display: block;
+    font-size: 9px;
+    letter-spacing: 0.2em;
+    color: rgba(127,255,107,0.45);
+    text-transform: uppercase;
+  }
+  #statusbar .val {
+    display: block;
+    font-family: 'VT323', monospace;
+    font-size: 24px;
+    color: var(--sodium);
+    text-shadow: 0 0 8px rgba(255,149,0,0.35);
+  }
+  #sAmmo { font-size: 20px; }
+  #statusbar .val.low  { color: var(--neon-pink); text-shadow: 0 0 10px rgba(255,59,124,0.6); }
+  #sFace {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 11px;
+    line-height: 1.05;
+    color: var(--window);
+    border: 1px solid rgba(255,149,0,0.35);
+    background: rgba(255,149,0,0.06);
+    padding: 3px 6px;
+    text-shadow: 0 0 6px rgba(255,208,122,0.4);
+  }
+  /* health bar: a lagging "chip" layer behind the live fill, so a hit reads as
+     a red wedge draining away rather than an instant jump */
+  #sHpWrap { position: relative; }
+  #hpBar {
+    position: relative;
+    width: 78px; height: 7px;
+    margin: 3px auto 0;
+    border: 1px solid rgba(255,149,0,0.35);
+    background: rgba(255,255,255,0.05);
+    overflow: hidden;
+  }
+  #hpChip, #hpFill {
+    position: absolute; top: 0; bottom: 0; left: 0;
+    width: 100%;
+  }
+  #hpChip { background: var(--neon-pink); box-shadow: 0 0 8px rgba(255,59,124,0.7); }
+  #hpFill { background: var(--crt); box-shadow: 0 0 7px rgba(127,255,107,0.5); }
+  #hpFill.low { background: var(--neon-pink); box-shadow: 0 0 9px rgba(255,59,124,0.65); }
+  .hp-hit { animation: hpHit 0.42s ease-out; }
+  @keyframes hpHit {
+    0%   { transform: translateX(0)    scale(1);    filter: brightness(2.4); }
+    18%  { transform: translateX(-4px) scale(1.14); filter: brightness(2.4); }
+    38%  { transform: translateX(4px)  scale(1.10); filter: brightness(1.7); }
+    58%  { transform: translateX(-2px) scale(1.05); filter: brightness(1.3); }
+    78%  { transform: translateX(2px)  scale(1.02); filter: brightness(1.1); }
+    100% { transform: translateX(0)    scale(1);    filter: brightness(1); }
+  }
+  /* border tint that deepens as health drops */
+  #hpVignette {
+    position: absolute; inset: 0;
+    z-index: 4;
+    pointer-events: none;
+    opacity: 0;
+    box-shadow:
+      inset 0 0 60px  rgba(200,20,45,0.55),
+      inset 0 0 140px rgba(160,10,35,0.40);
+    transition: opacity 0.45s ease;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .hp-hit { animation: none; }
+  }
+  #sKeys { display: flex; gap: 5px; justify-content: center; margin-top: 3px; }
+  #sKeys i {
+    width: 13px; height: 18px;
+    border: 1px solid rgba(255,255,255,0.18);
+    background: rgba(255,255,255,0.05);
+    display: block;
+  }
+  #sKeys i.red.on  { background: #FF3B4E; border-color: #FF8A96; box-shadow: 0 0 8px #FF3B4E; }
+  #sKeys i.blue.on { background: #4FA8FF; border-color: #A6D4FF; box-shadow: 0 0 8px #4FA8FF; }
+
+  /* ── boss bar: only up while the CEO is awake and alive ──── */
+  #bossBar {
+    position: absolute;
+    top: 54px; left: 50%;
+    transform: translateX(-50%);
+    z-index: 7;
+    width: min(60%, 520px);
+    text-align: center;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.35s ease;
+  }
+  #bossBar.show { opacity: 1; }
+  #bossBar .name {
+    display: block;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 10px; letter-spacing: 0.26em;
+    color: rgba(255,194,74,0.8); text-transform: uppercase;
+    text-shadow: 0 0 8px rgba(255,194,74,0.45);
+  }
+  #bossBar .track {
+    position: relative;
+    height: 9px; margin: 4px 0 3px;
+    border: 1px solid rgba(255,194,74,0.45);
+    background: rgba(2,3,10,0.6);
+    overflow: hidden;
+  }
+  #bossFill {
+    position: absolute; inset: 0 auto 0 0;
+    width: 100%;
+    background: linear-gradient(to right, #6A5480, #FFC24A);
+    box-shadow: 0 0 10px rgba(255,194,74,0.55);
+    transition: width 0.2s linear;
+  }
+  #bossBar .phase {
+    display: block;
+    font-family: 'VT323', monospace;
+    font-size: 15px; letter-spacing: 0.16em;
+    color: var(--neon-pink);
+    text-shadow: 0 0 10px rgba(255,59,124,0.5);
+  }
+
+  #prompt {
+    position: absolute;
+    top: 60%; left: 50%;
+    transform: translate(-50%, -50%);
+    z-index: 7;
+    font-family: 'VT323', monospace;
+    font-size: 22px;
+    letter-spacing: 0.12em;
+    color: var(--sodium);
+    background: rgba(2,3,10,0.55);
+    padding: 5px 15px;
+    border: 1px solid rgba(255,149,0,0.55);
+    text-shadow: 0 0 10px rgba(255,149,0,0.6);
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.18s ease;
+    white-space: nowrap;
+  }
+  #prompt.show { opacity: 1; }
+
+  #toast {
+    position: absolute;
+    top: 20%; left: 50%;
+    transform: translate(-50%, -50%);
+    z-index: 7;
+    font-family: 'VT323', monospace;
+    font-size: 20px;
+    letter-spacing: 0.14em;
+    color: var(--crt);
+    text-shadow: 0 0 12px rgba(127,255,107,0.6);
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.35s ease;
+    white-space: nowrap;
+  }
+  #toast.show { opacity: 1; }
+
+  #banner {
+    position: absolute;
+    inset: 0;
+    z-index: 8;
+    display: none;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    text-align: center;
+    background: radial-gradient(ellipse at center, rgba(2,3,10,0.72), rgba(2,3,10,0.95));
+    font-family: 'VT323', monospace;
+    pointer-events: none;
+  }
+  #banner.show { display: flex; }
+  #banner h2 { font-size: 52px; letter-spacing: 0.08em; color: var(--sodium); text-shadow: 0 0 18px rgba(255,149,0,0.55); }
+  #banner.fail h2 { color: var(--neon-pink); text-shadow: 0 0 18px rgba(255,59,124,0.6); }
+  #banner p { font-size: 20px; color: var(--crt); letter-spacing: 0.1em; }
+  #banner small {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 11px; letter-spacing: 0.22em;
+    color: rgba(127,255,107,0.55); text-transform: uppercase;
+  }
+
+  /* ── end-of-floor tally, the Wolf3D percentage screen ─────── */
+  #tally {
+    position: absolute;
+    inset: 0;
+    z-index: 8;
+    display: none;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 14px;
+    text-align: center;
+    background: radial-gradient(ellipse at center, rgba(2,3,10,0.74), rgba(2,3,10,0.96));
+    font-family: 'VT323', monospace;
+    pointer-events: none;
+  }
+  #tally.show { display: flex; }
+  #tally h2 {
+    font-size: 44px; letter-spacing: 0.08em;
+    color: var(--sodium); text-shadow: 0 0 18px rgba(255,149,0,0.55);
+  }
+  #tally .sub {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 11px; letter-spacing: 0.24em;
+    color: rgba(255,208,122,0.55); text-transform: uppercase;
+    margin-top: -8px;
+  }
+  #tRows {
+    display: grid;
+    grid-template-columns: auto auto auto;
+    gap: 4px 26px;
+    align-items: baseline;
+    font-size: 26px;
+    font-variant-numeric: tabular-nums;
+    margin: 4px 0;
+  }
+  #tRows .lbl {
+    text-align: right;
+    color: rgba(127,255,107,0.75);
+    letter-spacing: 0.14em;
+  }
+  #tRows .val { text-align: right; color: var(--crt); min-width: 4.2em;
+                text-shadow: 0 0 10px rgba(127,255,107,0.45); }
+  #tRows .bon { text-align: left; color: var(--sodium); min-width: 6.5em; font-size: 22px; }
+  #tRows .r { display: contents; }
+  #tRows .r.hide .lbl, #tRows .r.hide .val, #tRows .r.hide .bon { visibility: hidden; }
+  #tRows .r.perfect .val { color: var(--neon-pink); text-shadow: 0 0 14px rgba(255,59,124,0.7); }
+  #tScore {
+    font-size: 30px; letter-spacing: 0.12em; color: var(--window);
+    text-shadow: 0 0 14px rgba(255,208,122,0.45);
+    font-variant-numeric: tabular-nums;
+  }
+  #tScore.hide { visibility: hidden; }
+  #tHint {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 11px; letter-spacing: 0.22em;
+    color: rgba(127,255,107,0.55); text-transform: uppercase;
+  }
+  #tHint.hide { visibility: hidden; }
+
+  #splash {
+    position: absolute;
+    inset: 0;
+    z-index: 10;
+    background: radial-gradient(ellipse at center, rgba(2,3,10,0.65), rgba(2,3,10,0.96));
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-direction: column;
+    gap: 12px;
+    text-align: center;
+    color: var(--sodium);
+    font-family: 'VT323', monospace;
+    cursor: pointer;
+    transition: opacity 0.5s ease;
+  }
+  #splash h2 { font-size: 46px; letter-spacing: 0.06em; text-shadow: 0 0 14px rgba(255,149,0,0.5); }
+  #splash h3 { font-size: 26px; letter-spacing: 0.2em; color: var(--neon-pink); text-shadow: 0 0 14px rgba(255,59,124,0.5); font-weight: normal; }
+  #splash p  { font-size: 17px; color: var(--crt); letter-spacing: 0.1em; opacity: 0.85; }
+  #splash .keys {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 11px; line-height: 1.9;
+    color: rgba(127,255,107,0.6); letter-spacing: 0.08em;
+    margin-top: 6px;
+  }
+  #splash kbd {
+    display: inline-block; padding: 1px 5px;
+    border: 1px solid rgba(127,255,107,0.35);
+    border-radius: 2px; background: rgba(127,255,107,0.06);
+    color: var(--crt); font-family: inherit; font-size: 10px; margin: 0 1px;
+  }
+  #splash small { font-size: 11px; color: rgba(127,255,107,0.45); letter-spacing: 0.22em; text-transform: uppercase; font-family: 'IBM Plex Mono', monospace; }
+  .fade-out { opacity: 0; pointer-events: none; }
+  @media (prefers-reduced-motion: reduce) {
+    #stage::before { background: none; }
+    canvas#screen { filter: none; }
+  }
