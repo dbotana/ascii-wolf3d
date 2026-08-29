@@ -87,6 +87,16 @@ const perFrame = g.drawCalls / 60;
 ok(perFrame > 10000, `renders a full screen each frame (~${Math.round(perFrame)} draws)`);
 ok(P.atlasSize() < 500, `glyph atlas stays bounded (${P.atlasSize()} of ${P.atlasCap()})`);
 
+// Booting twice is not a hypothetical: the splash is not removed for 600ms, so
+// a second click — or a difficulty row's click bubbling up to it — used to sail
+// past the old `parentElement` guard, restart the level and register a SECOND
+// requestAnimationFrame chain. The harness keeps only one rAF callback, so no
+// frame-count assertion can see that; this asserts on begin()'s idempotence,
+// which is the part that can actually be checked.
+P.player.hp = 42;
+g.el('splash')._handlers.click();
+ok(P.player.hp === 42, 'booting a second time does not restart the game');
+
 // ── enemy AI ─────────────────────────────────────────────────────────────────
 group('enemy AI');
 P.startLevel();
@@ -335,6 +345,143 @@ P.player.x = 20.5; P.player.y = 38.5; P.player.a = Math.PI / 2;   // face a wall
 P.player.ammo = 20;
 P.fire(); run(20);
 ok(P.player.kills === 0, 'shooting a wall hits nothing');
+
+// ── the weapon roster ────────────────────────────────────────────────────────
+group('weapons');
+P.startLevel();
+const KNIFE = 0, PISTOL_I = 1, SMG_I = 2, CHAIN = 3;
+const W = P.weapons();
+ok(W.length === 4, `the roster has four weapons (${W.map(w => w.name).join(', ')})`);
+ok(P.player.weapon === PISTOL_I && P.curWeapon().name === 'PISTOL',
+   'a cold start hands you the pistol');
+ok(W[PISTOL_I].cd === 0.28 && W[PISTOL_I].dmgMin === 22 && W[PISTOL_I].dmgSpan === 20 &&
+   W[PISTOL_I].clip === 8 && W[PISTOL_I].spread === 0 && W[PISTOL_I].alert === 9,
+   'the pistol row still describes the weapon the game shipped with');
+
+// only the pistol is single-shot; that is the whole semi-auto item
+ok(W[PISTOL_I].auto === false, 'the pistol does not repeat on a held trigger');
+ok(W[KNIFE].auto && W[SMG_I].auto && W[CHAIN].auto, 'everything else does');
+
+// ── selection
+ok(P.selectWeapon(SMG_I) && P.player.weapon === SMG_I, 'a number key selects a weapon');
+ok(!P.selectWeapon(SMG_I), 'selecting the weapon already up is a no-op');
+ok(!P.selectWeapon(9) && !P.selectWeapon(-1) && P.player.weapon === SMG_I,
+   'an out-of-range index is refused');
+P.player.weapons[CHAIN] = 0;
+ok(!P.selectWeapon(CHAIN) && P.player.weapon === SMG_I, 'an unowned weapon is refused');
+P.player.weapons[CHAIN] = 1;
+
+// ── the clip truncates on a switch, and never tops up. Switching would
+//    otherwise be a free instant reload, which is the whole reason for the rule.
+P.selectWeapon(SMG_I);
+P.player.clip = 25; P.player.ammo = 60;
+P.selectWeapon(PISTOL_I);
+ok(P.player.clip === 8, `switching to a smaller magazine truncates (${P.player.clip})`);
+ok(P.player.ammo === 60, `and the surplus stays in the reserve (${P.player.ammo})`);
+P.selectWeapon(SMG_I);
+ok(P.player.clip === 8, `switching back does NOT refill the magazine (${P.player.clip})`);
+
+// ── the knife has no magazine, and must not eat the one you were holding
+P.selectWeapon(PISTOL_I);
+P.player.clip = 8; P.player.ammo = 40;
+P.selectWeapon(KNIFE);
+ok(P.player.clip === 8, `drawing the knife leaves your gun loaded (${P.player.clip})`);
+ok(!P.startReload(), 'the knife cannot be reloaded');
+P.player.fireCd = 0;
+P.player.ammo = 40;
+P.fire(); run(2);
+ok(P.player.ammo === 40 && P.player.clip === 8, 'and swinging it spends no ammo');
+
+// ── the knife reaches a body you are standing on, which is most of the range
+//    it has. Nothing keeps the player off an enemy tile — blockAt only reads
+//    the grid — so walking into a guard puts it at depth ~0.2, inside the
+//    0.35 dead zone every gun has. That one number is the whole of "melee
+//    works at contact range"; the screen-space test needs no help, because
+//    depth cancels out of it and it is really |lateral| > wW/2.
+P.startLevel();
+freezeEnemies();
+const kv = firstGuard();
+P.player.x = kv.x - 0.18; P.player.y = kv.y;
+P.player.a = Math.atan2(kv.y - P.player.y, kv.x - P.player.x);
+ok(0.18 < W[PISTOL_I].minDepth && W[KNIFE].minDepth === 0,
+   `test setup: 0.18u is inside the guns' dead zone (${W[PISTOL_I].minDepth}) and outside the knife's`);
+P.selectWeapon(KNIFE);
+P.player.fireCd = 0;
+const kvHp = kv.hp;
+P.fire(); run(2);
+ok(kv.hp < kvHp, `the knife connects at contact range (${kvHp} -> ${kv.hp})`);
+
+// ...and not across a room, which is what `reach` is for
+P.startLevel();
+freezeEnemies();
+const kf = firstGuard();
+ok(place(kf, 3), 'test setup: player placed 3u from a guard with LOS');
+P.selectWeapon(KNIFE);
+P.player.fireCd = 0;
+const kfHp = kf.hp;
+P.fire(); run(2);
+ok(kf.hp === kfHp, 'the knife does not reach across a room');
+P.selectWeapon(PISTOL_I);
+P.player.fireCd = 0;          // the raise costs a beat; clear it after the switch
+P.fire(); run(2);
+ok(kf.hp < kfHp, 'but the pistol does, from the same spot');
+
+// ── per-weapon cooldown really gates the rate of fire
+P.startLevel();
+freezeEnemies();
+const cdTarget = firstGuard();
+place(cdTarget, 3);
+for (const [idx, name] of [[PISTOL_I, 'pistol'], [CHAIN, 'chaingun']]) {
+  P.player.weapon = idx;
+  P.player.ammo = 400; P.player.clip = P.curWeapon().clip;
+  P.player.fireCd = 0; P.player.windT = P.curWeapon().spinUp;
+  const before = P.player.ammo;
+  // 30 frames at 16ms = 0.48s: 1 pistol shot at 0.28s, several chaingun at 0.07s
+  for (let i = 0; i < 30; i++) { P.fire(); run(1); P.player.windT = P.curWeapon().spinUp; }
+  const shots = before - P.player.ammo;
+  if (name === 'pistol') ok(shots <= 2, `the pistol fires at most twice in 0.48s (${shots})`);
+  else ok(shots >= 5, `the chaingun fires far more in the same time (${shots})`);
+}
+
+// ── the chaingun will not fire until its barrels are up to speed
+P.startLevel();
+freezeEnemies();
+P.selectWeapon(CHAIN);
+P.player.ammo = 100; P.player.clip = 50; P.player.fireCd = 0; P.player.windT = 0;
+const spinAmmo = P.player.ammo;
+P.fire();
+ok(P.player.ammo === spinAmmo, 'a cold chaingun fires nothing on the first pull');
+run(40, [' ']);   // hold the trigger past the 0.42s spin-up
+ok(P.player.ammo < spinAmmo, `holding it spins up and then fires (${spinAmmo} -> ${P.player.ammo})`);
+
+// ── the auto gate: a held trigger repeats for the SMG and not for the pistol.
+//    This is the semi-auto item, exercised through frame()'s real input path
+//    rather than by calling fire() directly, which bypasses the gate.
+P.startLevel();
+freezeEnemies();
+for (const [idx, name] of [[PISTOL_I, 'pistol'], [SMG_I, 'SMG']]) {
+  P.player.weapon = idx;
+  P.player.ammo = 300; P.player.clip = P.curWeapon().clip;
+  P.player.fireCd = 0; P.player.reloadT = 0;
+  const before = P.player.ammo;
+  run(40, [' ']);            // ~0.64s with the trigger held down
+  const shots = before - P.player.ammo;
+  if (name === 'pistol') ok(shots === 0, `holding fire does not repeat the pistol (${shots} shots)`);
+  else ok(shots >= 4, `holding fire does repeat the ${name} (${shots} shots)`);
+}
+
+// ── reload cycle length is the weapon's own, not always the pistol's
+P.startLevel();
+P.selectWeapon(SMG_I);
+P.player.ammo = 60; P.player.clip = 1; P.player.reloadT = 0;
+ok(P.startReload() && Math.abs(P.player.reloadT - W[SMG_I].reload) < 1e-9,
+   `the SMG reloads on its own cycle (${P.player.reloadT}s, not ${W[PISTOL_I].reload}s)`);
+ok(Math.abs(P.player.reloadMax - W[SMG_I].reload) < 1e-9,
+   'and the view-model is told how long that cycle is');
+run(90);
+ok(P.player.clip === W[SMG_I].clip, `it seats a full SMG magazine (${P.player.clip})`);
+
+P.selectWeapon(PISTOL_I);
 
 // ── doors ────────────────────────────────────────────────────────────────────
 group('doors & keycards');
@@ -677,6 +824,305 @@ ok(longestAttack > 25,
    `a burst holds the attack state for ${longestAttack} frames — a single shot is ~14`);
 
 P.startLevel(0);
+
+// ── damage direction ─────────────────────────────────────────────────────────
+group('damage direction');
+P.startLevel();
+freezeEnemies();
+
+// A hit with no source is still a hit: the flash fires, the arc does not.
+P.hitDirs().length = 0;
+P.player.hp = 100;
+P.hurtPlayer(7);
+ok(P.player.hp === 93, 'a source-less hit still takes health');
+ok(P.hitDirs().length === 0, 'and leaves no marker pointing nowhere');
+
+// The side the arc lands on is MEASURED against the game's own projection —
+// the same technique the guard-rotation test uses, and for the same reason:
+// the guardLeft/guardRight pair shipped mirrored in all eight cases because
+// someone reasoned about the sign of atan2 instead of measuring it. An arc
+// that points at the wrong side of the screen would be just as invisible in
+// review and considerably more annoying in play.
+for (const turn of [-0.55, 0.55]) {
+  P.startLevel();
+  freezeEnemies();
+  const src = firstGuard();
+  ok(place(src, 3), 'test setup: a guard 3u ahead with LOS');
+  P.player.a += turn;                       // now it is off to one side
+
+  const cosA = Math.cos(P.player.a), sinA = Math.sin(P.player.a);
+  const ex = src.x - P.player.x, ey = src.y - P.player.y;
+  const depth = ex * cosA + ey * sinA;
+  const lat   = -ex * sinA + ey * cosA;
+  // where the renderer itself would put this body on screen
+  const truth = P.spriteSpan(depth, lat, P.spr().guard.wW).centerCol;
+
+  P.hitDirs().length = 0;
+  P.player.hp = 100;
+  P.hurtPlayer(5, src.x, src.y);
+  ok(P.hitDirs().length === 1, 'a hit from a known body leaves one marker');
+
+  const cell = P.hitDirCell(P.hitDirAngle(P.hitDirs()[0]), 0, 45);
+  const side = n => (n > 80 ? 'right' : 'left');
+  ok(Math.sign(cell.col - 80) === Math.sign(truth - 80),
+     `the arc lands on the same side the shooter renders on ` +
+     `(sprite at col ${truth.toFixed(0)} = ${side(truth)}, ` +
+     `arc at col ${cell.col} = ${side(cell.col)})`);
+}
+
+// Behind you is behind you: the arc drops below the crosshair, not above it.
+{
+  P.startLevel();
+  freezeEnemies();
+  P.player.a = 0;
+  P.hitDirs().length = 0;
+  P.hurtPlayer(5, P.player.x - 4, P.player.y);        // directly astern
+  const back = P.hitDirCell(P.hitDirAngle(P.hitDirs()[0]), 0, 45);
+  P.hitDirs().length = 0;
+  P.hurtPlayer(5, P.player.x + 4, P.player.y);        // dead ahead
+  const front = P.hitDirCell(P.hitDirAngle(P.hitDirs()[0]), 0, 45);
+  ok(back.row > 45 && front.row < 45,
+     `a shot from behind reads low and one from ahead reads high (${back.row} vs ${front.row})`);
+}
+
+// The arc swings as you turn to look: it is anchored in the world, not to the
+// screen position it first appeared at.
+{
+  P.startLevel();
+  freezeEnemies();
+  P.player.a = 0;
+  P.hitDirs().length = 0;
+  P.hurtPlayer(5, P.player.x, P.player.y + 4);
+  const before = P.hitDirCell(P.hitDirAngle(P.hitDirs()[0]), 0, 45).col;
+  P.player.a += Math.PI / 2;                          // turn to face the shooter
+  const after = P.hitDirCell(P.hitDirAngle(P.hitDirs()[0]), 0, 45).col;
+  ok(before !== after && Math.abs(after - 80) < Math.abs(before - 80),
+     `turning toward the shooter swings the arc to centre (col ${before} -> ${after})`);
+}
+
+// The arc is a CIRCLE, which on a 7x12 cell grid means the row radius has to be
+// smaller than the column radius, not equal to it. Getting this backwards
+// draws a tall ellipse that still points the right way, so it survives review.
+{
+  const c = P.cellSize();
+  const top   = P.hitDirCell(0, 0, 45);              // straight ahead
+  const right = P.hitDirCell(Math.PI / 2, 0, 45);    // 90 degrees starboard
+  const rowPx = (45 - top.row) * c.h;
+  const colPx = (right.col - 80) * c.w;
+  ok(Math.abs(rowPx - colPx) <= c.h,
+     `the arc is round in pixels, not in cells (${colPx}px across, ${rowPx}px up)`);
+}
+
+// A new floor is a clean slate: an arc left pointing at last floor's ambush
+// would be pointing at a body that is not there.
+P.startLevel();
+P.hurtPlayer(5, P.player.x + 3, P.player.y);
+ok(P.hitDirs().length === 1, 'test setup: a marker is live');
+P.startLevel();
+ok(P.hitDirs().length === 0, 'starting a floor clears the markers');
+
+// Markers merge and expire rather than piling up on the same few cells.
+P.startLevel();
+P.hitDirs().length = 0;
+for (let i = 0; i < 5; i++) P.hurtPlayer(1, P.player.x + 3, P.player.y);
+ok(P.hitDirs().length === 1, 'repeated fire from one spot refreshes one marker');
+P.hurtPlayer(1, P.player.x - 3, P.player.y);
+ok(P.hitDirs().length === 2, 'but a shot from elsewhere adds its own');
+run(60);
+ok(P.hitDirs().length === 0, 'and they expire');
+
+// The arc redraws every frame it is alive, so its fade has to be quantised:
+// every distinct (glyph, colour) pair is an atlas entry, and a continuous
+// alpha stringified per frame mints a fresh one each time. The property that
+// matters is not a magic number, it is that the cost CONVERGES — so this
+// measures the atlas after a burst of arcs and again after five times as many.
+//
+// Measured as an A/B over the SAME number of frames, because ordinary
+// rendering — the neon flicker, the rain — mints entries of its own as the
+// clock advances, and a naive before/after would bill those to the arc.
+P.startLevel();
+run(600);                                  // let the background palette settle
+const settled = P.atlasSize();
+run(1000);                                 // 1000 quiet frames
+const quietCost = P.atlasSize() - settled;
+const beforeArcs = P.atlasSize();
+for (let i = 0; i < 200; i++) {            // 1000 frames, 200 arcs
+  P.player.hp = 100;
+  P.hurtPlayer(1, P.player.x + Math.cos(i) * 3, P.player.y + Math.sin(i) * 3);
+  run(5);
+}
+const arcCost = P.atlasSize() - beforeArcs;
+ok(arcCost - quietCost <= 8,
+   `200 arcs cost at most the 8 (glyph, colour) pairs a 4-step fade can make ` +
+   `(${arcCost} entries over 1000 frames vs ${quietCost} for the same frames idle)`);
+
+// The damage-number pop fade is the pre-existing sibling of the arc fade above
+// — the one that was found unquantised while fixing the arc — and it needs
+// its own assertion for the same reason: nothing else in the suite fires
+// enough shots to trip the boot-time `atlasSize() < 500` check before this
+// point, so a regression here would pass every other assertion clean.
+// Unquantised, 40 shots cost ~375 atlas entries; quantised to 8 steps it
+// converges. Same A/B shape as the arc, same reason: ordinary rendering
+// mints entries of its own as frames advance.
+P.startLevel();
+run(600);
+const popSettled = P.atlasSize();
+run(300);
+const popQuietCost = P.atlasSize() - popSettled;
+const popFoe = firstGuard();
+const beforePops = P.atlasSize();
+for (let i = 0; i < 40; i++) {
+  popFoe.hp = 1e9; popFoe.x = P.player.x + 2; popFoe.y = P.player.y; P.player.a = 0;
+  P.player.fireCd = 0; P.player.ammo = 500; P.player.clip = 8;
+  P.fire(); run(5);
+}
+const popCost = P.atlasSize() - beforePops;
+// Measured convergence at 8-step quantisation: ~293 entries flat through 320+
+// shots (hit/kill colour x jitter position x shadow row all multiply against
+// the 8 alpha steps). Unquantised the same 40 shots cost ~375 on their own and
+// never stop growing. 100 is comfortably below "never converges" and above
+// the honest quantised cost.
+ok(popCost - popQuietCost < 100,
+   `40 damage-number pops cost a bounded handful of (glyph, colour) pairs, ` +
+   `not an unbounded ~375 (${popCost} entries vs ${popQuietCost} idle)`);
+
+// ── difficulty ───────────────────────────────────────────────────────────────
+// LAST of the shipped-level groups on purpose. `difficulty` is a run-level
+// setting that startLevel deliberately does NOT reset, so it leaks forward into
+// every test after it — the same ordering trap as startLevel() defaulting to
+// the current floor. This group restores the default before it hands back.
+group('difficulty');
+const D = P.difficulties();
+ok(D.length === 4, `four settings (${D.map(d => d.name).join(' / ')})`);
+ok(P.difficulty() === 2, 'the default is index 2');
+ok(D[2].acc === 1 && D[2].dmg === 1 && D[2].cd === 1 && D[2].keep === 1 && D[2].extra === 0,
+   'and every multiplier on it is 1.0 — the default IS the pre-difficulty game');
+ok(D[0].acc < D[2].acc && D[2].acc < D[3].acc, 'accuracy climbs across the four');
+ok(D[0].dmg < D[2].dmg && D[2].dmg < D[3].dmg, 'so does damage');
+ok(D[3].cd < D[2].cd && D[2].cd < D[0].cd, 'and the delay between attacks shortens');
+
+ok(P.setDifficulty(0) === 0 && P.difficulty() === 0, 'setDifficulty selects');
+ok(P.setDifficulty(99) === 3 && P.setDifficulty(-5) === 0, 'and clamps to the table');
+
+// ── enemy HP is deliberately NOT scaled: shots-to-kill has to mean the same
+//    thing at every setting, or the damage numbers stop being feedback.
+const hpAt = d => { P.setDifficulty(d); P.startLevel(); return firstGuard().spec.hp; };
+ok(hpAt(0) === hpAt(3), `a guard has the same health on both extremes (${hpAt(0)})`);
+
+// ── spawn counts. Deterministic, so the same setting twice gives the same
+//    floor — a random filter would make every restart a different level.
+const countAt = d => { P.setDifficulty(d); P.startLevel(); return P.enemies().length; };
+const easy = countAt(0), normal = countAt(2), death = countAt(3);
+ok(easy === countAt(0), `the same setting builds the same floor twice (${easy})`);
+ok(easy < normal, `the easiest floor is thinner (${easy} vs ${normal})`);
+ok(death > normal, `and the hardest is denser (${death} vs ${normal})`);
+ok(P.enemies().length === P.totalEnemies(),
+   `the kill denominator follows the real body count (${P.totalEnemies()})`);
+
+// ── the boss is never filtered away: it is the floor's win condition, and the
+//    elevator will not move while it lives.
+for (const d of [0, 1, 2, 3]) {
+  P.setDifficulty(d);
+  P.startLevel(2);
+  if (!P.boss()) { ok(false, `floor 3 still places a CEO on setting ${d}`); break; }
+}
+ok(!!P.boss(), 'the CEO survives every difficulty filter');
+P.startLevel(0);
+
+// ── what difficulty is actually FOR: the same guard, in the same spot, has to
+//    hurt you more on a harder setting. Everything above this point asserts on
+//    the table's shape and the body count — none of it would notice the
+//    multipliers being dropped on the floor of enemyShot(), and a mutation
+//    battery caught exactly that: deleting D.acc and deleting D.dmg both
+//    survived a fully green suite.
+//
+//    Accuracy and damage are sampled SEPARATELY so that dropping either one
+//    fails its own assertion rather than hiding behind the other.
+{
+  const sample = (d, n) => {
+    P.setDifficulty(d);
+    P.startLevel();
+    freezeEnemies();
+    const e = firstGuard();
+    place(e, 2);
+    let hits = 0, dmg = 0;
+    for (let i = 0; i < n; i++) {
+      P.player.hp = 100;              // topped up so a sample can never kill
+      P.enemyShot(e, 2);
+      const took = 100 - P.player.hp;
+      if (took > 0) { hits++; dmg += took; }
+    }
+    return { hits, perHit: hits ? dmg / hits : 0 };
+  };
+  const N = 500;
+  const soft = sample(0, N), hard = sample(3, N);
+  // the tables differ by 1.30/0.55 = 2.4x on each; 1.6x is a wide margin on
+  // 500 samples while still being far above the noise
+  ok(hard.hits > soft.hits * 1.6,
+     `a harder setting lands more shots (${soft.hits}/${N} on the easiest, ` +
+     `${hard.hits}/${N} on the hardest)`);
+  ok(hard.perHit > soft.perHit * 1.6,
+     `and each one hurts more (${soft.perHit.toFixed(1)} vs ` +
+     `${hard.perHit.toFixed(1)} hp per hit)`);
+}
+
+// ── and the delay between attacks: only enemyShot() was sampled above, which
+//    never exercises DIFFICULTY[difficulty].cd — that multiplier is applied to
+//    e.atkCd in the 'attack' case of stepEnemies, one FSM transition away from
+//    anything the sample above touches. Drive the real FSM instead: park a
+//    guard already in 'attack' with LOS and count how many volleys it gets off
+//    in a fixed window on each setting.
+{
+  const attacksIn = (d, ms) => {
+    P.setDifficulty(d);
+    P.startLevel();
+    freezeEnemies();
+    const e = firstGuard();
+    place(e, 3);
+    e.state = 'attack'; e.stateT = 0; e.shotsLeft = 1;
+    let shots = 0;
+    const before = P.player.hp;
+    let lastHp = before;
+    for (let t = 0; t < ms; t += 16) {
+      run(1);
+      if (e.state === 'attack' && e.stateT === 0) shots++;   // just re-entered attack
+      // re-arm: freezeEnemies + a fixed spot means it will keep re-entering
+      // 'attack' every cooldown as long as it stays alive and in range
+      if (e.state === 'chase') { e.state = 'attack'; e.stateT = 0; e.shotsLeft = 1; }
+    }
+    return shots;
+  };
+  const N = 4000;   // milliseconds
+  const soft = attacksIn(0, N), hard = attacksIn(3, N);
+  ok(hard > soft, `a shorter cooldown fits more attacks into the same window (${soft} vs ${hard})`);
+}
+
+
+// Restore the default BEFORE the fixture below: loadWithLevel replaces the
+// process globals, and every assertion on `P` after that point would be
+// running against an instance that has stopped stepping. Forgetting this is
+// exactly how a difficulty group poisons every group after it.
+P.setDifficulty(2);
+P.startLevel(0);
+ok(P.difficulty() === 2, 'the default is restored before the fixtures run');
+
+// ── thinning can never empty a floor. ratio() reports an empty category as
+//    100%, so a floor filtered down to nothing would silently hand out a
+//    perfect kill ratio and its 2500 bonus.
+{
+  const f = loadWithLevel([
+    '##########',
+    '#@......g#',
+    '#........#',
+    '#.......X#',
+    '##########',
+  ], { htmlPath: process.env.WOLF3D_HTML });
+  f.P.setDifficulty(0);
+  f.P.startLevel();
+  ok(f.P.enemies().length === 1,
+     `a one-guard floor keeps its guard on the easiest setting (${f.P.enemies().length})`);
+  ok(f.P.totalEnemies() > 0, 'so the kill ratio never divides by zero');
+}
 
 // ── push-wall clamping, on purpose-built geometry ────────────────────────────
 // The shipped level happens to put every secret in an open corridor, so it
@@ -1053,6 +1499,123 @@ group('enemies and doors (fixture)');
   un2.phase = 'closed'; un2.open = 0;
   un.F.openDoorAhead(un.foe, un2.gx, un2.gy);
   ok(un2.phase === 'closed', 'a door is only leaned on from arm\'s length, not across the room');
+}
+
+// ── spread makes distance matter (fixture) ───────────────────────────────────
+// The shipped floors have no sightline long enough to tell an accurate weapon
+// from an inaccurate one, which is the usual reason a fixture exists here.
+//
+// The hit test is depth-independent on its own (|lateral| > wW/2), so ALL of
+// the SMG's and chaingun's inaccuracy comes from `spread`: a fixed jitter in
+// screen columns against a target whose half-width is 59/depth columns. Close
+// up nothing misses; far away the jitter is wider than the guard.
+group('weapon spread (fixture)');
+{
+  const f = loadWithLevel([
+    '####################',
+    '#..................#',
+    '#@...............g.#',
+    '#..................#',
+    '####################',
+  ], { htmlPath: process.env.WOLF3D_HTML });
+  const F = f.P;
+  const foe = F.enemies().find(e => e.type === 'guard');
+  foe.state = 'hurt'; foe.stateT = 1e9;      // park it; this is about aim only
+
+  // dead centre on the target, at the far end of the corridor
+  F.player.y = foe.y;
+  F.player.a = Math.atan2(foe.y - F.player.y, foe.x - F.player.x);
+  const range = Math.hypot(foe.x - F.player.x, foe.y - F.player.y);
+  ok(range > 12, `test setup: the corridor gives a ${range.toFixed(1)}u sightline`);
+  ok(F.hasLOS(F.player.x, F.player.y, foe.x, foe.y), 'test setup: with line of sight');
+
+  // Perfectly aimed, so every miss is spread and nothing else.
+  const volley = (idx, shots) => {
+    F.player.weapon = idx;
+    let hits = 0;
+    for (let i = 0; i < shots; i++) {
+      foe.hp = 1e9;
+      F.player.ammo = 500; F.player.clip = F.curWeapon().clip;
+      F.player.fireCd = 0; F.player.reloadT = 0;
+      F.player.windT = F.curWeapon().spinUp;
+      F.fire();
+      if (foe.hp < 1e9) hits++;
+    }
+    return hits;
+  };
+
+  const N = 200;
+  const pistolHits = volley(1, N);
+  const smgHits    = volley(2, N);
+  const chainHits  = volley(3, N);
+  ok(pistolHits === N, `the pistol never misses a centred target (${pistolHits}/${N})`);
+  ok(smgHits < N, `the SMG does, at ${range.toFixed(1)}u (${smgHits}/${N})`);
+  ok(chainHits < smgHits,
+     `and the chaingun is the loosest of the three (${chainHits}/${N} vs ${smgHits}/${N})`);
+
+  // ...and none of them misses in your face, where the jitter is far narrower
+  // than the target: same weapon, same roll, different geometry.
+  foe.x = F.player.x + 1.2;
+  const smgClose = volley(2, 60);
+  ok(smgClose === 60, `the SMG does not miss at 1.2u (${smgClose}/60)`);
+
+  // ── one roll per SHOT, not one per candidate.
+  // Rolling inside the candidate loop gives every enemy its own independent
+  // chance, so a shot into a crowd would hit far more often than the same shot
+  // at one body — spread would quietly stop being a cone and start being a
+  // hit test that widens with the number of things in front of you. Stacking
+  // three targets on one spot makes that difference enormous and needs no
+  // randomness to reason about: p versus 1-(1-p)^3.
+  foe.x = 17.5;
+  const stackHits = (n, shots) => {
+    const stack = [foe];
+    for (let i = 1; i < n; i++) {
+      const clone = F.enemies().find(e => e.type === 'guard' && e !== foe && !stack.includes(e));
+      const born = clone || Object.assign(Object.create(Object.getPrototypeOf(foe)), foe);
+      born.x = foe.x; born.y = foe.y; born.alive = true;
+      born.state = 'hurt'; born.stateT = 1e9;
+      if (!F.enemies().includes(born)) F.enemies().push(born);
+      stack.push(born);
+    }
+    let hits = 0;
+    for (let i = 0; i < shots; i++) {
+      for (const e of stack) e.hp = 1e9;
+      F.player.weapon = 2;
+      F.player.ammo = 500; F.player.clip = F.curWeapon().clip;
+      F.player.fireCd = 0; F.player.reloadT = 0;
+      F.fire();
+      if (stack.some(e => e.hp < 1e9)) hits++;
+    }
+    // leave only the original standing for anything downstream
+    for (const e of stack.slice(1)) e.alive = false;
+    return hits;
+  };
+  const one   = stackHits(1, 300);
+  const three = stackHits(3, 300);
+  ok(three < one * 1.35,
+     `stacking three targets does not raise the SMG's hit rate ` +
+     `(${one}/300 on one, ${three}/300 on three — a per-candidate roll would be ~${
+        Math.round(300 * (1 - Math.pow(1 - one / 300, 3)))})`);
+
+  // ── `reach` is a RADIUS, not a forward depth. A guard 1.55u ahead and 0.5u
+  //    to the side is 1.63u away: outside the knife's 1.6u reach, but inside
+  //    it on the forward axis alone, and still well within the sprite column
+  //    the hit test uses. Exact arithmetic, no randomness — this is the only
+  //    geometry that tells the two models apart.
+  F.player.x = 1.5; F.player.y = 2.5; F.player.a = 0;
+  foe.x = F.player.x + 1.55; foe.y = F.player.y + 0.5;
+  foe.hp = 1e9;
+  const away = Math.hypot(foe.x - F.player.x, foe.y - F.player.y);
+  ok(away > 1.6 && 1.55 < 1.6 && 0.5 < F.spr().guard.wW / 2,
+     `test setup: ${away.toFixed(3)}u away but only 1.55u ahead, and inside the sprite`);
+  F.player.weapon = 0;                       // knife
+  F.player.fireCd = 0; F.player.windT = 0;
+  F.fire();
+  ok(foe.hp === 1e9, 'the knife measures reach as a radius, not a forward depth');
+  foe.x = F.player.x + 1.0; foe.y = F.player.y + 0.3;
+  F.player.fireCd = 0;
+  F.fire();
+  ok(foe.hp < 1e9, 'and does connect once the body is genuinely within reach');
 }
 
 // ── report ───────────────────────────────────────────────────────────────────

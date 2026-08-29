@@ -4,32 +4,15 @@ Roadmap for `wolf3d.html`. Three floors, the CEO fight, core combat, sliding
 doors + keycards, secret push-walls, the magazine/feedback pass and the
 end-of-floor tally are in — Phase 1 is done. Phase 2 closed the enemy engine
 gaps: pathfinding, separation, patrols and rotations. The restructure pass then
-split the single file into `wolf3d/*.js` and gave it a bundler. Open work is
+split the single file into `wolf3d/*.js` and gave it a bundler. Phase 3 added
+the weapon roster, the semi-auto pistol, difficulty levels and a damage
+direction arc. Open work is
 ordered roughly by value per hour of work; everything finished is collected
 under **Completed** at the bottom.
 
-**The line numbers below are stale.** They were written against the single-file
-build and every one of them has moved into some `wolf3d/*.js` — grep the
-function name instead, and see the file map in `reference/CLAUDE.md` for which
-file to look in.
-
----
-
-## Phase 3 — combat depth
-
-- [ ] **Weapon roster.** Only the pistol exists (`GUN_IDLE` at `:586`, `fire` at
-  `:1005`). Add knife (melee, no ammo), SMG (fast, auto), chaingun (spin-up).
-  Number keys select. `fire()` needs per-weapon cooldown, damage, spread, and
-  ammo cost; the view-model blit in `drawGun` (`:1302`) already takes any art
-  table, so new weapons are mostly new ASCII art.
-- [ ] **Semi-auto pistol.** Holding Space currently auto-fires at the 0.28s
-  cooldown (`:1540`). Wolf3D's pistol was one shot per press. Gate the hold-to-
-  fire path behind the weapon's own `auto` flag once the roster lands.
-- [ ] **Difficulty levels.** "Can I play, Daddy?" through "I am Death incarnate" —
-  scale enemy damage, accuracy (`p` in the `attack` case), and spawn counts.
-  Pick it on the splash screen.
-- [ ] **Damage direction indicator.** `hurtPlayer` (`:1060`) flashes the whole
-  screen red. Show which side the shot came from so ambushes are readable.
+Entries below name the function and the file it lives in rather than a line
+number — line numbers drift with every edit, and the file map in
+`reference/CLAUDE.md` says which file owns what.
 
 ---
 
@@ -38,8 +21,8 @@ file to look in.
 - [ ] **Thin-wall doors with frames.** Doors currently fill their whole tile, so
   they sit flush with the wall plane. Real Wolf3D doors sit at the tile centre
   with a visible recess. Requires proper thin-wall raycasting: on hitting a door
-  cell, step to the mid-plane and test there. `castRay` (`:780`) already
-  computes `wallX` and already slips rays through the opened slice (`:809`), so
+  cell, step to the mid-plane and test there. `castRay` in `wolf3d/raycast.js`
+  already computes `wallX` and already slips rays through the opened slice, so
   this is an extension of machinery that exists, not a rewrite.
 - [ ] **Door slide direction is view-dependent.** `wallX` runs along opposite
   axes depending on which face you hit, so the same door appears to retract left
@@ -47,14 +30,15 @@ file to look in.
   wrong. Fix by deriving the slide direction from the door's own fixed axis
   rather than from the hit face.
 - [ ] **Status bar sits above the scanlines.** `#statusbar` is `z-index: 7`
-  (`:94`) and `#stage::before` (the scanline overlay) is `z-index: 6` (`:60`),
-  so the HUD escapes the CRT treatment the viewport gets. Either move the bar
-  under the overlay or render it into the canvas as ASCII cells.
-- [ ] **Music.** Audio is ambience plus one-shots (`initAudio` at `:1326`, `sfx`
-  at `:1410`). A procedural chiptune march, muted with the rest under `M`, would
-  do a lot for the parody.
-- [ ] **Pause.** No pause exists. `gameState` (`:647`) already gates movement,
-  firing and enemies, so a `'paused'` value is a small addition.
+  and `#stage::before` (the scanline overlay) is `z-index: 6`, both in
+  `wolf3d/style.css`, so the HUD escapes the CRT treatment the viewport gets.
+  Either move the bar under the overlay or render it into the canvas as ASCII
+  cells.
+- [ ] **Music.** Audio is ambience plus one-shots (`initAudio` and `sfx` in
+  `wolf3d/audio.js`). A procedural chiptune march, muted with the rest under
+  `M`, would do a lot for the parody.
+- [ ] **Pause.** No pause exists. `gameState` (`wolf3d/world.js`) already gates
+  movement, firing and enemies, so a `'paused'` value is a small addition.
 - [ ] **Blood decals / gib frames.** Corpses persist (good) but death is two
   frames. More frames, plus floor decals, would sell the hits.
 
@@ -103,16 +87,17 @@ file to look in.
   bullet in this list). Now that there are three floors' worth of secrets, that
   is worth a validator check rather than a curiosity — no shipped floor places
   two secrets adjacent, but nothing enforces it.
-- `castRay` (`:791`) computes `Math.abs(1 / cosA)`, which is `Infinity` when the
-  angle is exactly axis-aligned; combined with a player sitting exactly on a
-  grid line it would produce `NaN`. Not reachable in practice — JS `Math.cos`
-  returns `6.1e-17` rather than `0` at ±π/2 — but it is a latent trap if angles
-  are ever snapped to exact multiples of π/2.
-- `zbuf` is a fresh `new Float32Array(COLS)` every frame (`:1556`). Harmless at
-  160 columns, but it is per-frame garbage; hoist it if the profile ever matters.
-- `frontCell` (`:970`) probes three fixed distances (0.6 / 1.1 / 1.6) along the
-  facing vector to find what you are trying to use. Crude, and it can pick a
-  diagonal neighbour at odd angles.
+- `castRay` (`wolf3d/raycast.js`) computes `Math.abs(1 / cosA)`, which is
+  `Infinity` when the angle is exactly axis-aligned; combined with a player
+  sitting exactly on a grid line it would produce `NaN`. Not reachable in
+  practice — JS `Math.cos` returns `6.1e-17` rather than `0` at ±π/2 — but it
+  is a latent trap if angles are ever snapped to exact multiples of π/2.
+- `zbuf` is a fresh `new Float32Array(COLS)` every frame, allocated in `frame()`
+  in `wolf3d/main.js`. Harmless at 160 columns, but it is per-frame garbage;
+  hoist it if the profile ever matters.
+- `frontCell` (`wolf3d/world.js`) probes three fixed distances (0.6 / 1.1 / 1.6)
+  along the facing vector to find what you are trying to use. Crude, and it can
+  pick a diagonal neighbour at odd angles.
 - The atlas holds only ~80 entries in normal play against a 32768 cap, so there
   is plenty of headroom for new colours and glyphs.
 - `castSecrets` returns `mapX`/`mapY` truncated from a fractional slab origin.
@@ -130,6 +115,113 @@ file to look in.
 
 Newest first. Kept for the design notes — several record why an approach that
 looks obvious was not the one taken.
+
+- [x] **Phase 3 — combat depth.** All four items, shipped together. The suite
+  went 192 assertions → 269, and a 31-bug mutation battery covers the new
+  systems. **Three of the first twenty survived a fully green suite** —
+  `enemyShot`'s accuracy and damage multipliers, and a floor filtered down to
+  zero enemies never being caught — because every difficulty assertion up to
+  that point was structural (table shape, spawn counts) rather than behavioural
+  (does a harder setting actually hurt more). Fixed with a 500-sample test that
+  drives real hits through `enemyShot` and measures hit rate and per-hit damage
+  separately, so dropping either multiplier fails its own assertion. The battery
+  run was still going when this entry was written; see the note below.
+  - *The roster is a table, and it landed as a pure refactor first.* `WEAPONS`
+    in a new `wolf3d/weapons.js` — data only, per rule 2 — with the pistol row
+    reproducing the shipped numbers exactly (0.28s, 22-41, 8-round magazine,
+    9-tile alert, no spread). That row is why the entire existing suite stayed
+    at **192/192 unchanged** through the indirection, which is a stronger claim
+    than "still green": it is the same game until you press a number key.
+    `art.js` was 307 lines and nine more art tables would have crossed the
+    400-line budget, so the table went to its own file rather than where
+    `reference/CLAUDE.md` said to put it — rule 4 outranks a filename, and that
+    note has been corrected.
+  - **The melee "problem" did not exist, and the mutation battery is what
+    proved it.** Both the plan and its review said the screen-space hit test
+    collapses at contact range, so the knife needed an angular cone. It does
+    not: `|centerCol - aim| > halfW` has `depth` on both sides and it cancels,
+    leaving `|lateral| > wW/2` — a cylinder test that behaves identically at
+    0.2u and 20u. A mutation that replaced the cone with the ordinary column
+    test **survived a green suite**, which is what sent anyone to check the
+    algebra. The cone came back out; melee is now one number, `minDepth: 0`,
+    against the 0.35 dead zone every gun keeps. One aiming model, one branch
+    fewer, and the reason is in `weapons.js` so it is not re-derived.
+  - *Spread is jitter in screen columns, and that is the only reason distance
+    matters.* Since the hit test is depth-independent, all of an SMG's
+    inaccuracy is a fixed column jitter against a target whose half-width is
+    59/depth columns. It is rolled **once per shot, outside the candidate
+    loop** — rolling per enemy would give every body its own chance and quietly
+    turn spread into a hit test that widens with the size of the crowd. That
+    was the second survivor: with one target the two are indistinguishable, so
+    it needed a fixture that stacks three bodies on one tile, where the models
+    predict 152/300 against 275/300. Measured 275.
+  - *Switching truncates the magazine, never tops it up.* `player.ammo` already
+    counts the seated rounds, so the surplus falls back to the reserve on its
+    own and no accounting changed. The knife is exempt: at capacity 0 the same
+    rule would have emptied the gun you were holding and charged you a reload
+    for having drawn a blade.
+  - *Difficulty scales offence and counts, never health.* Wolf3D's philosophy
+    and a practical one: shots-to-kill has to mean the same thing at every
+    setting or the damage numbers stop being feedback. Index 2 is the default
+    and every multiplier on it is 1.0, so the default IS the pre-difficulty
+    game. The `cd` multiplier is applied **at the point of use** rather than in
+    `mkEnemy`, because `stepCeoPhase` reassigns `e.spec.cd` outright on a phase
+    change and a baked-in multiplier would have evaporated at 62% health with
+    every existing CEO assertion still green.
+  - *Spawn thinning is a running-ratio walk, not a random roll.* Deterministic,
+    order-preserving, exactly `round(n × keep)` bodies, and it never rounds to
+    zero — `ratio()` reports an empty category as 100%, so thinning a one-guard
+    floor out of existence would have silently paid a perfect kill ratio and
+    its 2500 bonus. Reinforcements land on a tile a body already holds and let
+    `separateEnemies` push them apart, so there is no new placement logic that
+    could drop someone inside a wall.
+  - **`begin()` could run twice, and that bug was already in the tree.** The
+    splash is not removed for 600ms, so its `parentElement` guard stayed true:
+    a difficulty row's click bubbling to `#splash`, or the old click-then-
+    keypress race, called it again — two audio graphs and **two
+    requestAnimationFrame chains that both re-arm forever**. The harness keeps
+    one rAF callback, so no frame-count assertion could ever have seen it; the
+    test asserts `begin()`'s idempotence instead. Fixed with a `booted` latch
+    rather than `stopPropagation`, because the stub DOM invokes handlers with
+    no event object.
+  - *The damage arc is derived from `fwd`/`lat`, not from a world `atan2`.*
+    Same basis the projection uses, where a positive `lat` is screen-right —
+    the quantity `fire()` and `drawSprite` already steer by. The test measures
+    the arc's column against `spriteSpan`'s own answer for the same body rather
+    than asserting a sign, because reasoning about the sign of `atan2` is
+    exactly what shipped `guardLeft`/`guardRight` mirrored in all eight cases.
+    The radius is in columns and converted to rows by the 7:12 cell aspect;
+    using one radius for both axes draws a tall ellipse that still points the
+    right way and so survives review. There is an assertion on the pixel
+    radii for that reason.
+  - **Damage numbers were minting atlas entries without a bound.** Found while
+    quantising the arc's own fade: `drawDmgPops` stringified a continuous alpha
+    to two decimals, so every frame of every fade was a new `(glyph, colour)`
+    pair — 454 entries against the suite's own 500-entry assertion, 91% of the
+    way to tripping it and to the silent `fillText` degradation
+    `reference/CLAUDE.md` warns about. Pre-existing, not Phase 3, and now on
+    the same 8-step quantisation `mix()` uses: a flat 293 through 1,240 shots.
+    The arc's own cost is measured as an A/B over equal frame counts, because
+    the neon flicker and the rain mint entries as the clock advances and a
+    naive before/after bills those to the feature under test.
+  - *`world.js` hit 410 lines, so it split.* `populateEnemies`, `parseLevel`,
+    `startLevel` and `nextLevel` moved to `wolf3d/level.js`. Rule 4 says a file
+    past 400 is a signal to split rather than a target to fill, and the note
+    that says so also says not to answer it by shaving comments.
+  - **TO INVESTIGATE — two mutation-battery survivors, confirmed live against
+    the current tree, no fix yet for either:**
+    - `attack delay ignores difficulty` — deleting the
+      `DIFFICULTY[difficulty].cd` multiplier from the `e.atkCd` assignment in
+      the `attack` case of `stepEnemies` (`wolf3d/enemies.js`) still passes the
+      full suite (270/270). A prior attempt at a fix here did not reproduce red
+      against the actual mutation on direct re-check, so nothing currently
+      guards this multiplier — needs a real test, not another guess at one.
+    - `thinning may empty a floor` — changing the `keep` floor in
+      `populateEnemies` (`wolf3d/level.js`) from `Math.max(1, Math.round(mob *
+      D.keep))` to plain `Math.round(mob * D.keep)` also still passes the full
+      suite (270/270), even though a floor thinned to zero enemies is exactly
+      the case `hud.js`'s `ratio()` mishandles (an empty category reads as a
+      100% kill ratio). No fix attempted yet.
 
 - [x] **The restructure — split to develop, bundle to ship.** 2,883 lines of
   single-file HTML became a 91-line manifest, `wolf3d/style.css`, and fourteen

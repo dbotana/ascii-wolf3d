@@ -33,6 +33,7 @@
     <div class="slot" id="sHpWrap"><span class="lbl">health</span><span class="val" id="sHp">100</span>
       <div id="hpBar"><div id="hpChip"></div><div id="hpFill"></div></div>
     </div>
+    <div class="slot"><span class="lbl">weapon</span><span class="val" id="sWeapon">PISTOL</span></div>
     <div class="slot"><span class="lbl">ammo</span><span class="val" id="sAmmo">8/24</span></div>
     <div class="slot"><span class="lbl">keycards</span>
       <div id="sKeys"><i class="red"></i><i class="blue"></i></div>
@@ -62,6 +63,12 @@
     <h2>WOLFENSTAIN 3D</h2>
     <h3>NEON REICH</h3>
     <p>three floors up &middot; one boardroom &middot; no notice period</p>
+    <div class="diffs">
+      <button type="button" class="diff" id="diff0"><b>1</b> CAN I PLAY, DADDY?</button>
+      <button type="button" class="diff" id="diff1"><b>2</b> DON'T HURT ME</button>
+      <button type="button" class="diff" id="diff2"><b>3</b> BRING 'EM ON</button>
+      <button type="button" class="diff" id="diff3"><b>4</b> I AM DEATH INCARNATE</button>
+    </div>
     <div class="keys">
       <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> move &nbsp;
       <kbd>&larr;</kbd><kbd>&rarr;</kbd> turn &nbsp;
@@ -78,10 +85,12 @@
 <script src="wolf3d/config.js"></script>
 <script src="wolf3d/levels.js"></script>
 <script src="wolf3d/art.js"></script>
+<script src="wolf3d/weapons.js"></script>
 <script src="wolf3d/gfx.js"></script>
 <script src="wolf3d/audio.js"></script>
 <script src="wolf3d/input.js"></script>
 <script src="wolf3d/world.js"></script>
+<script src="wolf3d/level.js"></script>
 <script src="wolf3d/raycast.js"></script>
 <script src="wolf3d/nav.js"></script>
 <script src="wolf3d/enemies.js"></script>

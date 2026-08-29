@@ -62,20 +62,22 @@ the bundler and the harness both read it rather than keeping their own list.
 | file | lines | what |
 |---|---|---|
 | `wolf3d/style.css` | 378 | all CSS |
-| `wolf3d/config.js` | 87 | screen/projection constants, palette + fog cache, distance ramps, status-bar faces |
+| `wolf3d/config.js` | 110 | screen/projection constants, `DIFFICULTY`, palette + fog cache, distance ramps, faces |
 | `wolf3d/levels.js` | 149 | the three floors, `FLOOR_NAMES`, `PAR_TIME` |
-| `wolf3d/art.js` | 307 | `SPR` sprite table, `GUN_*` view-model frames |
+| `wolf3d/art.js` | 307 | `SPR` sprite table, the pistol's `GUN_*` view-model frames |
+| `wolf3d/weapons.js` | 202 | knife / SMG / chaingun art, and the `WEAPONS` table |
 | `wolf3d/gfx.js` | 94 | glyph atlas, `drawChar`, wall shading |
-| `wolf3d/audio.js` | 125 | the whole Web Audio graph |
-| `wolf3d/input.js` | 35 | keyboard, mouse-look, pointer lock |
-| `wolf3d/world.js` | 341 | grid + entities, `parseLevel`, floor lifecycle, grid queries, doors, push-walls |
+| `wolf3d/audio.js` | 130 | the whole Web Audio graph |
+| `wolf3d/input.js` | 50 | keyboard, mouse-look, pointer lock |
+| `wolf3d/world.js` | 267 | grid + entities, difficulty, grid queries, doors, push-walls |
+| `wolf3d/level.js` | 154 | `populateEnemies`, `parseLevel`, `startLevel`, `nextLevel` |
 | `wolf3d/raycast.js` | 54 | DDA raycast, `hasLOS`, `spriteSpan` |
 | `wolf3d/nav.js` | 103 | the BFS flow field |
-| `wolf3d/enemies.js` | 343 | FSM, steering, patrols, separation, loot, the CEO |
-| `wolf3d/combat.js` | 172 | firing, the magazine cycle, damage numbers, pickups |
-| `wolf3d/render.js` | 280 | `drawWalls`, sprites, the weapon view-model, crosshair |
-| `wolf3d/hud.js` | 318 | toasts, banners, status bar, health bar, the tally screen |
-| `wolf3d/main.js` | 122 | `updatePlayer`, `frame`, boot |
+| `wolf3d/enemies.js` | 356 | FSM, steering, patrols, separation, loot, the CEO |
+| `wolf3d/combat.js` | 246 | the roster lookup, firing, the magazine cycle, damage numbers, pickups |
+| `wolf3d/render.js` | 366 | `drawWalls`, sprites, the weapon view-model, crosshair, the damage arc |
+| `wolf3d/hud.js` | 323 | toasts, banners, status bar, health bar, the tally screen |
+| `wolf3d/main.js` | 161 | `updatePlayer`, `frame`, boot |
 
 **Order matters only for top-level execution.** Function declarations hoist
 across the whole shared scope, so a function body may call anything in any file
@@ -84,6 +86,9 @@ loaded four tags later, and it is fine. What genuinely needs ordering is small:
 
 - top-level `const` initialisers that read another file's `const`
   (`CANVAS_W = COLS * CELL_W`), which is why `config.js` is first;
+- `weapons.js` must follow **`art.js`**, not merely `config.js`: the pistol's
+  row in `WEAPONS` points straight at `GUN_IDLE`/`GUN_FIRE`/`GUN_RECOIL`, and
+  it reads `CLIP_SIZE`, `RELOAD_TIME` and `MAX_DEPTH` from `config.js`;
 - the handful of statements that touch the DOM at load — `gfx.js` grabs the
   canvas, `input.js` binds listeners to it (so it must follow `gfx.js`),
   `hud.js` caches elements, and `main.js` registers the splash handlers.
@@ -99,11 +104,16 @@ same problem in fifteen pieces.
 1. **New content is a table row, not a code path.** This is the whole game.
    `SPR` already keys every enemy sprite by type; `mkEnemy` already builds a
    spec per type; `drawGun` already blits *any* art table you hand it. So the
-   Phase 3 weapon roster is a `WEAPONS` table in `art.js` plus a lookup in
-   `fire()` — not four branches. Difficulty levels are a `DIFFICULTY` table
-   scaling `spec` values — not conditionals threaded through the FSM. If a
-   feature is making you add a branch to `fire()` or `stepEnemies`, check
-   whether it wants to be data first.
+   Phase 3 weapon roster is a `WEAPONS` table plus a lookup in `fire()` — not
+   four branches. Difficulty levels are a `DIFFICULTY` table scaling `spec`
+   values — not conditionals threaded through the FSM. If a feature is making
+   you add a branch to `fire()` or `stepEnemies`, check whether it wants to be
+   data first.
+
+   Both shipped in the Phase 3 pass and both held. `WEAPONS` went to its own
+   `wolf3d/weapons.js` rather than into `art.js` as this note originally said:
+   nine more art tables would have put `art.js` past the 400-line budget, and
+   rule 4 outranks the filename.
 2. **Data files hold data only.** No functions in `levels.js` or `art.js`.
 3. **No file calls a game function at top level.** Only `main.js` boots. This is
    what keeps load order a short list of real constraints rather than a
@@ -450,7 +460,7 @@ last floor sets `gameState = 'won'` and shows the OUT banner instead.
 Run all of these before shipping any change. None of them needs a browser.
 
 ```sh
-node reference/run-tests.js                              # 192 assertions against the real game loop
+node reference/run-tests.js                              # 266 assertions against the real game loop
 WOLF3D_HTML=dist/wolf3d.html node reference/run-tests.js # ...and against the shipped bundle
 node reference/validate-level.js                         # map geometry + key-gated reachability, all 3 floors
 node reference/bundle.js                                 # rebuild dist/wolf3d.html
@@ -490,13 +500,18 @@ file has drifted past 400 lines.
 
 **`run-tests.js`** — boot, render, enemy AI, combat, doors, keycards, pickups,
 push-walls, death, restart, level clear, treasure counters, floor advance, the
-tally payout, the CEO fight, and the Phase 2 movement systems (flow field,
-separation, patrols, rotations).
+tally payout, the CEO fight, the Phase 2 movement systems (flow field,
+separation, patrols, rotations) and the Phase 3 combat systems (the weapon
+roster, spread, difficulty scaling, the damage arc).
 
-Two ordering rules bite here. `startLevel()` with no argument restarts the
+Three ordering rules bite here. `startLevel()` with no argument restarts the
 **current** floor, so any test that has moved off floor 1 must reset explicitly
-— the multi-floor group ends with `P.startLevel(0)` for exactly that reason. And
-fixtures still have to come last, for the reason below.
+— the multi-floor group ends with `P.startLevel(0)` for exactly that reason.
+`difficulty` is the same trap one level up: `startLevel` deliberately does
+**not** reset it, so it leaks forward into every group after the one that
+changed it. The difficulty group is therefore the last group to use the shipped
+level, and it restores `setDifficulty(2)` before it hands back. And fixtures
+still have to come last, for the reason below.
 
 **Mutation-tested, and this is the part that matters.** Bugs are injected into
 copies of the game and the suite must go red for every one. It has not always:

@@ -7,10 +7,14 @@
 const keys = new Set();
 let mouseLocked = false;
 let firePressed = false;
+// held, as opposed to firePressed, which is one edge. The auto weapons read
+// this every frame; the pistol only ever sees the edge.
+let mouseHeld = false;
 
 addEventListener('keydown', e => {
   const k = e.key.toLowerCase();
-  if (['arrowleft','arrowright','arrowup','arrowdown','w','a','s','d','e','r',' '].includes(k)) e.preventDefault();
+  if (['arrowleft','arrowright','arrowup','arrowdown','w','a','s','d','e','r',' ',
+       '1','2','3','4'].includes(k)) e.preventDefault();
   if (keys.has(k)) return;
   keys.add(k);
   if (k === ' ')     firePressed = true;
@@ -18,16 +22,27 @@ addEventListener('keydown', e => {
   if (k === 'm')     toggleMute();
   if (k === 'r')     { if (gameState === 'playing') startReload(); }
   if (k === 'p')     startLevel(gameState === 'won' ? 0 : levelIndex);
+  if (k >= '1' && k <= '4') selectWeapon(+k - 1);
 });
 addEventListener('keyup', e => keys.delete(e.key.toLowerCase()));
 
 canvas.addEventListener('mousedown', e => {
   if (e.button !== 0) return;
   if (!mouseLocked && canvas.requestPointerLock) { canvas.requestPointerLock(); return; }
+  // both, deliberately: the edge drives the semi-auto path and the tally
+  // screen, the held flag drives the auto weapons. frame() may act on both in
+  // the same frame, which is harmless only because fire() sets its own
+  // cooldown before it returns — don't reorder that.
   firePressed = true;
+  mouseHeld = true;
 });
+// every way the button can stop being down, including the ones that never
+// deliver a mouseup: releasing the pointer lock with Esc, and losing focus
+addEventListener('mouseup', e => { if (e.button === 0) mouseHeld = false; });
+addEventListener('blur', () => { mouseHeld = false; keys.clear(); });
 document.addEventListener('pointerlockchange', () => {
   mouseLocked = document.pointerLockElement === canvas;
+  if (!mouseLocked) mouseHeld = false;
 });
 addEventListener('mousemove', e => {
   if (!mouseLocked || gameState !== 'playing') return;

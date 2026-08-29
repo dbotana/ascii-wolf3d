@@ -97,6 +97,11 @@ function sfx(name) {
   if (!audioReady || muted) return;
   switch (name) {
     case 'shot':      noiseBurst(0.13, 1500, 0.5, 0.8); blip(190, 0.09, 'square', 0.16, 60); break;
+    case 'knife':     noiseBurst(0.07, 3200, 0.16, 3.0); blip(1500, 0.05, 'sine', 0.06, 2600); break;
+    case 'smg':       noiseBurst(0.07, 1800, 0.34, 1.1); blip(230, 0.05, 'square', 0.11, 90); break;
+    case 'chain':     noiseBurst(0.05, 1200, 0.30, 0.7); blip(150, 0.04, 'square', 0.10, 70); break;
+    case 'spin':      blip(90, 0.42, 'sawtooth', 0.13, 320); break;
+    case 'swap':      blip(520, 0.05, 'square', 0.10, 780); noiseBurst(0.04, 2400, 0.07, 1.6); break;
     case 'enemyShot': noiseBurst(0.11, 1100, 0.22, 0.9); break;
     case 'dry':       blip(1400, 0.04, 'square', 0.07, 900); break;
     case 'reload':    noiseBurst(0.06, 2200, 0.10, 1.2); blip(420, 0.05, 'square', 0.09, 260);

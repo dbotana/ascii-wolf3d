@@ -25,9 +25,15 @@ function alertNear(x, y, radius) {
   }
 }
 
-function hurtPlayer(amount) {
+/**
+ * Take damage. `sx`/`sy` are where it came from, and are optional: a source
+ * that has no position (a future hazard, a scripted hit) simply gets the flash
+ * without an arc rather than a marker pointing at the origin of the map.
+ */
+function hurtPlayer(amount, sx, sy) {
   if (gameState !== 'playing') return;
   chipHpFromNow();                          // chip starts from the old value
+  addHitDir(sx, sy);
   player.hp -= amount;
   player.hurtT = 0.28;
   pulseHpBar();
@@ -100,10 +106,14 @@ function enemyShot(e, dist) {
   if (!hasLOS(e.x, e.y, player.x, player.y)) return;
   if (dist >= e.spec.range + 1) return;
   sfx('enemyShot');
-  const p = Math.max(0.16, 0.72 - dist * 0.045);
+  const D = DIFFICULTY[difficulty];
+  // the floor is applied first so the easy settings scale the real accuracy
+  // rather than a number that has already been propped up, then clamped
+  // because a multiplier above 1 could otherwise promise more than certainty
+  const p = Math.min(1, Math.max(0.16, 0.72 - dist * 0.045) * D.acc);
   if (Math.random() >= p) return;
   const falloff = Math.max(0.45, 1 - dist / 18);
-  hurtPlayer(Math.round(e.spec.dmg * falloff * (0.7 + Math.random() * 0.6)));
+  hurtPlayer(Math.round(e.spec.dmg * D.dmg * falloff * (0.7 + Math.random() * 0.6)), e.x, e.y);
 }
 
 // ─── ENEMY MOVEMENT ─────────────────────────────────────────
@@ -332,7 +342,10 @@ function stepEnemies(dt) {
             e.stateT = 0.16;          // stay in the muzzle-flash frame
           } else {
             e.state = 'chase';
-            e.atkCd = e.spec.cd * (0.75 + Math.random() * 0.5);
+            // scaled HERE and not in mkEnemy: stepCeoPhase reassigns e.spec.cd
+            // outright on every phase change, so a multiplier baked into the
+            // spec would silently evaporate the moment the boss hit 62%
+            e.atkCd = e.spec.cd * DIFFICULTY[difficulty].cd * (0.75 + Math.random() * 0.5);
           }
         }
         break;

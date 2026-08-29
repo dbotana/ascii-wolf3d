@@ -117,27 +117,35 @@ function blitArt(art, col0, row0, spanC, spanR, base, accentSet, accent) {
 // rather than assigning these directly: a cross-file write you can grep for
 // is a dependency, one you cannot is a surprise.
 let gunFrame = 0, gunT = 0;
-function triggerGunFire() { gunFrame = 1; gunT = 0.09; }
+function triggerGunFire() { gunFrame = 1; gunT = curWeapon().fireT; }
 function resetGun()       { gunFrame = 0; gunT = 0; }
 function stepGun(dt) {
   if (gunT > 0) {
     gunT -= dt;
     if (gunT <= 0) {
-      if (gunFrame === 1) { gunFrame = 2; gunT = 0.10; }
+      if (gunFrame === 1) { gunFrame = 2; gunT = curWeapon().recoilT; }
       else gunFrame = 0;
     }
   }
 }
 function drawGun() {
+  const w = curWeapon();
   const spanC = 39, spanR = 22;
   const sway = Math.round(Math.sin(player.bob * 0.5) * 2);
   const rise = Math.round(Math.cos(player.bob) * 1.2);
   let col0 = ((COLS - spanC) / 2 | 0) + sway;
   let row0 = ROWS - spanR + 2 + rise;
 
+  // a chaingun coming up to speed shudders before it lets go of anything
+  if (w.spinUp && player.windT > 0 && player.windT < w.spinUp) {
+    col0 += Math.round(Math.sin(player.windT * 55) * 1.6);
+  }
+
   if (player.reloadT > 0) {
-    // u runs 0→1 across the cycle: drop, eject, seat, raise
-    const u = 1 - player.reloadT / RELOAD_TIME;
+    // u runs 0→1 across the cycle: drop, eject, seat, raise. The denominator
+    // is the latched cycle length, not the pistol's, or a longer magazine
+    // would run the animation off the end of the reload.
+    const u = 1 - player.reloadT / player.reloadMax;
     let art, accent = RELOAD_ACCENT, base = COLOR.gun, accentCol = COLOR.crt;
     let dip;
     if (u < 0.22)      { art = GUN_DOWN;  dip = u / 0.22; }
@@ -151,9 +159,87 @@ function drawGun() {
     return;
   }
 
-  const art = gunFrame === 1 ? GUN_FIRE : gunFrame === 2 ? GUN_RECOIL : GUN_IDLE;
+  const art = gunFrame === 1 ? w.fire : gunFrame === 2 ? w.recoil : w.idle;
   blitArt(art, col0, row0, spanC, spanR,
-          gunFrame === 1 ? COLOR.gunHi : COLOR.gun, GUN_ACCENT, COLOR.muzzle);
+          COLOR[gunFrame === 1 ? w.hi : w.base], w.accent, COLOR[w.accentColor]);
+}
+
+// ─── DAMAGE DIRECTION ───────────────────────────────────────
+// A full-screen red wash says you were hit; it cannot say by whom, which makes
+// an ambush unreadable. This is an arc of red cells at a fixed radius from the
+// crosshair, pointing at where the shot came from.
+//
+// The radius is expressed in COLUMNS and converted to rows by the cell aspect,
+// because a cell is 7x12: using one radius for both axes would draw a tall
+// ellipse. 24 columns and 14 rows are both 168px.
+const HIT_ARC_COLS = 24;
+const HIT_ARC_ROWS = HIT_ARC_COLS * CELL_W / CELL_H;
+const HIT_ARC_STEP = 0.105;     // radians between glyphs
+const HIT_LIFE = 0.75;
+
+// The world position is what is stored, not a bearing: the arc has to swing as
+// you turn to look at whoever shot you, which is the entire point of it.
+function addHitDir(sx, sy) {
+  if (typeof sx !== 'number' || typeof sy !== 'number') return;
+  for (const h of hitDirs) {
+    // a second shot from roughly the same place refreshes that marker instead
+    // of stacking a second one on the same few cells
+    if (Math.hypot(h.x - sx, h.y - sy) < 1.2) { h.x = sx; h.y = sy; h.t = 0; return; }
+  }
+  hitDirs.push({ x: sx, y: sy, t: 0 });
+  if (hitDirs.length > 6) hitDirs.shift();
+}
+
+function stepHitDirs(dt) {
+  for (let i = hitDirs.length - 1; i >= 0; i--) {
+    hitDirs[i].t += dt;
+    if (hitDirs[i].t >= HIT_LIFE) hitDirs.splice(i, 1);
+  }
+}
+
+/**
+ * Where the arc's centre points, in radians, 0 being straight ahead.
+ *
+ * Derived from `fwd`/`lat` — the SAME basis the wall and sprite projection
+ * uses, where a positive `lat` is screen-right — rather than from a world
+ * atan2 and a remembered sign convention. Reasoning about the sign of atan2 is
+ * precisely what shipped the guardLeft/guardRight sprite pair mirrored in all
+ * eight viewing cases; see reference/CLAUDE.md.
+ */
+function hitDirAngle(h) {
+  const cosA = Math.cos(player.a), sinA = Math.sin(player.a);
+  const ex = h.x - player.x, ey = h.y - player.y;
+  const fwd = ex * cosA + ey * sinA;
+  const lat = -ex * sinA + ey * cosA;
+  if (!fwd && !lat) return null;              // standing exactly on you
+  return Math.atan2(lat, fwd);
+}
+
+/** One cell of the arc, `k` glyphs around from its centre. */
+function hitDirCell(th, k, horizon) {
+  const t = th + k * HIT_ARC_STEP;
+  return {
+    col: Math.round(COLS / 2 + Math.sin(t) * HIT_ARC_COLS),
+    row: Math.round(horizon  - Math.cos(t) * HIT_ARC_ROWS),
+  };
+}
+
+function drawHitDirs(horizon) {
+  for (const h of hitDirs) {
+    const th = hitDirAngle(h);
+    if (th === null) continue;
+    const fade = 1 - h.t / HIT_LIFE;
+    for (let k = -4; k <= 4; k++) {
+      const { col, row } = hitDirCell(th, k, horizon);
+      if (col < 0 || col >= COLS || row < 0 || row >= ROWS) continue;
+      // Quantised to four steps on purpose. Every distinct (glyph, colour)
+      // pair is an atlas entry, and a continuous fade would mint a fresh one
+      // every frame until the atlas overflowed to the slow fillText path.
+      const a = Math.round(fade * (1 - Math.abs(k) / 5) * 4) / 4;
+      if (a <= 0) continue;
+      drawChar(col, row, Math.abs(k) > 2 ? '▒' : '█', 'rgba(255,59,90,' + a + ')');
+    }
+  }
 }
 
 function drawCrosshair(horizon) {

@@ -366,6 +366,32 @@
   #splash h2 { font-size: 46px; letter-spacing: 0.06em; text-shadow: 0 0 14px rgba(255,149,0,0.5); }
   #splash h3 { font-size: 26px; letter-spacing: 0.2em; color: var(--neon-pink); text-shadow: 0 0 14px rgba(255,59,124,0.5); font-weight: normal; }
   #splash p  { font-size: 17px; color: var(--crt); letter-spacing: 0.1em; opacity: 0.85; }
+  #splash .diffs {
+    display: flex; flex-direction: column; gap: 4px;
+    margin: 8px 0 2px;
+  }
+  #splash .diff {
+    font-family: 'VT323', monospace;
+    font-size: 19px; letter-spacing: 0.08em;
+    padding: 3px 22px;
+    border: 1px solid transparent;
+    background: none;
+    color: rgba(127,255,107,0.5);
+    cursor: pointer;
+    transition: color 0.12s ease, border-color 0.12s ease;
+  }
+  #splash .diff b {
+    font-weight: normal;
+    color: rgba(255,149,0,0.55);
+    margin-right: 8px;
+  }
+  #splash .diff:hover { color: var(--crt); }
+  #splash .diff.sel {
+    color: var(--sodium);
+    border-color: rgba(255,149,0,0.35);
+    text-shadow: 0 0 10px rgba(255,149,0,0.5);
+  }
+  #splash .diff.sel b { color: var(--sodium); }
   #splash .keys {
     font-family: 'IBM Plex Mono', monospace;
     font-size: 11px; line-height: 1.9;
@@ -414,6 +440,7 @@
     <div class="slot" id="sHpWrap"><span class="lbl">health</span><span class="val" id="sHp">100</span>
       <div id="hpBar"><div id="hpChip"></div><div id="hpFill"></div></div>
     </div>
+    <div class="slot"><span class="lbl">weapon</span><span class="val" id="sWeapon">PISTOL</span></div>
     <div class="slot"><span class="lbl">ammo</span><span class="val" id="sAmmo">8/24</span></div>
     <div class="slot"><span class="lbl">keycards</span>
       <div id="sKeys"><i class="red"></i><i class="blue"></i></div>
@@ -443,6 +470,12 @@
     <h2>WOLFENSTAIN 3D</h2>
     <h3>NEON REICH</h3>
     <p>three floors up &middot; one boardroom &middot; no notice period</p>
+    <div class="diffs">
+      <button type="button" class="diff" id="diff0"><b>1</b> CAN I PLAY, DADDY?</button>
+      <button type="button" class="diff" id="diff1"><b>2</b> DON'T HURT ME</button>
+      <button type="button" class="diff" id="diff2"><b>3</b> BRING 'EM ON</button>
+      <button type="button" class="diff" id="diff3"><b>4</b> I AM DEATH INCARNATE</button>
+    </div>
     <div class="keys">
       <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> move &nbsp;
       <kbd>&larr;</kbd><kbd>&rarr;</kbd> turn &nbsp;
@@ -477,6 +510,29 @@ const FOCAL = COLS / (2 * Math.tan(FOV / 2));
 const CLIP_SIZE = 8;          // rounds per magazine before a reload cycle
 const KILL_SCORE = { guard: 200, drone: 150, ceo: 5000 };
 const RELOAD_TIME = 1.05;     // seconds for the full reload animation
+
+// ─── DIFFICULTY ─────────────────────────────────────────────
+// Wolf3D's four, and its philosophy: the enemies do not get tougher, they get
+// better and there are more of them. Enemy HP is deliberately NOT scaled, so
+// "a guard dies in two pistol shots" is true at every setting and the damage
+// numbers keep meaning the same thing.
+//
+//   acc    multiplies the enemy hit probability in enemyShot()
+//   dmg    multiplies the damage of a shot that lands
+//   cd     multiplies the delay between attacks — below 1 they shoot sooner
+//   keep   fraction of a floor's non-boss spawns that actually appear
+//   extra  reinforcements, as a fraction of the floor's spawn count
+//
+// Index 2 is the default and every multiplier on it is 1.0: it IS the game as
+// it was tuned before difficulty existed, so nothing changes for a player (or
+// a test) that never picks.
+const DIFFICULTY = [
+  { name: "CAN I PLAY, DADDY?",   acc: 0.55, dmg: 0.55, cd: 1.35, keep: 0.65, extra: 0    },
+  { name: "DON'T HURT ME",        acc: 0.78, dmg: 0.80, cd: 1.15, keep: 0.85, extra: 0    },
+  { name: "BRING 'EM ON",         acc: 1.00, dmg: 1.00, cd: 1.00, keep: 1.00, extra: 0    },
+  { name: 'I AM DEATH INCARNATE', acc: 1.30, dmg: 1.30, cd: 0.72, keep: 1.00, extra: 0.35 },
+];
+const DIFF_DEFAULT = 2;
 
 // ─── PALETTE ────────────────────────────────────────────────
 const COLOR = {
@@ -1008,6 +1064,210 @@ const RELOAD_ACCENT = '▖▗▘▓▄';
 ;
 'use strict';
 
+// The weapon roster: view-model art for everything that is not the pistol,
+// and the WEAPONS table that drives fire(), drawGun() and the HUD.
+//
+// Data only, like art.js and levels.js — no functions live here. Adding a
+// weapon is a row plus three art tables; fire() never grows a branch for it.
+//
+// Every art table is the same 13-column x 10-row grid as GUN_IDLE, because
+// blitArt() scales whatever it is handed into one fixed 39x22 cell span. The
+// pistol's own frames stay in art.js next to the reload keyframes, which all
+// four weapons share.
+
+// ─── KNIFE ──────────────────────────────────────────────────
+// Held low and to the left, edge up. The fire frame is a thrust into the
+// centre of the screen rather than a slash, so it reads at 0.45s intervals.
+const KNIFE_IDLE = [
+  '          ▗▖ ',
+  '         ▗▛  ',
+  '        ▗▛   ',
+  '       ▗▛    ',
+  '      ▗▛     ',
+  '     ▗▛      ',
+  '    ▗▛       ',
+  '   ▟█▙       ',
+  '   ███       ',
+  '   ▜█▛       ',
+];
+const KNIFE_FIRE = [
+  '     ▗▄▖     ',
+  '     ▐█▌     ',
+  '     ▐█▌     ',
+  '     ▐█▌     ',
+  '     ▐█▌     ',
+  '    ▗▟█▙▖    ',
+  '    ▐███▌    ',
+  '    ▝▜█▛▘    ',
+  '     ███     ',
+  '     ▜█▛     ',
+];
+const KNIFE_RECOIL = [
+  '             ',
+  '        ▗▖   ',
+  '       ▗▛    ',
+  '      ▗▛     ',
+  '     ▗▛      ',
+  '    ▗▛       ',
+  '   ▗▛        ',
+  '  ▟█▙        ',
+  '  ███        ',
+  '  ▜█▛        ',
+];
+
+// ─── SMG ────────────────────────────────────────────────────
+// Boxy receiver, stubby barrel offset left, magazine hanging under the grip.
+const SMG_IDLE = [
+  '   ▄▄        ',
+  '   ██        ',
+  '   ██        ',
+  '  ▟██▙       ',
+  '  ████▙▖     ',
+  '  ███████    ',
+  ' ▟████████▙  ',
+  ' ██████████  ',
+  ' ███▛▀▀▜███  ',
+  ' ██▌    ▐██  ',
+];
+const SMG_FIRE = [
+  '  ╲▲╱        ',
+  '  ▄██▄       ',
+  '   ██        ',
+  '  ▟██▙       ',
+  '  ████▙▖     ',
+  '  ███████    ',
+  ' ▟████████▙  ',
+  ' ██████████  ',
+  ' ███▛▀▀▜███  ',
+  ' ██▌    ▐██  ',
+];
+const SMG_RECOIL = [
+  '             ',
+  '   ▄▄        ',
+  '   ██        ',
+  '   ██        ',
+  '  ▟██▙       ',
+  '  ████▙▖     ',
+  '  ███████    ',
+  ' ▟████████▙  ',
+  ' ██████████  ',
+  ' ███▛▀▀▜███  ',
+];
+
+// ─── CHAINGUN ───────────────────────────────────────────────
+// Three barrels over a wide receiver. The recoil frame shifts the barrel
+// caps rather than dropping the whole model: at a 0.07s cooldown the
+// idle/fire/recoil cycle repeats fast enough to read as rotation.
+const CHAIN_IDLE = [
+  '  ▄  ▄  ▄    ',
+  '  █  █  █    ',
+  ' ▟█▙▟█▙▟█▙   ',
+  ' █████████   ',
+  ' █████████   ',
+  '▗███████████▖',
+  '▐███████████▌',
+  '▐███████████▌',
+  ' ▜█████████▛ ',
+  '  ▜███████▛  ',
+];
+const CHAIN_FIRE = [
+  ' ╲▲╱╲▲╱╲▲╱   ',
+  ' ▄█▄▄█▄▄█▄   ',
+  ' ▟█▙▟█▙▟█▙   ',
+  ' █████████   ',
+  ' █████████   ',
+  '▗███████████▖',
+  '▐███████████▌',
+  '▐███████████▌',
+  ' ▜█████████▛ ',
+  '  ▜███████▛  ',
+];
+const CHAIN_RECOIL = [
+  '  ▄  ▄  ▄    ',
+  ' ▟█▙▟█▙▟█▙   ',
+  ' ▜█▛▜█▛▜█▛   ',
+  ' █████████   ',
+  ' █████████   ',
+  '▗███████████▖',
+  '▐███████████▌',
+  '▐███████████▌',
+  ' ▜█████████▛ ',
+  '  ▜███████▛  ',
+];
+
+// ─── THE ROSTER ─────────────────────────────────────────────
+//
+// Index is the number key minus one. Row 1 (the pistol) reproduces the
+// numbers the single-weapon game shipped with — 0.28s cooldown, 22-41 damage,
+// a CLIP_SIZE magazine, a 9-tile alert radius, no spread — so the whole
+// existing test suite still describes the default weapon exactly.
+//
+//   cd       seconds between shots
+//   auto     does holding the trigger repeat? (the pistol is one shot per press)
+//   dmgMin   damage is dmgMin + floor(random() * dmgSpan)
+//   cost     rounds spent per shot; 0 means the weapon needs no ammo at all
+//   clip     magazine capacity; 0 alongside cost 0 means "never reloads"
+//   reload   seconds for the reload cycle, using the shared GUN_* keyframes
+//   spread   aim jitter in SCREEN COLUMNS, rolled once per shot. This is the
+//            one place distance genuinely matters: the hit test itself is
+//            depth-independent, but a target's on-screen half-width is
+//            59/depth columns, so a fixed column jitter misses a guard past
+//            ~8u for the SMG and ~6.5u for the chaingun, and never up close.
+//   minDepth how far in front of the eye a target must be to be hittable. The
+//            guns keep the 0.35 the game shipped with; the knife needs 0, and
+//            that single number is the whole of "melee works at contact range".
+//            (The screen-space test itself does NOT need special-casing: depth
+//            cancels out of it, so it reduces to |lateral| > wW/2 and behaves
+//            identically at 0.2u and 20u.)
+//   reach    melee radius in tiles — a true distance, not the forward depth
+//            above, so a body beside you is not stabbable. 0 means no cap.
+//   spinUp   seconds of held trigger before the first round leaves the barrel
+//   flash    seconds of muzzle wash; 0 for anything with no muzzle
+//   alert    radius in tiles that the noise wakes idle enemies in
+//   base/hi  COLOR keys for the body, and the accent colour for `accent` chars
+const WEAPONS = [
+  { name: 'KNIFE',
+    idle: KNIFE_IDLE, fire: KNIFE_FIRE, recoil: KNIFE_RECOIL,
+    accent: '▗▛▘▝▄', base: 'steelD', hi: 'steel', accentColor: 'steel',
+    cd: 0.45, auto: true, dmgMin: 18, dmgSpan: 17,
+    cost: 0, clip: 0, reload: 0,
+    spread: 0, minDepth: 0, reach: 1.6,
+    spinUp: 0, flash: 0, alert: 2,
+    fireT: 0.10, recoilT: 0.13, sfx: 'knife' },
+
+  { name: 'PISTOL',
+    idle: GUN_IDLE, fire: GUN_FIRE, recoil: GUN_RECOIL,
+    accent: GUN_ACCENT, base: 'gun', hi: 'gunHi', accentColor: 'muzzle',
+    cd: 0.28, auto: false, dmgMin: 22, dmgSpan: 20,
+    cost: 1, clip: CLIP_SIZE, reload: RELOAD_TIME,
+    spread: 0, minDepth: 0.35, reach: 0,
+    spinUp: 0, flash: 0.09, alert: 9,
+    fireT: 0.09, recoilT: 0.10, sfx: 'shot' },
+
+  { name: 'SMG',
+    idle: SMG_IDLE, fire: SMG_FIRE, recoil: SMG_RECOIL,
+    accent: '╲╱▲▄▀', base: 'gun', hi: 'gunHi', accentColor: 'muzzle',
+    cd: 0.11, auto: true, dmgMin: 14, dmgSpan: 13,
+    cost: 1, clip: 25, reload: 1.25,
+    spread: 7.0, minDepth: 0.35, reach: 0,
+    spinUp: 0, flash: 0.09, alert: 10,
+    fireT: 0.05, recoilT: 0.05, sfx: 'smg' },
+
+  { name: 'CHAINGUN',
+    idle: CHAIN_IDLE, fire: CHAIN_FIRE, recoil: CHAIN_RECOIL,
+    accent: '╲╱▲▄▖▗', base: 'gun', hi: 'gunHi', accentColor: 'muzzle',
+    cd: 0.07, auto: true, dmgMin: 13, dmgSpan: 12,
+    cost: 1, clip: 50, reload: 1.90,
+    spread: 9.0, minDepth: 0.35, reach: 0,
+    spinUp: 0.42, flash: 0.09, alert: 12,
+    fireT: 0.035, recoilT: 0.035, sfx: 'chain' },
+];
+
+const PISTOL = 1;   // the weapon a cold start hands you
+
+;
+'use strict';
+
 // The glyph atlas and the one primitive every renderer bottoms out in.
 //
 // Naively this would be 14,400 fillText calls per frame. Instead each distinct
@@ -1201,6 +1461,11 @@ function sfx(name) {
   if (!audioReady || muted) return;
   switch (name) {
     case 'shot':      noiseBurst(0.13, 1500, 0.5, 0.8); blip(190, 0.09, 'square', 0.16, 60); break;
+    case 'knife':     noiseBurst(0.07, 3200, 0.16, 3.0); blip(1500, 0.05, 'sine', 0.06, 2600); break;
+    case 'smg':       noiseBurst(0.07, 1800, 0.34, 1.1); blip(230, 0.05, 'square', 0.11, 90); break;
+    case 'chain':     noiseBurst(0.05, 1200, 0.30, 0.7); blip(150, 0.04, 'square', 0.10, 70); break;
+    case 'spin':      blip(90, 0.42, 'sawtooth', 0.13, 320); break;
+    case 'swap':      blip(520, 0.05, 'square', 0.10, 780); noiseBurst(0.04, 2400, 0.07, 1.6); break;
     case 'enemyShot': noiseBurst(0.11, 1100, 0.22, 0.9); break;
     case 'dry':       blip(1400, 0.04, 'square', 0.07, 900); break;
     case 'reload':    noiseBurst(0.06, 2200, 0.10, 1.2); blip(420, 0.05, 'square', 0.09, 260);
@@ -1238,10 +1503,14 @@ function toggleMute() {
 const keys = new Set();
 let mouseLocked = false;
 let firePressed = false;
+// held, as opposed to firePressed, which is one edge. The auto weapons read
+// this every frame; the pistol only ever sees the edge.
+let mouseHeld = false;
 
 addEventListener('keydown', e => {
   const k = e.key.toLowerCase();
-  if (['arrowleft','arrowright','arrowup','arrowdown','w','a','s','d','e','r',' '].includes(k)) e.preventDefault();
+  if (['arrowleft','arrowright','arrowup','arrowdown','w','a','s','d','e','r',' ',
+       '1','2','3','4'].includes(k)) e.preventDefault();
   if (keys.has(k)) return;
   keys.add(k);
   if (k === ' ')     firePressed = true;
@@ -1249,16 +1518,27 @@ addEventListener('keydown', e => {
   if (k === 'm')     toggleMute();
   if (k === 'r')     { if (gameState === 'playing') startReload(); }
   if (k === 'p')     startLevel(gameState === 'won' ? 0 : levelIndex);
+  if (k >= '1' && k <= '4') selectWeapon(+k - 1);
 });
 addEventListener('keyup', e => keys.delete(e.key.toLowerCase()));
 
 canvas.addEventListener('mousedown', e => {
   if (e.button !== 0) return;
   if (!mouseLocked && canvas.requestPointerLock) { canvas.requestPointerLock(); return; }
+  // both, deliberately: the edge drives the semi-auto path and the tally
+  // screen, the held flag drives the auto weapons. frame() may act on both in
+  // the same frame, which is harmless only because fire() sets its own
+  // cooldown before it returns — don't reorder that.
   firePressed = true;
+  mouseHeld = true;
 });
+// every way the button can stop being down, including the ones that never
+// deliver a mouseup: releasing the pointer lock with Esc, and losing focus
+addEventListener('mouseup', e => { if (e.button === 0) mouseHeld = false; });
+addEventListener('blur', () => { mouseHeld = false; keys.clear(); });
 document.addEventListener('pointerlockchange', () => {
   mouseLocked = document.pointerLockElement === canvas;
+  if (!mouseLocked) mouseHeld = false;
 });
 addEventListener('mousemove', e => {
   if (!mouseLocked || gameState !== 'playing') return;
@@ -1290,12 +1570,32 @@ const player = {
   keyRed: false, keyBlue: false,
   fireCd: 0, bob: 0, hurtT: 0, flashT: 0,
   reloadT: 0, clip: CLIP_SIZE,
+  // Which weapon is up, and which ones you own. Everything is unlocked today;
+  // `weapons` exists so drops or level pickups are a one-line change rather
+  // than a new concept — selectWeapon already refuses an index that is 0 here.
+  weapon: PISTOL, weapons: [1, 1, 1, 1],
+  // reloadMax latches the current weapon's cycle length so the view-model
+  // animation stays correct for magazines that take longer than the pistol's.
+  reloadMax: RELOAD_TIME,
+  windT: 0,            // chaingun spin-up, in seconds of held trigger
 };
 
 // floating damage numbers over enemies we just shot
 let dmgPops = [];
+// where the shots that hit US came from, for the direction arc
+let hitDirs = [];
 
 let gameState = 'playing';   // playing | dead | cleared
+
+// Chosen once on the splash and then left alone. This is a RUN-level setting,
+// not player state: startLevel deliberately does not reset it, on either the
+// carry path or the cold restart, because dying on floor 3 should not quietly
+// put you back on the default.
+let difficulty = DIFF_DEFAULT;
+function setDifficulty(n) {
+  difficulty = Math.max(0, Math.min(DIFFICULTY.length - 1, n | 0));
+  return difficulty;
+}
 let levelTime = 0;
 let levelIndex = 0;          // which floor of LEVELS we are on
 let boss = null;             // the CEO, once a floor places one
@@ -1334,100 +1634,6 @@ function mkEnemy(type, x, y) {
 }
 function mkItem(kind, x, y) {
   return { kind, x, y, taken: false, bob: Math.random() * 6.28 };
-}
-
-function parseLevel(src) {
-  MAP_H = src.length;
-  MAP_W = src[0].length;
-  grid = [];
-  enemies = []; items = []; doorList = []; secretList = []; movingSecrets = [];
-  totalTreasure = 0; treasureFound = 0;
-  boss = null;
-  for (let y = 0; y < MAP_H; y++) {
-    const row = new Array(MAP_W).fill(0);
-    for (let x = 0; x < MAP_W; x++) {
-      const ch = src[y][x];
-      const seed = (((x * 91) ^ (y * 17) ^ 0x9E3779B1) * 2654435761) >>> 0;
-      switch (ch) {
-        case '#': row[x] = { tag: 'panel',  h: WALL_H, seed }; break;
-        case '|': row[x] = { tag: 'window', h: WALL_H, seed }; break;
-        case 'X': row[x] = { tag: 'exit',   h: WALL_H, seed }; break;
-        case 'N': row[x] = { tag: 'neon',   h: WALL_H, seed,
-                             signColor: NEON_PAL[(seed >>> 5) % NEON_PAL.length] }; break;
-        case 'D': case 'R': case 'B': {
-          const lock = ch === 'R' ? 'red' : ch === 'B' ? 'blue' : null;
-          const d = mkDoor(lock);
-          d.gx = x; d.gy = y;
-          row[x] = d; doorList.push(d);
-          break;
-        }
-        case 'S': {
-          const sec = mkSecret(x, y, seed);
-          row[x] = sec; secretList.push(sec);
-          break;
-        }
-        case 'g': enemies.push(mkEnemy('guard', x + 0.5, y + 0.5)); break;
-        case 'd': enemies.push(mkEnemy('drone', x + 0.5, y + 0.5)); break;
-        case 'C': {
-          const c = mkEnemy('ceo', x + 0.5, y + 0.5);
-          enemies.push(c); boss = c;
-          break;
-        }
-        case '+': items.push(mkItem('health',  x + 0.5, y + 0.5)); break;
-        case 'a': items.push(mkItem('ammo',    x + 0.5, y + 0.5)); break;
-        case 'r': items.push(mkItem('keyRed',  x + 0.5, y + 0.5)); break;
-        case 'b': items.push(mkItem('keyBlue', x + 0.5, y + 0.5)); break;
-        case '$': items.push(mkItem('cash',    x + 0.5, y + 0.5)); totalTreasure++; break;
-        case '@': player.x = x + 0.5; player.y = y + 0.5; break;
-      }
-    }
-    grid.push(row);
-  }
-  totalEnemies = enemies.length;
-  totalSecrets = secretList.length;
-  secretsFound = 0;
-  // sized with the map, so a floor of a different shape cannot read a stale field
-  navDist = new Int32Array(MAP_W * MAP_H).fill(-1);
-  navQueue = new Int32Array(MAP_W * MAP_H);   // hoisted: the field rebuilds ~3x a second
-  navSeedX = navSeedY = -1;
-  navRebuildT = 0;
-}
-
-/**
- * Start (or restart) a floor.
- * @param {number} [n]      index into LEVELS; defaults to the current floor
- * @param {boolean} [carry] true when descending — health, ammo and score
- *                          come with you, the way they do in Wolf3D. A cold
- *                          start resets them.
- */
-function startLevel(n, carry) {
-  levelIndex = Math.max(0, Math.min(LEVELS.length - 1,
-                                    n === undefined ? levelIndex : n));
-  parseLevel(LEVELS[levelIndex]);
-  player.a = -Math.PI / 2;
-  if (!carry) { player.hp = 100; player.ammo = 24; player.score = 0; }
-  // kills and keycards are per-floor even on a descent: the ratio on the
-  // tally screen is this floor's, and last floor's keys open nothing here
-  player.kills = 0;
-  player.keyRed = false; player.keyBlue = false;
-  player.fireCd = 0; player.bob = 0; player.hurtT = 0; player.flashT = 0;
-  player.reloadT = 0; player.clip = Math.min(CLIP_SIZE, player.ammo);
-  dmgPops = [];
-  resetHpShown();
-  gameState = 'playing';
-  levelTime = 0;
-  resetGun();
-  hideBanner();
-  hideTally();
-  syncHud();
-}
-
-function nextLevel() {
-  if (levelIndex + 1 >= LEVELS.length) return false;
-  startLevel(levelIndex + 1, true);
-  sfx('door');
-  toast('FLOOR ' + (levelIndex + 1) + '  ·  ' + FLOOR_NAMES[levelIndex]);
-  return true;
 }
 
 // ─── GRID QUERIES ───────────────────────────────────────────
@@ -1606,6 +1812,162 @@ function use() {
     if (boss && boss.alive) { toast('THE BOARD IS STILL IN SESSION'); sfx('deny'); return; }
     clearLevel();
   }
+}
+
+;
+'use strict';
+
+// The floor lifecycle: turning a level's ASCII into a populated world, and
+// starting, restarting or descending between floors.
+//
+// Split out of world.js when the difficulty spawn scaling pushed that file
+// past the 400-line budget — rule 4 says that is a signal to split, not a
+// target to fill. It is a clean seam: world.js owns the grid and the entities
+// as STATE, plus the queries over them, and this file owns the one path that
+// builds and rebuilds that state. Nothing here runs at load, so it only needs
+// to follow world.js for readers, not for the engine.
+
+/**
+ * Turn a floor's spawn list into actual bodies, thinned or reinforced to suit
+ * the difficulty. The CEO is never touched: it is the floor's win condition,
+ * and the elevator will not move while it lives.
+ *
+ * Selection is a running-ratio (Bresenham) walk rather than a random roll.
+ * Random would make a floor different on every restart, make the fixtures
+ * unrepeatable, and give no guarantee about how many bodies you actually get;
+ * this keeps exactly round(n * keep) of them, evenly spread through the map in
+ * source order.
+ *
+ * `keep` never rounds down to zero. A floor with no enemies left would divide
+ * by zero in the tally, where ratio() reports an empty category as 100% — so
+ * thinning a one-guard floor out of existence would silently award a perfect
+ * kill ratio and its 2500 bonus.
+ */
+function populateEnemies(spawns) {
+  const D = DIFFICULTY[difficulty];
+  const mob = spawns.filter(s => s[0] !== 'ceo').length;
+  const want = Math.min(mob, Math.max(1, Math.round(mob * D.keep)));
+
+  const survivors = [];
+  let acc = 0;
+  for (const s of spawns) {
+    if (s[0] !== 'ceo') {
+      acc += want;
+      if (acc < mob) continue;      // this one does not make the cut
+      acc -= mob;
+    }
+    const e = mkEnemy(s[0], s[1], s[2]);
+    enemies.push(e);
+    if (s[0] === 'ceo') boss = e;
+    else survivors.push(s);
+  }
+
+  // Reinforcements, on the hardest setting only. They land on a tile a body
+  // already occupies rather than somewhere new: separateEnemies resolves
+  // exactly-coincident bodies with a deterministic axis, so this needs no
+  // placement logic of its own and can never spawn anyone inside a wall.
+  const extra = survivors.length ? Math.round(mob * D.extra) : 0;
+  for (let i = 0; i < extra; i++) {
+    const s = survivors[i % survivors.length];
+    enemies.push(mkEnemy(s[0], s[1], s[2]));
+  }
+}
+
+function parseLevel(src) {
+  MAP_H = src.length;
+  MAP_W = src[0].length;
+  grid = [];
+  enemies = []; items = []; doorList = []; secretList = []; movingSecrets = [];
+  totalTreasure = 0; treasureFound = 0;
+  boss = null;
+  const spawns = [];
+  for (let y = 0; y < MAP_H; y++) {
+    const row = new Array(MAP_W).fill(0);
+    for (let x = 0; x < MAP_W; x++) {
+      const ch = src[y][x];
+      const seed = (((x * 91) ^ (y * 17) ^ 0x9E3779B1) * 2654435761) >>> 0;
+      switch (ch) {
+        case '#': row[x] = { tag: 'panel',  h: WALL_H, seed }; break;
+        case '|': row[x] = { tag: 'window', h: WALL_H, seed }; break;
+        case 'X': row[x] = { tag: 'exit',   h: WALL_H, seed }; break;
+        case 'N': row[x] = { tag: 'neon',   h: WALL_H, seed,
+                             signColor: NEON_PAL[(seed >>> 5) % NEON_PAL.length] }; break;
+        case 'D': case 'R': case 'B': {
+          const lock = ch === 'R' ? 'red' : ch === 'B' ? 'blue' : null;
+          const d = mkDoor(lock);
+          d.gx = x; d.gy = y;
+          row[x] = d; doorList.push(d);
+          break;
+        }
+        case 'S': {
+          const sec = mkSecret(x, y, seed);
+          row[x] = sec; secretList.push(sec);
+          break;
+        }
+        // bodies are collected, not built, because how many of them actually
+        // appear is a difficulty question — see populateEnemies below
+        case 'g': spawns.push(['guard', x + 0.5, y + 0.5]); break;
+        case 'd': spawns.push(['drone', x + 0.5, y + 0.5]); break;
+        case 'C': spawns.push(['ceo',   x + 0.5, y + 0.5]); break;
+        case '+': items.push(mkItem('health',  x + 0.5, y + 0.5)); break;
+        case 'a': items.push(mkItem('ammo',    x + 0.5, y + 0.5)); break;
+        case 'r': items.push(mkItem('keyRed',  x + 0.5, y + 0.5)); break;
+        case 'b': items.push(mkItem('keyBlue', x + 0.5, y + 0.5)); break;
+        case '$': items.push(mkItem('cash',    x + 0.5, y + 0.5)); totalTreasure++; break;
+        case '@': player.x = x + 0.5; player.y = y + 0.5; break;
+      }
+    }
+    grid.push(row);
+  }
+  populateEnemies(spawns);
+  totalEnemies = enemies.length;
+  totalSecrets = secretList.length;
+  secretsFound = 0;
+  // sized with the map, so a floor of a different shape cannot read a stale field
+  navDist = new Int32Array(MAP_W * MAP_H).fill(-1);
+  navQueue = new Int32Array(MAP_W * MAP_H);   // hoisted: the field rebuilds ~3x a second
+  navSeedX = navSeedY = -1;
+  navRebuildT = 0;
+}
+
+/**
+ * Start (or restart) a floor.
+ * @param {number} [n]      index into LEVELS; defaults to the current floor
+ * @param {boolean} [carry] true when descending — health, ammo and score
+ *                          come with you, the way they do in Wolf3D. A cold
+ *                          start resets them.
+ */
+function startLevel(n, carry) {
+  levelIndex = Math.max(0, Math.min(LEVELS.length - 1,
+                                    n === undefined ? levelIndex : n));
+  parseLevel(LEVELS[levelIndex]);
+  player.a = -Math.PI / 2;
+  if (!carry) { player.hp = 100; player.ammo = 24; player.score = 0; player.weapon = PISTOL; }
+  // kills and keycards are per-floor even on a descent: the ratio on the
+  // tally screen is this floor's, and last floor's keys open nothing here
+  player.kills = 0;
+  player.keyRed = false; player.keyBlue = false;
+  player.fireCd = 0; player.bob = 0; player.hurtT = 0; player.flashT = 0;
+  player.reloadT = 0; player.windT = 0;
+  player.reloadMax = curWeapon().reload || RELOAD_TIME;
+  player.clip = Math.min(curWeapon().clip, player.ammo);
+  dmgPops = [];
+  hitDirs = [];
+  resetHpShown();
+  gameState = 'playing';
+  levelTime = 0;
+  resetGun();
+  hideBanner();
+  hideTally();
+  syncHud();
+}
+
+function nextLevel() {
+  if (levelIndex + 1 >= LEVELS.length) return false;
+  startLevel(levelIndex + 1, true);
+  sfx('door');
+  toast('FLOOR ' + (levelIndex + 1) + '  ·  ' + FLOOR_NAMES[levelIndex]);
+  return true;
 }
 
 ;
@@ -1797,9 +2159,15 @@ function alertNear(x, y, radius) {
   }
 }
 
-function hurtPlayer(amount) {
+/**
+ * Take damage. `sx`/`sy` are where it came from, and are optional: a source
+ * that has no position (a future hazard, a scripted hit) simply gets the flash
+ * without an arc rather than a marker pointing at the origin of the map.
+ */
+function hurtPlayer(amount, sx, sy) {
   if (gameState !== 'playing') return;
   chipHpFromNow();                          // chip starts from the old value
+  addHitDir(sx, sy);
   player.hp -= amount;
   player.hurtT = 0.28;
   pulseHpBar();
@@ -1872,10 +2240,14 @@ function enemyShot(e, dist) {
   if (!hasLOS(e.x, e.y, player.x, player.y)) return;
   if (dist >= e.spec.range + 1) return;
   sfx('enemyShot');
-  const p = Math.max(0.16, 0.72 - dist * 0.045);
+  const D = DIFFICULTY[difficulty];
+  // the floor is applied first so the easy settings scale the real accuracy
+  // rather than a number that has already been propped up, then clamped
+  // because a multiplier above 1 could otherwise promise more than certainty
+  const p = Math.min(1, Math.max(0.16, 0.72 - dist * 0.045) * D.acc);
   if (Math.random() >= p) return;
   const falloff = Math.max(0.45, 1 - dist / 18);
-  hurtPlayer(Math.round(e.spec.dmg * falloff * (0.7 + Math.random() * 0.6)));
+  hurtPlayer(Math.round(e.spec.dmg * D.dmg * falloff * (0.7 + Math.random() * 0.6)), e.x, e.y);
 }
 
 // ─── ENEMY MOVEMENT ─────────────────────────────────────────
@@ -2104,7 +2476,10 @@ function stepEnemies(dt) {
             e.stateT = 0.16;          // stay in the muzzle-flash frame
           } else {
             e.state = 'chase';
-            e.atkCd = e.spec.cd * (0.75 + Math.random() * 0.5);
+            // scaled HERE and not in mkEnemy: stepCeoPhase reassigns e.spec.cd
+            // outright on every phase change, so a multiplier baked into the
+            // spec would silently evaporate the moment the boss hit 62%
+            e.atkCd = e.spec.cd * DIFFICULTY[difficulty].cd * (0.75 + Math.random() * 0.5);
           }
         }
         break;
@@ -2119,14 +2494,54 @@ function stepEnemies(dt) {
 
 // Shooting, the magazine cycle, floating damage numbers, and pickups.
 
+// ─── THE ROSTER ─────────────────────────────────────────────
+// WEAPONS lives in weapons.js and is pure data; everything here is the lookup
+// the growth rules ask for instead of a branch per weapon.
+function curWeapon() { return WEAPONS[player.weapon]; }
+
+/**
+ * Put a weapon up. Returns false if the index is out of range or unowned.
+ *
+ * The clip is TRUNCATED to the new weapon's capacity, never topped up: since
+ * player.ammo already counts the seated rounds, the surplus simply falls back
+ * into the reserve. That is what stops "switch away and back" from being a
+ * free instant reload, which topping up would have made it.
+ *
+ * The knife is exempt, and that is not cosmetic: its capacity is 0, so
+ * truncating would empty the gun you were holding, and switching back would
+ * cost you a full reload for having drawn a blade.
+ */
+function selectWeapon(i) {
+  if (gameState !== 'playing') return false;
+  if (!(i >= 0 && i < WEAPONS.length)) return false;
+  if (!player.weapons[i]) return false;
+  if (i === player.weapon) return false;
+  player.weapon = i;
+  const w = curWeapon();
+  if (w.cost > 0) player.clip = Math.min(player.clip, w.clip);
+  player.reloadT = 0;            // a switch cancels a reload in flight
+  player.reloadMax = w.reload || RELOAD_TIME;
+  player.windT = 0;              // and drops any chaingun spin
+  player.fireCd = Math.max(player.fireCd, 0.22);   // the raise costs you a beat
+  resetGun();
+  sfx('swap');
+  syncHud();
+  return true;
+}
+
 // ─── COMBAT ─────────────────────────────────────────────────
 // Reserve rounds live in player.ammo; player.clip is what is actually seated.
 // Firing empties the clip, then the reload cycle moves reserve into it.
+// Capacity and cycle length are per weapon; the knife has neither and is
+// filtered out by its cost of 0 before any of this runs.
 function startReload() {
   if (player.reloadT > 0) return false;
-  if (player.clip >= CLIP_SIZE) return false;
+  const w = curWeapon();
+  if (w.cost <= 0) return false;                      // nothing to reload
+  if (player.clip >= w.clip) return false;
   if (player.ammo - player.clip <= 0) return false;   // nothing in reserve
-  player.reloadT = RELOAD_TIME;
+  player.reloadMax = w.reload;
+  player.reloadT = w.reload;
   sfx('reload');
   return true;
 }
@@ -2136,9 +2551,23 @@ function stepReload(dt) {
   player.reloadT -= dt;
   if (player.reloadT <= 0) {
     player.reloadT = 0;
-    player.clip = Math.min(CLIP_SIZE, player.ammo);
+    player.clip = Math.min(curWeapon().clip, player.ammo);
     sfx('reloadDone');
     syncHud();
+  }
+}
+
+// The chaingun's barrels have to come up to speed before anything comes out.
+// Driven from frame() with whether the trigger is actually held, so releasing
+// it spins back down rather than banking the wind-up for later.
+function stepSpin(dt, held) {
+  const w = curWeapon();
+  if (!w.spinUp) { player.windT = 0; return; }
+  if (held && gameState === 'playing') {
+    if (player.windT <= 0) sfx('spin');
+    player.windT = Math.min(w.spinUp, player.windT + dt);
+  } else {
+    player.windT = Math.max(0, player.windT - dt * 1.6);
   }
 }
 
@@ -2146,18 +2575,27 @@ function fire() {
   if (gameState !== 'playing') return;
   if (player.reloadT > 0) return;
   if (player.fireCd > 0) return;
-  if (player.clip <= 0) {
-    // auto-reload if there is anything left in reserve, otherwise dry-click
-    if (!startReload()) { sfx('dry'); player.fireCd = 0.25; }
-    return;
+  const w = curWeapon();
+  if (player.windT < w.spinUp) return;      // barrels not up to speed yet
+  if (w.cost > 0) {
+    if (player.clip < w.cost) {
+      // auto-reload if there is anything left in reserve, otherwise dry-click
+      if (!startReload()) { sfx('dry'); player.fireCd = 0.25; }
+      return;
+    }
+    player.clip -= w.cost;
+    player.ammo -= w.cost;
   }
-  player.clip--;
-  player.ammo--;
-  player.fireCd = 0.28;
-  player.flashT = 0.09;
+  player.fireCd = w.cd;
+  player.flashT = w.flash;
   triggerGunFire();
-  sfx('shot');
+  sfx(w.sfx);
   syncHud();
+
+  // One spread roll per shot, drawn OUTSIDE the candidate loop: rolling per
+  // enemy would not be a cone, it would be a hit test that widens with the
+  // number of things standing in front of you.
+  const aimCol = COLS / 2 + (w.spread ? (Math.random() * 2 - 1) * w.spread : 0);
 
   const cosA = Math.cos(player.a), sinA = Math.sin(player.a);
   let best = null, bestD = Infinity;
@@ -2165,16 +2603,21 @@ function fire() {
     if (!e.alive) continue;
     const ex = e.x - player.x, ey = e.y - player.y;
     const depth = ex * cosA + ey * sinA;
-    if (depth <= 0.35 || depth >= MAX_DEPTH) continue;
+    // the far cull matches drawSprites', so you can always shoot what you see
+    if (depth <= w.minDepth || depth >= MAX_DEPTH) continue;
+    // A melee weapon caps on true distance; a gun does not cap at all. Note
+    // this is a RADIUS, not the forward depth above — a body 1.5u to your side
+    // is not something you can stab, however far in front of you it projects.
+    if (w.reach && Math.hypot(ex, ey) > w.reach) continue;
     const lateral = -ex * sinA + ey * cosA;
     const { centerCol, halfW } = spriteSpan(depth, lateral, SPR[e.type].wW);
-    if (Math.abs(centerCol - COLS / 2) > halfW) continue;
+    if (Math.abs(centerCol - aimCol) > halfW) continue;
     if (!hasLOS(player.x, player.y, e.x, e.y)) continue;
     if (depth < bestD) { bestD = depth; best = e; }
   }
   if (!best) return;
 
-  const dmg = 22 + Math.floor(Math.random() * 20);
+  const dmg = w.dmgMin + Math.floor(Math.random() * w.dmgSpan);
   best.hp -= dmg;
   if (best.hp <= 0) {
     addDmgPop(best, dmg, true);
@@ -2192,8 +2635,8 @@ function fire() {
     best.stateT = 0.22;
     sfx('hit');
   }
-  // gunfire wakes the neighbourhood
-  alertNear(player.x, player.y, 9);
+  // gunfire wakes the neighbourhood — a blade barely does
+  alertNear(player.x, player.y, w.alert);
 }
 
 // ─── DAMAGE NUMBERS ─────────────────────────────────────────
@@ -2238,7 +2681,13 @@ function drawDmgPops(zbuf, horizon) {
     const row  = Math.round(baseRow);
     if (row < 0 || row >= ROWS) continue;
 
-    const alpha = u < 0.7 ? 1 : 1 - (u - 0.7) / 0.3;
+    // Quantised to 8 steps, the same way mix() quantises its blend factor and
+    // for the same reason: every distinct (glyph, colour) pair is an atlas
+    // entry, and .toFixed(2) on a continuous fade mints a new one per frame.
+    // Unquantised this cost ~375 entries over 40 shots against a 32768 cap —
+    // never an overflow in play, but it is the exact drift CLAUDE.md warns
+    // about, and it is the reason the arc above quantises too.
+    const alpha = Math.round((u < 0.7 ? 1 : 1 - (u - 0.7) / 0.3) * 8) / 8;
     const rgb = p.kill ? '255,59,124' : '255,233,168';
     const color = 'rgba(' + rgb + ',' + (alpha * 0.95).toFixed(2) + ')';
     // a dark row underneath keeps the digits readable over bright walls
@@ -2408,27 +2857,35 @@ function blitArt(art, col0, row0, spanC, spanR, base, accentSet, accent) {
 // rather than assigning these directly: a cross-file write you can grep for
 // is a dependency, one you cannot is a surprise.
 let gunFrame = 0, gunT = 0;
-function triggerGunFire() { gunFrame = 1; gunT = 0.09; }
+function triggerGunFire() { gunFrame = 1; gunT = curWeapon().fireT; }
 function resetGun()       { gunFrame = 0; gunT = 0; }
 function stepGun(dt) {
   if (gunT > 0) {
     gunT -= dt;
     if (gunT <= 0) {
-      if (gunFrame === 1) { gunFrame = 2; gunT = 0.10; }
+      if (gunFrame === 1) { gunFrame = 2; gunT = curWeapon().recoilT; }
       else gunFrame = 0;
     }
   }
 }
 function drawGun() {
+  const w = curWeapon();
   const spanC = 39, spanR = 22;
   const sway = Math.round(Math.sin(player.bob * 0.5) * 2);
   const rise = Math.round(Math.cos(player.bob) * 1.2);
   let col0 = ((COLS - spanC) / 2 | 0) + sway;
   let row0 = ROWS - spanR + 2 + rise;
 
+  // a chaingun coming up to speed shudders before it lets go of anything
+  if (w.spinUp && player.windT > 0 && player.windT < w.spinUp) {
+    col0 += Math.round(Math.sin(player.windT * 55) * 1.6);
+  }
+
   if (player.reloadT > 0) {
-    // u runs 0→1 across the cycle: drop, eject, seat, raise
-    const u = 1 - player.reloadT / RELOAD_TIME;
+    // u runs 0→1 across the cycle: drop, eject, seat, raise. The denominator
+    // is the latched cycle length, not the pistol's, or a longer magazine
+    // would run the animation off the end of the reload.
+    const u = 1 - player.reloadT / player.reloadMax;
     let art, accent = RELOAD_ACCENT, base = COLOR.gun, accentCol = COLOR.crt;
     let dip;
     if (u < 0.22)      { art = GUN_DOWN;  dip = u / 0.22; }
@@ -2442,9 +2899,87 @@ function drawGun() {
     return;
   }
 
-  const art = gunFrame === 1 ? GUN_FIRE : gunFrame === 2 ? GUN_RECOIL : GUN_IDLE;
+  const art = gunFrame === 1 ? w.fire : gunFrame === 2 ? w.recoil : w.idle;
   blitArt(art, col0, row0, spanC, spanR,
-          gunFrame === 1 ? COLOR.gunHi : COLOR.gun, GUN_ACCENT, COLOR.muzzle);
+          COLOR[gunFrame === 1 ? w.hi : w.base], w.accent, COLOR[w.accentColor]);
+}
+
+// ─── DAMAGE DIRECTION ───────────────────────────────────────
+// A full-screen red wash says you were hit; it cannot say by whom, which makes
+// an ambush unreadable. This is an arc of red cells at a fixed radius from the
+// crosshair, pointing at where the shot came from.
+//
+// The radius is expressed in COLUMNS and converted to rows by the cell aspect,
+// because a cell is 7x12: using one radius for both axes would draw a tall
+// ellipse. 24 columns and 14 rows are both 168px.
+const HIT_ARC_COLS = 24;
+const HIT_ARC_ROWS = HIT_ARC_COLS * CELL_W / CELL_H;
+const HIT_ARC_STEP = 0.105;     // radians between glyphs
+const HIT_LIFE = 0.75;
+
+// The world position is what is stored, not a bearing: the arc has to swing as
+// you turn to look at whoever shot you, which is the entire point of it.
+function addHitDir(sx, sy) {
+  if (typeof sx !== 'number' || typeof sy !== 'number') return;
+  for (const h of hitDirs) {
+    // a second shot from roughly the same place refreshes that marker instead
+    // of stacking a second one on the same few cells
+    if (Math.hypot(h.x - sx, h.y - sy) < 1.2) { h.x = sx; h.y = sy; h.t = 0; return; }
+  }
+  hitDirs.push({ x: sx, y: sy, t: 0 });
+  if (hitDirs.length > 6) hitDirs.shift();
+}
+
+function stepHitDirs(dt) {
+  for (let i = hitDirs.length - 1; i >= 0; i--) {
+    hitDirs[i].t += dt;
+    if (hitDirs[i].t >= HIT_LIFE) hitDirs.splice(i, 1);
+  }
+}
+
+/**
+ * Where the arc's centre points, in radians, 0 being straight ahead.
+ *
+ * Derived from `fwd`/`lat` — the SAME basis the wall and sprite projection
+ * uses, where a positive `lat` is screen-right — rather than from a world
+ * atan2 and a remembered sign convention. Reasoning about the sign of atan2 is
+ * precisely what shipped the guardLeft/guardRight sprite pair mirrored in all
+ * eight viewing cases; see reference/CLAUDE.md.
+ */
+function hitDirAngle(h) {
+  const cosA = Math.cos(player.a), sinA = Math.sin(player.a);
+  const ex = h.x - player.x, ey = h.y - player.y;
+  const fwd = ex * cosA + ey * sinA;
+  const lat = -ex * sinA + ey * cosA;
+  if (!fwd && !lat) return null;              // standing exactly on you
+  return Math.atan2(lat, fwd);
+}
+
+/** One cell of the arc, `k` glyphs around from its centre. */
+function hitDirCell(th, k, horizon) {
+  const t = th + k * HIT_ARC_STEP;
+  return {
+    col: Math.round(COLS / 2 + Math.sin(t) * HIT_ARC_COLS),
+    row: Math.round(horizon  - Math.cos(t) * HIT_ARC_ROWS),
+  };
+}
+
+function drawHitDirs(horizon) {
+  for (const h of hitDirs) {
+    const th = hitDirAngle(h);
+    if (th === null) continue;
+    const fade = 1 - h.t / HIT_LIFE;
+    for (let k = -4; k <= 4; k++) {
+      const { col, row } = hitDirCell(th, k, horizon);
+      if (col < 0 || col >= COLS || row < 0 || row >= ROWS) continue;
+      // Quantised to four steps on purpose. Every distinct (glyph, colour)
+      // pair is an atlas entry, and a continuous fade would mint a fresh one
+      // every frame until the atlas overflowed to the slow fillText path.
+      const a = Math.round(fade * (1 - Math.abs(k) / 5) * 4) / 4;
+      if (a <= 0) continue;
+      drawChar(col, row, Math.abs(k) > 2 ? '▒' : '█', 'rgba(255,59,90,' + a + ')');
+    }
+  }
 }
 
 function drawCrosshair(horizon) {
@@ -2662,14 +3197,19 @@ function syncHud() {
   el('sTreasure').textContent = treasureFound + '/' + totalTreasure;
   const meta = el('floorName');
   if (meta) meta.textContent = 'neon reich \u00b7 floor ' + (levelIndex + 1) +
-                               ' \u00b7 ' + FLOOR_NAMES[levelIndex].toLowerCase();
+                               ' \u00b7 ' + FLOOR_NAMES[levelIndex].toLowerCase() +
+                               ' \u00b7 ' + DIFFICULTY[difficulty].name.toLowerCase();
   el('sHp').textContent   = player.hp;
-  el('sAmmo').textContent = player.reloadT > 0
-    ? '--/' + player.ammo
+  const w = curWeapon();
+  el('sWeapon').textContent = w.name;
+  // a weapon that costs no ammo has no magazine to report, and must not read
+  // as permanently empty
+  el('sAmmo').textContent = w.cost <= 0 ? '--'
+    : player.reloadT > 0 ? '--/' + player.ammo
     : player.clip + '/' + player.ammo;
   el('sHp').classList.toggle('low', player.hp <= 25);
   paintHpBar();
-  el('sAmmo').classList.toggle('low', player.clip <= 2);
+  el('sAmmo').classList.toggle('low', w.cost > 0 && player.clip <= 2);
   el('sFace').textContent = faceFor(player.hp);
   const ks = el('sKeys').children;
   ks[0].classList.toggle('on', player.keyRed);
@@ -2939,12 +3479,17 @@ function frame(now) {
   animT += dt;
   if (gameState === 'playing') levelTime += dt;
 
+  const trigger = keys.has(' ') || mouseHeld;
+  stepSpin(dt, trigger);
+
   if (firePressed) {
     firePressed = false;
     if (gameState === 'cleared') advanceFromTally();
     else fire();
   }
-  if (keys.has(' ') && gameState === 'playing') fire();   // hold to auto-fire
+  // Hold to repeat, but only for weapons that repeat. The pistol is one shot
+  // per press — it reaches fire() through the edge above and nowhere else.
+  if (trigger && gameState === 'playing' && curWeapon().auto) fire();
 
   updatePlayer(dt);
   stepDoors(dt);
@@ -2954,6 +3499,7 @@ function frame(now) {
   stepGun(dt);
   stepReload(dt);
   stepDmgPops(dt);
+  stepHitDirs(dt);
   stepHpBar(dt);
   stepTally(dt);
   stepToast(dt);
@@ -2977,6 +3523,7 @@ function frame(now) {
 
   // ── CROSSHAIR + WEAPON
   drawCrosshair(horizon);
+  drawHitDirs(horizon);
   if (gameState === 'playing') drawGun();
 
   // ── SCREEN FLASHES
@@ -2997,8 +3544,15 @@ function frame(now) {
 
 // ─── BOOT ───────────────────────────────────────────────────
 const splash = document.getElementById('splash');
+// A latch, not a parentElement check. The splash is not removed for 600ms, so
+// the original guard let begin() run twice — once from a difficulty row and
+// again when that click bubbled to #splash, or from a keypress landing inside
+// the fade. Twice means two audio graphs and, worse, TWO requestAnimationFrame
+// chains that both re-arm forever: every system would step twice per frame.
+let booted = false;
 function begin() {
-  if (!splash.parentElement) return;
+  if (booted || !splash.parentElement) return;
+  booted = true;
   splash.classList.add('fade-out');
   setTimeout(() => splash.remove(), 600);
   initAudio();                 // inside the user gesture
@@ -3012,6 +3566,31 @@ function begin() {
   else start();
 }
 splash.addEventListener('click', begin);
-addEventListener('keydown', () => { if (splash.parentElement) begin(); }, { once: true });
+
+// Difficulty rows. Each row is its own element with its own handler, NOT one
+// delegated listener on #splash: the stub DOM keeps a single handler per type
+// per element, so delegating would replace the boot click above — which is the
+// path the headless harness uses to start the game.
+//
+// A row's click also bubbles to #splash and calls begin() a second time. That
+// is safe now only because begin() latches; see the note on `booted`.
+const diffRows = DIFFICULTY.map((d, i) => el('diff' + i));
+function paintDiff() {
+  for (let i = 0; i < diffRows.length; i++) {
+    if (diffRows[i]) diffRows[i].classList.toggle('sel', i === difficulty);
+  }
+}
+for (let i = 0; i < diffRows.length; i++) {
+  if (!diffRows[i]) continue;
+  diffRows[i].addEventListener('click', () => { setDifficulty(i); paintDiff(); begin(); });
+}
+paintDiff();
+
+addEventListener('keydown', e => {
+  if (!splash.parentElement) return;
+  const k = e && e.key;
+  if (k >= '1' && k <= '4') { setDifficulty(+k - 1); paintDiff(); }
+  begin();
+}, { once: true });
 </script>
 

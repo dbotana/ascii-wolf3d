@@ -2,14 +2,54 @@
 
 // Shooting, the magazine cycle, floating damage numbers, and pickups.
 
+// ─── THE ROSTER ─────────────────────────────────────────────
+// WEAPONS lives in weapons.js and is pure data; everything here is the lookup
+// the growth rules ask for instead of a branch per weapon.
+function curWeapon() { return WEAPONS[player.weapon]; }
+
+/**
+ * Put a weapon up. Returns false if the index is out of range or unowned.
+ *
+ * The clip is TRUNCATED to the new weapon's capacity, never topped up: since
+ * player.ammo already counts the seated rounds, the surplus simply falls back
+ * into the reserve. That is what stops "switch away and back" from being a
+ * free instant reload, which topping up would have made it.
+ *
+ * The knife is exempt, and that is not cosmetic: its capacity is 0, so
+ * truncating would empty the gun you were holding, and switching back would
+ * cost you a full reload for having drawn a blade.
+ */
+function selectWeapon(i) {
+  if (gameState !== 'playing') return false;
+  if (!(i >= 0 && i < WEAPONS.length)) return false;
+  if (!player.weapons[i]) return false;
+  if (i === player.weapon) return false;
+  player.weapon = i;
+  const w = curWeapon();
+  if (w.cost > 0) player.clip = Math.min(player.clip, w.clip);
+  player.reloadT = 0;            // a switch cancels a reload in flight
+  player.reloadMax = w.reload || RELOAD_TIME;
+  player.windT = 0;              // and drops any chaingun spin
+  player.fireCd = Math.max(player.fireCd, 0.22);   // the raise costs you a beat
+  resetGun();
+  sfx('swap');
+  syncHud();
+  return true;
+}
+
 // ─── COMBAT ─────────────────────────────────────────────────
 // Reserve rounds live in player.ammo; player.clip is what is actually seated.
 // Firing empties the clip, then the reload cycle moves reserve into it.
+// Capacity and cycle length are per weapon; the knife has neither and is
+// filtered out by its cost of 0 before any of this runs.
 function startReload() {
   if (player.reloadT > 0) return false;
-  if (player.clip >= CLIP_SIZE) return false;
+  const w = curWeapon();
+  if (w.cost <= 0) return false;                      // nothing to reload
+  if (player.clip >= w.clip) return false;
   if (player.ammo - player.clip <= 0) return false;   // nothing in reserve
-  player.reloadT = RELOAD_TIME;
+  player.reloadMax = w.reload;
+  player.reloadT = w.reload;
   sfx('reload');
   return true;
 }
@@ -19,9 +59,23 @@ function stepReload(dt) {
   player.reloadT -= dt;
   if (player.reloadT <= 0) {
     player.reloadT = 0;
-    player.clip = Math.min(CLIP_SIZE, player.ammo);
+    player.clip = Math.min(curWeapon().clip, player.ammo);
     sfx('reloadDone');
     syncHud();
+  }
+}
+
+// The chaingun's barrels have to come up to speed before anything comes out.
+// Driven from frame() with whether the trigger is actually held, so releasing
+// it spins back down rather than banking the wind-up for later.
+function stepSpin(dt, held) {
+  const w = curWeapon();
+  if (!w.spinUp) { player.windT = 0; return; }
+  if (held && gameState === 'playing') {
+    if (player.windT <= 0) sfx('spin');
+    player.windT = Math.min(w.spinUp, player.windT + dt);
+  } else {
+    player.windT = Math.max(0, player.windT - dt * 1.6);
   }
 }
 
@@ -29,18 +83,27 @@ function fire() {
   if (gameState !== 'playing') return;
   if (player.reloadT > 0) return;
   if (player.fireCd > 0) return;
-  if (player.clip <= 0) {
-    // auto-reload if there is anything left in reserve, otherwise dry-click
-    if (!startReload()) { sfx('dry'); player.fireCd = 0.25; }
-    return;
+  const w = curWeapon();
+  if (player.windT < w.spinUp) return;      // barrels not up to speed yet
+  if (w.cost > 0) {
+    if (player.clip < w.cost) {
+      // auto-reload if there is anything left in reserve, otherwise dry-click
+      if (!startReload()) { sfx('dry'); player.fireCd = 0.25; }
+      return;
+    }
+    player.clip -= w.cost;
+    player.ammo -= w.cost;
   }
-  player.clip--;
-  player.ammo--;
-  player.fireCd = 0.28;
-  player.flashT = 0.09;
+  player.fireCd = w.cd;
+  player.flashT = w.flash;
   triggerGunFire();
-  sfx('shot');
+  sfx(w.sfx);
   syncHud();
+
+  // One spread roll per shot, drawn OUTSIDE the candidate loop: rolling per
+  // enemy would not be a cone, it would be a hit test that widens with the
+  // number of things standing in front of you.
+  const aimCol = COLS / 2 + (w.spread ? (Math.random() * 2 - 1) * w.spread : 0);
 
   const cosA = Math.cos(player.a), sinA = Math.sin(player.a);
   let best = null, bestD = Infinity;
@@ -48,16 +111,21 @@ function fire() {
     if (!e.alive) continue;
     const ex = e.x - player.x, ey = e.y - player.y;
     const depth = ex * cosA + ey * sinA;
-    if (depth <= 0.35 || depth >= MAX_DEPTH) continue;
+    // the far cull matches drawSprites', so you can always shoot what you see
+    if (depth <= w.minDepth || depth >= MAX_DEPTH) continue;
+    // A melee weapon caps on true distance; a gun does not cap at all. Note
+    // this is a RADIUS, not the forward depth above — a body 1.5u to your side
+    // is not something you can stab, however far in front of you it projects.
+    if (w.reach && Math.hypot(ex, ey) > w.reach) continue;
     const lateral = -ex * sinA + ey * cosA;
     const { centerCol, halfW } = spriteSpan(depth, lateral, SPR[e.type].wW);
-    if (Math.abs(centerCol - COLS / 2) > halfW) continue;
+    if (Math.abs(centerCol - aimCol) > halfW) continue;
     if (!hasLOS(player.x, player.y, e.x, e.y)) continue;
     if (depth < bestD) { bestD = depth; best = e; }
   }
   if (!best) return;
 
-  const dmg = 22 + Math.floor(Math.random() * 20);
+  const dmg = w.dmgMin + Math.floor(Math.random() * w.dmgSpan);
   best.hp -= dmg;
   if (best.hp <= 0) {
     addDmgPop(best, dmg, true);
@@ -75,8 +143,8 @@ function fire() {
     best.stateT = 0.22;
     sfx('hit');
   }
-  // gunfire wakes the neighbourhood
-  alertNear(player.x, player.y, 9);
+  // gunfire wakes the neighbourhood — a blade barely does
+  alertNear(player.x, player.y, w.alert);
 }
 
 // ─── DAMAGE NUMBERS ─────────────────────────────────────────
@@ -121,7 +189,13 @@ function drawDmgPops(zbuf, horizon) {
     const row  = Math.round(baseRow);
     if (row < 0 || row >= ROWS) continue;
 
-    const alpha = u < 0.7 ? 1 : 1 - (u - 0.7) / 0.3;
+    // Quantised to 8 steps, the same way mix() quantises its blend factor and
+    // for the same reason: every distinct (glyph, colour) pair is an atlas
+    // entry, and .toFixed(2) on a continuous fade mints a new one per frame.
+    // Unquantised this cost ~375 entries over 40 shots against a 32768 cap —
+    // never an overflow in play, but it is the exact drift CLAUDE.md warns
+    // about, and it is the reason the arc above quantises too.
+    const alpha = Math.round((u < 0.7 ? 1 : 1 - (u - 0.7) / 0.3) * 8) / 8;
     const rgb = p.kill ? '255,59,124' : '255,233,168';
     const color = 'rgba(' + rgb + ',' + (alpha * 0.95).toFixed(2) + ')';
     // a dark row underneath keeps the digits readable over bright walls

@@ -89,14 +89,19 @@ function syncHud() {
   el('sTreasure').textContent = treasureFound + '/' + totalTreasure;
   const meta = el('floorName');
   if (meta) meta.textContent = 'neon reich \u00b7 floor ' + (levelIndex + 1) +
-                               ' \u00b7 ' + FLOOR_NAMES[levelIndex].toLowerCase();
+                               ' \u00b7 ' + FLOOR_NAMES[levelIndex].toLowerCase() +
+                               ' \u00b7 ' + DIFFICULTY[difficulty].name.toLowerCase();
   el('sHp').textContent   = player.hp;
-  el('sAmmo').textContent = player.reloadT > 0
-    ? '--/' + player.ammo
+  const w = curWeapon();
+  el('sWeapon').textContent = w.name;
+  // a weapon that costs no ammo has no magazine to report, and must not read
+  // as permanently empty
+  el('sAmmo').textContent = w.cost <= 0 ? '--'
+    : player.reloadT > 0 ? '--/' + player.ammo
     : player.clip + '/' + player.ammo;
   el('sHp').classList.toggle('low', player.hp <= 25);
   paintHpBar();
-  el('sAmmo').classList.toggle('low', player.clip <= 2);
+  el('sAmmo').classList.toggle('low', w.cost > 0 && player.clip <= 2);
   el('sFace').textContent = faceFor(player.hp);
   const ks = el('sKeys').children;
   ks[0].classList.toggle('on', player.keyRed);

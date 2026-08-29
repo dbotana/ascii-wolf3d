@@ -46,12 +46,17 @@ function frame(now) {
   animT += dt;
   if (gameState === 'playing') levelTime += dt;
 
+  const trigger = keys.has(' ') || mouseHeld;
+  stepSpin(dt, trigger);
+
   if (firePressed) {
     firePressed = false;
     if (gameState === 'cleared') advanceFromTally();
     else fire();
   }
-  if (keys.has(' ') && gameState === 'playing') fire();   // hold to auto-fire
+  // Hold to repeat, but only for weapons that repeat. The pistol is one shot
+  // per press — it reaches fire() through the edge above and nowhere else.
+  if (trigger && gameState === 'playing' && curWeapon().auto) fire();
 
   updatePlayer(dt);
   stepDoors(dt);
@@ -61,6 +66,7 @@ function frame(now) {
   stepGun(dt);
   stepReload(dt);
   stepDmgPops(dt);
+  stepHitDirs(dt);
   stepHpBar(dt);
   stepTally(dt);
   stepToast(dt);
@@ -84,6 +90,7 @@ function frame(now) {
 
   // ── CROSSHAIR + WEAPON
   drawCrosshair(horizon);
+  drawHitDirs(horizon);
   if (gameState === 'playing') drawGun();
 
   // ── SCREEN FLASHES
@@ -104,8 +111,15 @@ function frame(now) {
 
 // ─── BOOT ───────────────────────────────────────────────────
 const splash = document.getElementById('splash');
+// A latch, not a parentElement check. The splash is not removed for 600ms, so
+// the original guard let begin() run twice — once from a difficulty row and
+// again when that click bubbled to #splash, or from a keypress landing inside
+// the fade. Twice means two audio graphs and, worse, TWO requestAnimationFrame
+// chains that both re-arm forever: every system would step twice per frame.
+let booted = false;
 function begin() {
-  if (!splash.parentElement) return;
+  if (booted || !splash.parentElement) return;
+  booted = true;
   splash.classList.add('fade-out');
   setTimeout(() => splash.remove(), 600);
   initAudio();                 // inside the user gesture
@@ -119,4 +133,29 @@ function begin() {
   else start();
 }
 splash.addEventListener('click', begin);
-addEventListener('keydown', () => { if (splash.parentElement) begin(); }, { once: true });
+
+// Difficulty rows. Each row is its own element with its own handler, NOT one
+// delegated listener on #splash: the stub DOM keeps a single handler per type
+// per element, so delegating would replace the boot click above — which is the
+// path the headless harness uses to start the game.
+//
+// A row's click also bubbles to #splash and calls begin() a second time. That
+// is safe now only because begin() latches; see the note on `booted`.
+const diffRows = DIFFICULTY.map((d, i) => el('diff' + i));
+function paintDiff() {
+  for (let i = 0; i < diffRows.length; i++) {
+    if (diffRows[i]) diffRows[i].classList.toggle('sel', i === difficulty);
+  }
+}
+for (let i = 0; i < diffRows.length; i++) {
+  if (!diffRows[i]) continue;
+  diffRows[i].addEventListener('click', () => { setDifficulty(i); paintDiff(); begin(); });
+}
+paintDiff();
+
+addEventListener('keydown', e => {
+  if (!splash.parentElement) return;
+  const k = e && e.key;
+  if (k >= '1' && k <= '4') { setDifficulty(+k - 1); paintDiff(); }
+  begin();
+}, { once: true });

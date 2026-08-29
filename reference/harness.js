@@ -73,6 +73,21 @@ const PROBE_SRC = `global.__PROBE = {
   enemySprite:   (typeof enemySprite !== "undefined" ? enemySprite : null),
   spriteSpan:    (typeof spriteSpan !== "undefined" ? spriteSpan : null),
   spr:           () => SPR,
+  // Phase 3: the weapon roster, difficulty, and directional damage.
+  curWeapon:     (typeof curWeapon    !== "undefined" ? curWeapon : null),
+  selectWeapon:  (typeof selectWeapon !== "undefined" ? selectWeapon : null),
+  startReload:   (typeof startReload  !== "undefined" ? startReload : null),
+  weapons:       () => (typeof WEAPONS !== "undefined" ? WEAPONS : []),
+  setDifficulty: (typeof setDifficulty !== "undefined" ? setDifficulty : null),
+  difficulty:    () => (typeof difficulty !== "undefined" ? difficulty : 2),
+  difficulties:  () => (typeof DIFFICULTY !== "undefined" ? DIFFICULTY : []),
+  populate:      (typeof populateEnemies !== "undefined" ? populateEnemies : null),
+  hurtPlayer:    (typeof hurtPlayer   !== "undefined" ? hurtPlayer : null),
+  hitDirs:       () => (typeof hitDirs !== "undefined" ? hitDirs : []),
+  hitDirAngle:   (typeof hitDirAngle  !== "undefined" ? hitDirAngle : null),
+  hitDirCell:    (typeof hitDirCell   !== "undefined" ? hitDirCell : null),
+  cellSize:      () => ({ w: CELL_W, h: CELL_H }),
+  enemyShot:     (typeof enemyShot   !== "undefined" ? enemyShot : null),
 };`;
 
 // Names the probe exposes as direct function references. Every one of them is
@@ -86,6 +101,8 @@ const REQUIRED_FNS = [
   'pushSecret', 'nextLevel', 'clearLevel', 'itemAt',
   'navAt', 'buildNav', 'navStep', 'navPassable',
   'moveEnemy', 'openDoorAhead', 'separate', 'enemySprite', 'spriteSpan',
+  'curWeapon', 'selectWeapon', 'startReload', 'setDifficulty', 'populate',
+  'hurtPlayer', 'hitDirAngle', 'hitDirCell', 'enemyShot',
 ];
 
 function assertProbe(P, htmlPath) {
@@ -96,6 +113,13 @@ function assertProbe(P, htmlPath) {
   if (!P.spr || Object.keys(P.spr()).length === 0) missing.push('SPR (sprite art)');
   if (!P.levels || P.levels().length === 0) missing.push('LEVELS (level data)');
   if (!P.ceoPhases || P.ceoPhases().length === 0) missing.push('CEO_PHASES');
+  // weapons.js is its own <script src>. collectSources only throws on a tag
+  // whose file is missing, not on a file with no tag — so without this line a
+  // forgotten tag evals cleanly and first surfaces as a ReferenceError deep
+  // inside fire(), which is exactly the silent-false-pass failure these
+  // emptiness checks exist to prevent.
+  if (!P.weapons || P.weapons().length === 0) missing.push('WEAPONS (weapon table)');
+  if (!P.difficulties || P.difficulties().length === 0) missing.push('DIFFICULTY');
   if (missing.length) {
     throw new Error(
       'incomplete game load from ' + htmlPath + ' — missing: ' + missing.join(', ') +

@@ -358,6 +358,32 @@
   #splash h2 { font-size: 46px; letter-spacing: 0.06em; text-shadow: 0 0 14px rgba(255,149,0,0.5); }
   #splash h3 { font-size: 26px; letter-spacing: 0.2em; color: var(--neon-pink); text-shadow: 0 0 14px rgba(255,59,124,0.5); font-weight: normal; }
   #splash p  { font-size: 17px; color: var(--crt); letter-spacing: 0.1em; opacity: 0.85; }
+  #splash .diffs {
+    display: flex; flex-direction: column; gap: 4px;
+    margin: 8px 0 2px;
+  }
+  #splash .diff {
+    font-family: 'VT323', monospace;
+    font-size: 19px; letter-spacing: 0.08em;
+    padding: 3px 22px;
+    border: 1px solid transparent;
+    background: none;
+    color: rgba(127,255,107,0.5);
+    cursor: pointer;
+    transition: color 0.12s ease, border-color 0.12s ease;
+  }
+  #splash .diff b {
+    font-weight: normal;
+    color: rgba(255,149,0,0.55);
+    margin-right: 8px;
+  }
+  #splash .diff:hover { color: var(--crt); }
+  #splash .diff.sel {
+    color: var(--sodium);
+    border-color: rgba(255,149,0,0.35);
+    text-shadow: 0 0 10px rgba(255,149,0,0.5);
+  }
+  #splash .diff.sel b { color: var(--sodium); }
   #splash .keys {
     font-family: 'IBM Plex Mono', monospace;
     font-size: 11px; line-height: 1.9;

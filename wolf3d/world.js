@@ -22,12 +22,32 @@ const player = {
   keyRed: false, keyBlue: false,
   fireCd: 0, bob: 0, hurtT: 0, flashT: 0,
   reloadT: 0, clip: CLIP_SIZE,
+  // Which weapon is up, and which ones you own. Everything is unlocked today;
+  // `weapons` exists so drops or level pickups are a one-line change rather
+  // than a new concept — selectWeapon already refuses an index that is 0 here.
+  weapon: PISTOL, weapons: [1, 1, 1, 1],
+  // reloadMax latches the current weapon's cycle length so the view-model
+  // animation stays correct for magazines that take longer than the pistol's.
+  reloadMax: RELOAD_TIME,
+  windT: 0,            // chaingun spin-up, in seconds of held trigger
 };
 
 // floating damage numbers over enemies we just shot
 let dmgPops = [];
+// where the shots that hit US came from, for the direction arc
+let hitDirs = [];
 
 let gameState = 'playing';   // playing | dead | cleared
+
+// Chosen once on the splash and then left alone. This is a RUN-level setting,
+// not player state: startLevel deliberately does not reset it, on either the
+// carry path or the cold restart, because dying on floor 3 should not quietly
+// put you back on the default.
+let difficulty = DIFF_DEFAULT;
+function setDifficulty(n) {
+  difficulty = Math.max(0, Math.min(DIFFICULTY.length - 1, n | 0));
+  return difficulty;
+}
 let levelTime = 0;
 let levelIndex = 0;          // which floor of LEVELS we are on
 let boss = null;             // the CEO, once a floor places one
@@ -66,100 +86,6 @@ function mkEnemy(type, x, y) {
 }
 function mkItem(kind, x, y) {
   return { kind, x, y, taken: false, bob: Math.random() * 6.28 };
-}
-
-function parseLevel(src) {
-  MAP_H = src.length;
-  MAP_W = src[0].length;
-  grid = [];
-  enemies = []; items = []; doorList = []; secretList = []; movingSecrets = [];
-  totalTreasure = 0; treasureFound = 0;
-  boss = null;
-  for (let y = 0; y < MAP_H; y++) {
-    const row = new Array(MAP_W).fill(0);
-    for (let x = 0; x < MAP_W; x++) {
-      const ch = src[y][x];
-      const seed = (((x * 91) ^ (y * 17) ^ 0x9E3779B1) * 2654435761) >>> 0;
-      switch (ch) {
-        case '#': row[x] = { tag: 'panel',  h: WALL_H, seed }; break;
-        case '|': row[x] = { tag: 'window', h: WALL_H, seed }; break;
-        case 'X': row[x] = { tag: 'exit',   h: WALL_H, seed }; break;
-        case 'N': row[x] = { tag: 'neon',   h: WALL_H, seed,
-                             signColor: NEON_PAL[(seed >>> 5) % NEON_PAL.length] }; break;
-        case 'D': case 'R': case 'B': {
-          const lock = ch === 'R' ? 'red' : ch === 'B' ? 'blue' : null;
-          const d = mkDoor(lock);
-          d.gx = x; d.gy = y;
-          row[x] = d; doorList.push(d);
-          break;
-        }
-        case 'S': {
-          const sec = mkSecret(x, y, seed);
-          row[x] = sec; secretList.push(sec);
-          break;
-        }
-        case 'g': enemies.push(mkEnemy('guard', x + 0.5, y + 0.5)); break;
-        case 'd': enemies.push(mkEnemy('drone', x + 0.5, y + 0.5)); break;
-        case 'C': {
-          const c = mkEnemy('ceo', x + 0.5, y + 0.5);
-          enemies.push(c); boss = c;
-          break;
-        }
-        case '+': items.push(mkItem('health',  x + 0.5, y + 0.5)); break;
-        case 'a': items.push(mkItem('ammo',    x + 0.5, y + 0.5)); break;
-        case 'r': items.push(mkItem('keyRed',  x + 0.5, y + 0.5)); break;
-        case 'b': items.push(mkItem('keyBlue', x + 0.5, y + 0.5)); break;
-        case '$': items.push(mkItem('cash',    x + 0.5, y + 0.5)); totalTreasure++; break;
-        case '@': player.x = x + 0.5; player.y = y + 0.5; break;
-      }
-    }
-    grid.push(row);
-  }
-  totalEnemies = enemies.length;
-  totalSecrets = secretList.length;
-  secretsFound = 0;
-  // sized with the map, so a floor of a different shape cannot read a stale field
-  navDist = new Int32Array(MAP_W * MAP_H).fill(-1);
-  navQueue = new Int32Array(MAP_W * MAP_H);   // hoisted: the field rebuilds ~3x a second
-  navSeedX = navSeedY = -1;
-  navRebuildT = 0;
-}
-
-/**
- * Start (or restart) a floor.
- * @param {number} [n]      index into LEVELS; defaults to the current floor
- * @param {boolean} [carry] true when descending — health, ammo and score
- *                          come with you, the way they do in Wolf3D. A cold
- *                          start resets them.
- */
-function startLevel(n, carry) {
-  levelIndex = Math.max(0, Math.min(LEVELS.length - 1,
-                                    n === undefined ? levelIndex : n));
-  parseLevel(LEVELS[levelIndex]);
-  player.a = -Math.PI / 2;
-  if (!carry) { player.hp = 100; player.ammo = 24; player.score = 0; }
-  // kills and keycards are per-floor even on a descent: the ratio on the
-  // tally screen is this floor's, and last floor's keys open nothing here
-  player.kills = 0;
-  player.keyRed = false; player.keyBlue = false;
-  player.fireCd = 0; player.bob = 0; player.hurtT = 0; player.flashT = 0;
-  player.reloadT = 0; player.clip = Math.min(CLIP_SIZE, player.ammo);
-  dmgPops = [];
-  resetHpShown();
-  gameState = 'playing';
-  levelTime = 0;
-  resetGun();
-  hideBanner();
-  hideTally();
-  syncHud();
-}
-
-function nextLevel() {
-  if (levelIndex + 1 >= LEVELS.length) return false;
-  startLevel(levelIndex + 1, true);
-  sfx('door');
-  toast('FLOOR ' + (levelIndex + 1) + '  ·  ' + FLOOR_NAMES[levelIndex]);
-  return true;
 }
 
 // ─── GRID QUERIES ───────────────────────────────────────────

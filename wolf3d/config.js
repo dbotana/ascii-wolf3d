@@ -19,6 +19,29 @@ const CLIP_SIZE = 8;          // rounds per magazine before a reload cycle
 const KILL_SCORE = { guard: 200, drone: 150, ceo: 5000 };
 const RELOAD_TIME = 1.05;     // seconds for the full reload animation
 
+// ─── DIFFICULTY ─────────────────────────────────────────────
+// Wolf3D's four, and its philosophy: the enemies do not get tougher, they get
+// better and there are more of them. Enemy HP is deliberately NOT scaled, so
+// "a guard dies in two pistol shots" is true at every setting and the damage
+// numbers keep meaning the same thing.
+//
+//   acc    multiplies the enemy hit probability in enemyShot()
+//   dmg    multiplies the damage of a shot that lands
+//   cd     multiplies the delay between attacks — below 1 they shoot sooner
+//   keep   fraction of a floor's non-boss spawns that actually appear
+//   extra  reinforcements, as a fraction of the floor's spawn count
+//
+// Index 2 is the default and every multiplier on it is 1.0: it IS the game as
+// it was tuned before difficulty existed, so nothing changes for a player (or
+// a test) that never picks.
+const DIFFICULTY = [
+  { name: "CAN I PLAY, DADDY?",   acc: 0.55, dmg: 0.55, cd: 1.35, keep: 0.65, extra: 0    },
+  { name: "DON'T HURT ME",        acc: 0.78, dmg: 0.80, cd: 1.15, keep: 0.85, extra: 0    },
+  { name: "BRING 'EM ON",         acc: 1.00, dmg: 1.00, cd: 1.00, keep: 1.00, extra: 0    },
+  { name: 'I AM DEATH INCARNATE', acc: 1.30, dmg: 1.30, cd: 0.72, keep: 1.00, extra: 0.35 },
+];
+const DIFF_DEFAULT = 2;
+
 // ─── PALETTE ────────────────────────────────────────────────
 const COLOR = {
   fog:'#0A1A2E', fogFar:'#0F2038', fogMid:'#1B2E44',
