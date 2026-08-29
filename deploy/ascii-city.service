@@ -1,0 +1,47 @@
+# ─── ascii-city.service ──────────────────────────────────────────────────────
+#
+# The static server behind both browser programs. Checked in so the deployment
+# stops being undocumented state living only in ~/.config/systemd/user/ on one
+# machine.
+#
+# Install on the host (a user unit — no root, and it needs lingering so it
+# survives logout):
+#
+#   mkdir -p ~/.config/systemd/user
+#   cp deploy/ascii-city.service ~/.config/systemd/user/
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now ascii-city
+#   loginctl enable-linger "$USER"          # once, so it runs without a session
+#
+# Check it against the unit already installed before overwriting anything:
+#
+#   diff -u ~/.config/systemd/user/ascii-city.service deploy/ascii-city.service
+#
+# It serves the REPO ROOT, which is what lets one server carry both programs:
+# / -> the city (index.html), /dist/wolf3d.html -> the shooter. See the
+# Deployment section of README.md for the funnel mapping that exposes them.
+#
+# Binding to 127.0.0.1 is deliberate. Nothing here is exposed by the server
+# itself; `tailscale funnel` is the only thing that makes it reachable, and it
+# is the only place the exposure decision is made.
+
+[Unit]
+Description=ASCII Rain City — static server for the city and the shooter
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=exec
+WorkingDirectory=%h/Github/ascii-rain-city
+ExecStart=/usr/bin/python3 -m http.server 5060 --bind 127.0.0.1
+Restart=on-failure
+RestartSec=5
+
+# The content is static and world-readable; the unit needs nothing else.
+ProtectSystem=strict
+ProtectHome=read-only
+PrivateTmp=true
+NoNewPrivileges=true
+
+[Install]
+WantedBy=default.target

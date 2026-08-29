@@ -61,15 +61,17 @@ the bundler and the harness both read it rather than keeping their own list.
 
 | file | lines | what |
 |---|---|---|
-| `wolf3d/style.css` | 410 | all CSS |
+| `wolf3d/style.css` | 569 | all CSS |
 | `wolf3d/config.js` | 111 | screen/projection constants, `DIFFICULTY`, `DEATH_TIME`, palette + fog cache, distance ramps, faces |
+| `wolf3d/scores.js` | 148 | the persistent high score table and its three storage guards |
 | `wolf3d/levels.js` | 149 | the three floors, `FLOOR_NAMES`, `PAR_TIME` |
 | `wolf3d/art.js` | 307 | `SPR` sprite table, the pistol's `GUN_*` view-model frames |
 | `wolf3d/gore.js` | 107 | `DEATH_SEQ` death-frame sequences, `DECAL_SPR` blood splats |
 | `wolf3d/weapons.js` | 202 | knife / SMG / chaingun art, and the `WEAPONS` table |
 | `wolf3d/gfx.js` | 94 | glyph atlas, `drawChar`, wall shading |
 | `wolf3d/audio.js` | 289 | the Web Audio graph, and the `MUSIC` table + its scheduler |
-| `wolf3d/input.js` | 57 | keyboard, mouse-look, pointer lock, the pause hooks |
+| `wolf3d/input.js` | 63 | keyboard, mouse-look, pointer lock, the pause hooks |
+| `wolf3d/touch.js` | 215 | the twin-stick overlay: stick math, look pad, buttons |
 | `wolf3d/world.js` | 305 | grid + entities, difficulty, pause, grid queries, doors, push-walls |
 | `wolf3d/level.js` | 182 | `populateEnemies`, `parseLevel` (incl. the door-axis pass), `startLevel`, `nextLevel` |
 | `wolf3d/raycast.js` | 85 | DDA raycast incl. thin-wall doors, `hasLOS`, `spriteSpan` |
@@ -77,8 +79,8 @@ the bundler and the harness both read it rather than keeping their own list.
 | `wolf3d/enemies.js` | 379 | FSM, steering, patrols, separation, loot, blood, the CEO |
 | `wolf3d/combat.js` | 247 | the roster lookup, firing, the magazine cycle, damage numbers, pickups |
 | `wolf3d/render.js` | 392 | `drawWalls`, sprites, decals, the weapon view-model, crosshair, the damage arc |
-| `wolf3d/hud.js` | 323 | toasts, banners, status bar, health bar, the tally screen |
-| `wolf3d/main.js` | 172 | `updatePlayer`, `frame`, boot |
+| `wolf3d/hud.js` | 336 | toasts, banners, status bar, health bar, the tally screen |
+| `wolf3d/main.js` | 190 | `updatePlayer`, `frame`, boot |
 
 **Order matters only for top-level execution.** Function declarations hoist
 across the whole shared scope, so a function body may call anything in any file
@@ -97,7 +99,19 @@ loaded four tags later, and it is fine. What genuinely needs ordering is small:
   death-frame assertion that predates the sequences still passes untouched;
 - the handful of statements that touch the DOM at load — `gfx.js` grabs the
   canvas, `input.js` binds listeners to it (so it must follow `gfx.js`),
-  `hud.js` caches elements, and `main.js` registers the splash handlers.
+  `touch.js` binds the overlay's (so it must follow both), `hud.js` caches
+  elements, and `main.js` registers the splash handlers.
+
+`touch.js` has one more constraint that is easy to miss: `input.js`'s canvas
+`mousedown` handler reads `touchActive`, which `touch.js` declares with `let`
+and therefore leaves in the temporal dead zone until its own tag runs. That is
+safe only because the handler BODY runs on an event, long after load — but it
+means `touch.js` is not optional, and dropping its tag turns the first click
+into a ReferenceError rather than a missing feature.
+
+`scores.js` needs no ordering at all: it runs nothing at load, and both
+`DIFFICULTY` and `el()` are read at call time. It sits after `config.js` for
+readers.
 
 `main.js` is last because it is the only file that *starts* anything.
 
@@ -521,12 +535,17 @@ last floor sets `gameState = 'won'` and shows the OUT banner instead.
 Run all of these before shipping any change. None of them needs a browser.
 
 ```sh
-node reference/run-tests.js                              # 350 assertions against the real game loop
+node reference/run-tests.js                              # 463 assertions against the real game loop
 WOLF3D_HTML=dist/wolf3d.html node reference/run-tests.js # ...and against the shipped bundle
 node reference/validate-level.js                         # map geometry + key-gated reachability, all 3 floors
 node reference/bundle.js                                 # rebuild dist/wolf3d.html
 node reference/check-structure.js                        # src tags resolve, no ESM, dist current, line budget
+node reference/mutate.js                                 # inject known bugs; the suite must go red for each
 ```
+
+GitHub Actions runs the first five on every push and pull request, against both
+representations; the battery runs weekly and on demand. There is an opt-in
+pre-commit hook: `git config core.hooksPath reference/hooks`.
 
 **Run the suite against both representations.** They are the same program, but
 "the same program" is a claim the bundler makes and the suite is what checks it.
@@ -581,6 +600,38 @@ Three ordering rules bite here. `startLevel()` with no argument restarts the
 changed it. The difficulty group is therefore the last group to use the shipped
 level, and it restores `setDifficulty(2)` before it hands back. And fixtures
 still have to come last, for the reason below.
+
+**`mutate.js` + `mutations.js`** — the mutation battery, which is the tool that
+tells green apart from covered. `mutations.js` is the catalog (data only, per
+rule 2): one string substitution each, plus a note saying what the bug DOES in
+player-visible terms. `mutate.js` copies `wolf3d.html` + `wolf3d/` to scratch,
+applies one patch, and points the PRISTINE suite at the copy with
+`WOLF3D_HTML`. `reference/` is never copied — the tools have to stay honest —
+and that works because `collectSources` resolves every `<script src>` relative
+to the HTML's own directory.
+
+Three things about it are load-bearing:
+
+- **Every anchor's occurrence count is checked before anything runs.** A `find`
+  string that has drifted makes its patch a no-op, and a no-op mutant runs the
+  pristine game: it goes green, reads as SURVIVED, and sends the next reader
+  hunting a coverage gap that does not exist. A mismatch is a hard error, and
+  `--list` alone is enough to tell you the catalog has rotted.
+- **`unkillable: '<reason>'` marks a mutation that cannot be observed at all** —
+  not merely uncovered. There is one, documented under "The view-dependent
+  slide" below. It is EXPECTED to survive, and a marked mutation that dies is a
+  failure too: it means a test is claiming coverage it cannot have.
+- **`gap: '<what it would take>'` marks a triaged survivor.** Real news the
+  first time and noise every run after, so it is reported loudly without
+  failing the run. What fails is movement in either direction — a new survivor,
+  or a gap closed without dropping its marker. That makes the battery a
+  **ratchet**: the count can fall, never rise. A check that is red forever is a
+  check nobody reads.
+
+One property worth holding on to: **a flaky suite makes the battery
+UNDER-report.** A chance failure turns a survivor into a false kill, never the
+reverse. So the survivor list can be trusted, and the kill list cannot quite —
+which is how the flaky spread assertion below was found.
 
 **Mutation-tested, and this is the part that matters.** Bugs are injected into
 copies of the game and the suite must go red for every one. It has not always:
@@ -697,6 +748,58 @@ Every tool here exits non-zero on failure, so they drop straight into CI.
   palette to ~580. The assertion measured which groups happen to run first, not
   the feature under test. Bounds have a place in the run; re-asserting a
   boot-time one later is a unit mismatch.
+- **A test that measured time-to-death and called it a rate.** The Phase 3
+  attack-delay assertion drove a guard through the FSM and counted entries into
+  `attack` — but it re-armed the state by hand every time the guard left it,
+  which skips `e.atkCd` altogether, and it let the player die a second in.
+  `stepEnemies` stops stepping live enemies the moment `gameState` leaves
+  `'playing'`, so `e.state` froze at `'attack'` with `stateT === 0` and the
+  counter ticked once per remaining frame: 195 versus 236 "attacks" were exactly
+  `(4000-864)/16` and `(4000-208)/16`. The assertion was driven by `D.dmg` and
+  `D.acc`, and deleting the `D.cd` multiplier it claimed to cover left the suite
+  green for two phases. **When a counter keys off state, ask what happens to
+  that state after the game ends.**
+
+- **A guard that no floor the table can produce will ever reach.**
+  `populateEnemies`'s `Math.max(1, Math.round(mob * D.keep))` cannot fire:
+  `Math.round(mob * keep) >= 1` for every `mob >= 1` whenever `keep >= 0.5`, and
+  the lowest `keep` in `DIFFICULTY` is 0.65. The existing test placed one guard
+  on the easiest setting and passed identically with the floor deleted. A
+  defensive guard is still worth keeping — but the only honest way to test one
+  is to **be the future it defends against**: the test now lowers `DIFFICULTY[0].keep`
+  to 0.1 for two lines and restores it. Same shape as the push-wall test that
+  stood a secret against solid rock: when a guard is unreachable, the assertion
+  under it proves nothing.
+
+- **A bare inequality between two random draws.** `ok(chainHits < smgHits)` over
+  200 shots each: hit rates around 0.52 and 0.40, no margin, and it reverses
+  about **one run in 25**. It surfaced only because the mutation battery
+  reported a *door* mutation as killed by it — a verdict no door geometry could
+  earn. Now 600 samples with a 0.92 margin, measured across 25 trials at
+  0.68-0.85. Note the direction of the damage: a flaky suite makes the battery
+  under-report, turning survivors into false kills, so the survivor list stays
+  trustworthy and the kill list does not.
+
+- **A broad `try/catch` makes every guard inside it unobservable.** Two of
+  `scores.js`'s early-outs — `if (!store) return false` and
+  `if (!Array.isArray(parsed))` — survived the battery, and neither is a
+  coverage gap. Delete the first and `store` is null, so `null.setItem` throws
+  *inside* the try and the catch returns `false`: same value, same function,
+  same input. Delete the second and `parsed.filter` throws inside the same try
+  and the catch sets `highScores = []`, which is exactly what the guard
+  returned. Both are kept — an absent store is an expected state rather than an
+  exception, and saying so is worth a line — but neither can be tested, and
+  both are marked `unkillable` rather than chased. **Before writing a test for
+  a guard, check what the enclosing catch would do without it.**
+
+- **A tie-break that depended on the clock's resolution.** `recordScore` sorted
+  by score and then by `at`, meaning to put the newest run above a tie. But
+  `Date.now()` is millisecond-resolution: two runs recorded in the same
+  millisecond tie on `at` too, and a stable sort then keeps whichever came
+  first — the older one. It works in play and fails in any test fast enough to
+  matter. Fixed by putting the new entry at the FRONT of the array before
+  sorting, which decides it without consulting a clock at all.
+
 - That fix immediately failed three of the shipped level's own push-walls, whose
   treasure pockets were one-wide dead ends — geometry in which a two-tile slide
   can *never* leave the loot reachable, whatever the guard does. `todo.md` had

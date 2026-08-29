@@ -21,12 +21,21 @@
 const { load, loadWithLevel } = require('./harness');
 
 const VERBOSE = process.argv.includes('--verbose');
+// --bail stops at the first failure. Off by default so ordinary runs report
+// everything; reference/mutate.js passes it always, because a mutant that dies
+// in the first group should not go on to pay for the other three hundred
+// assertions. A killed mutation is the common case and this is most of what
+// makes the battery affordable.
+const BAIL = process.argv.includes('--bail');
 let pass = 0, fail = 0;
 const failures = [];
 
 function ok(cond, msg) {
   if (cond) { pass++; if (VERBOSE) console.log(`  ok    ${msg}`); }
-  else { fail++; failures.push(msg); console.log(`  FAIL  ${msg}`); }
+  else {
+    fail++; failures.push(msg); console.log(`  FAIL  ${msg}`);
+    if (BAIL) { console.log(`\n${pass} passed, ${fail} failed (bailed)`); process.exit(1); }
+  }
 }
 function group(name) { console.log(`\n${name}`); }
 
@@ -1345,6 +1354,18 @@ P.startLevel(0);
 //    anything the sample above touches. Drive the real FSM instead: park a
 //    guard already in 'attack' with LOS and count how many volleys it gets off
 //    in a fixed window on each setting.
+//
+//    Two things this test has to avoid, both of which it once did NOT:
+//
+//    1. Never re-arm the FSM by hand. An earlier version forced the guard back
+//       into 'attack' the moment it left, which skips e.atkCd altogether — the
+//       one quantity under test. Let 'chase' re-enter 'attack' on its own gate.
+//    2. Never let the player die. stepEnemies stops stepping live enemies the
+//       instant gameState leaves 'playing', so e.state freezes wherever it was
+//       and any counter keyed on it runs free for the rest of the window. The
+//       earlier version counted exactly that: 195 vs 236 "attacks" were
+//       (4000-864)/16 and (4000-208)/16 frames after death, which measures
+//       D.dmg and D.acc. Deleting the cd multiplier left it green.
 {
   const attacksIn = (d, ms) => {
     P.setDifficulty(d);
@@ -1353,21 +1374,26 @@ P.startLevel(0);
     const e = firstGuard();
     place(e, 3);
     e.state = 'attack'; e.stateT = 0; e.shotsLeft = 1;
-    let shots = 0;
-    const before = P.player.hp;
-    let lastHp = before;
+    let volleys = 0, was = e.state;
     for (let t = 0; t < ms; t += 16) {
+      P.player.hp = 100;          // see (2) above — a corpse counts nothing
       run(1);
-      if (e.state === 'attack' && e.stateT === 0) shots++;   // just re-entered attack
-      // re-arm: freezeEnemies + a fixed spot means it will keep re-entering
-      // 'attack' every cooldown as long as it stays alive and in range
-      if (e.state === 'chase') { e.state = 'attack'; e.stateT = 0; e.shotsLeft = 1; }
+      if (was !== 'attack' && e.state === 'attack') volleys++;
+      was = e.state;
     }
-    return shots;
+    return volleys;
   };
-  const N = 4000;   // milliseconds
+  // 20s, because a guard's cooldown is 1.15s before the multiplier and the
+  // 0.75-1.25 jitter needs a dozen samples a side to settle. Measured over six
+  // runs the ratio sits between 1.64 and 1.90 against a table ratio of
+  // 1.35/0.72 = 1.875; the fixed 0.22s attack window is what dilutes it.
+  const N = 20000;
   const soft = attacksIn(0, N), hard = attacksIn(3, N);
-  ok(hard > soft, `a shorter cooldown fits more attacks into the same window (${soft} vs ${hard})`);
+  ok(soft > 4 && hard > 4,
+     `both settings get enough volleys in to compare (${soft}, ${hard})`);
+  ok(hard > soft * 1.35,
+     `a shorter cooldown fits more attacks into the same window ` +
+     `(${soft} on the easiest, ${hard} on the hardest, ratio ${(hard / soft).toFixed(2)})`);
 }
 
 
@@ -1395,6 +1421,27 @@ ok(P.difficulty() === 2, 'the default is restored before the fixtures run');
   ok(f.P.enemies().length === 1,
      `a one-guard floor keeps its guard on the easiest setting (${f.P.enemies().length})`);
   ok(f.P.totalEnemies() > 0, 'so the kill ratio never divides by zero');
+
+  // ── and now the guard itself, which the assertion above does NOT reach.
+  //    Math.round(mob * keep) is >= 1 for every mob >= 1 whenever keep >= 0.5,
+  //    and the lowest keep in the shipped table is 0.65 — so no floor the table
+  //    can produce ever thins to zero, and the Math.max(1, ...) never fires.
+  //    It is a guard against a FUTURE lower keep, so the only honest way to
+  //    exercise it is to be that future table for two lines. Without this,
+  //    deleting the floor passes the whole suite.
+  {
+    const D = f.P.difficulties();
+    const was = D[0].keep;
+    D[0].keep = 0.1;                     // round(1 * 0.1) === 0
+    f.P.startLevel();
+    ok(f.P.enemies().length >= 1,
+       `a keep that rounds to zero still leaves a floor its last body (${f.P.enemies().length})`);
+    ok(f.P.totalEnemies() >= 1,
+       'because an empty category reads as a 100% kill ratio and pays its 2500 bonus');
+    D[0].keep = was;
+    f.P.startLevel();
+    ok(f.P.enemies().length === 1, 'and the table is restored');
+  }
 }
 
 // ── push-wall clamping, on purpose-built geometry ────────────────────────────
@@ -1817,14 +1864,27 @@ group('weapon spread (fixture)');
     return hits;
   };
 
-  const N = 200;
+  // 600 rather than 200, with a margin, because the SMG and the chaingun are
+  // only 7.0 and 9.0 columns of jitter against a 3.7-column target: their hit
+  // rates sit around 0.52 and 0.40, and a bare `chain < smg` on 200 samples
+  // reverses about ONE RUN IN 25. It did — the mutation battery caught it,
+  // reporting a door mutation as killed by this line, which is a verdict no
+  // door geometry could earn. Measured over 25 trials at 600: no reversals,
+  // and the ratio stayed inside 0.68-0.85 against the 0.92 asserted here.
+  //
+  // A flaky suite makes the battery UNDER-report: a chance failure turns a
+  // survivor into a false kill, never the other way round. This one only
+  // surfaced because the mutation was marked unkillable and so was expected to
+  // survive. Bare inequalities between two random draws do not belong here.
+  const N = 600;
   const pistolHits = volley(1, N);
   const smgHits    = volley(2, N);
   const chainHits  = volley(3, N);
   ok(pistolHits === N, `the pistol never misses a centred target (${pistolHits}/${N})`);
-  ok(smgHits < N, `the SMG does, at ${range.toFixed(1)}u (${smgHits}/${N})`);
-  ok(chainHits < smgHits,
-     `and the chaingun is the loosest of the three (${chainHits}/${N} vs ${smgHits}/${N})`);
+  ok(smgHits < N * 0.8, `the SMG does, at ${range.toFixed(1)}u (${smgHits}/${N})`);
+  ok(chainHits < smgHits * 0.92,
+     `and the chaingun is the loosest of the three (${chainHits}/${N} vs ${smgHits}/${N}, ` +
+     `ratio ${(chainHits / smgHits).toFixed(3)})`);
 
   // ...and none of them misses in your face, where the jitter is far narrower
   // than the target: same weapon, same roll, different geometry.
@@ -2088,6 +2148,493 @@ group('music scheduler (audio fixture)');
   F.player.hp = 100;
   F.clearLevel();
   ok(play(4) > 0, 'a cleared floor keeps playing');
+}
+
+// ── the raycaster's own contract ─────────────────────────────────────────────
+//
+// Everything downstream reads these three properties and none of them had an
+// assertion: the suite tested what the raycaster is FOR (doors, sightlines,
+// sprites) and never what it promises. Three mutations lived in that gap.
+group('raycast contract');
+{
+  const r = load({ htmlPath: process.env.WOLF3D_HTML });
+  const R = r.P;
+  R.startLevel(0);
+
+  // Swept rather than sampled: one ray proves nothing about a branch that
+  // depends on which face was struck.
+  const LIM = 6;
+  let notFraction = 0, pastLimit = 0, hits = 0;
+  for (let i = 0; i < 720; i++) {
+    const a = i * Math.PI / 360;
+    const h = R.castRay(R.player.x, R.player.y, a, 24);
+    if (h.cell) { hits++; if (!(h.wallX >= 0 && h.wallX < 1)) notFraction++; }
+    if (R.castRay(R.player.x, R.player.y, a, LIM).dist > LIM + 1e-9) pastLimit++;
+  }
+  ok(hits > 600, `test setup: the sweep actually hits things (${hits}/720)`);
+  ok(notFraction === 0,
+     `wallX is a position ALONG the face, so it is always in [0,1) (${notFraction}/${hits} were not)`);
+  ok(pastLimit === 0,
+     `and a ray never reports further than the limit it was handed (${pastLimit}/720 past ${LIM}u)`);
+
+  // The projection divides by depth, and both consumers of spriteSpan lean on
+  // it: drop the divide and every distant body flies off the side of the
+  // screen while still being shootable dead ahead.
+  const mid = R.spriteSpan(4, 0, 1.15).centerCol;
+  const off4 = R.spriteSpan(4, 1, 1.15).centerCol - mid;
+  const off8 = R.spriteSpan(8, 1, 1.15).centerCol - mid;
+  ok(off4 > 1, `test setup: a body 1u to the side is off-centre at all (${off4.toFixed(2)} cols)`);
+  ok(Math.abs(off4 - 2 * off8) < 1e-9,
+     `a body twice as far is half as far off-centre (${off4.toFixed(2)} vs ${off8.toFixed(2)})`);
+
+  // Bodies pass a door only once it is most of the way open. blockAt is
+  // tile-granular, so this threshold is the entire difference between walking
+  // through a door and walking through one that has barely twitched.
+  const d = R.doors()[0];
+  const wasOpen = d.open, wasPhase = d.phase;
+  d.phase = 'opening'; d.open = 0.3;
+  ok(R.blockAt(d.gx + 0.5, d.gy + 0.5), 'a barely-open door still blocks a body');
+  d.open = 0.9;
+  ok(!R.blockAt(d.gx + 0.5, d.gy + 0.5), 'and a mostly-open one lets it through');
+  d.open = wasOpen; d.phase = wasPhase;
+}
+
+// ── the shot, exactly (fixture) ──────────────────────────────────────────────
+//
+// A corridor with a wall two thirds along, so the same two bodies can be put
+// in a line, behind cover, or in the player's face without reloading anything.
+group('the shot, exactly (fixture)');
+{
+  const f = loadWithLevel([
+    '################',
+    '#@.gg......#...#',
+    '################',
+  ], { htmlPath: process.env.WOLF3D_HTML });
+  const F = f.P;
+  const foes = F.enemies().filter(e => e.type === 'guard');
+  ok(foes.length === 2, `test setup: two guards in the corridor (${foes.length})`);
+  for (const e of foes) { e.state = 'hurt'; e.stateT = 1e9; }
+  const shoot = () => { F.player.fireCd = 0; F.player.reloadT = 0;
+                        F.player.ammo = 500; F.player.clip = F.curWeapon().clip;
+                        F.player.windT = F.curWeapon().spinUp; F.fire(); };
+
+  F.player.x = 1.5; F.player.y = 1.5; F.player.a = 0;   // face east
+  F.player.weapon = 1;                                   // pistol
+
+  // ── the NEAREST body takes it. Both are dead ahead and both are hittable;
+  //    only the depth test decides, and picking the last candidate instead
+  //    would let you shoot past the guard standing in front of you.
+  foes[0].x = 4.5; foes[1].x = 8.5;
+  for (const e of foes) { e.y = 1.5; e.hp = 1e9; }
+  shoot();
+  ok(foes[0].hp < 1e9, 'the near body takes the shot');
+  ok(foes[1].hp === 1e9, 'and the one behind it does not');
+
+  // ── cover works. The far guard sits past the wall at x=11 with no sightline.
+  foes[0].alive = false;
+  foes[1].x = 13.5; foes[1].y = 1.5; foes[1].hp = 1e9;
+  ok(!F.hasLOS(F.player.x, F.player.y, foes[1].x, foes[1].y),
+     'test setup: the wall breaks the sightline');
+  ok(Math.hypot(foes[1].x - F.player.x, foes[1].y - F.player.y) < 24,
+     'test setup: but it is still inside the ray cutoff');
+  shoot();
+  ok(foes[1].hp === 1e9, 'a body behind solid wall cannot be shot');
+
+  // ── the dead zone in front of the muzzle. A pistol has minDepth 0.35; the
+  //    knife is the weapon that reaches a body in your face, which is its
+  //    entire advantage.
+  foes[1].x = F.player.x + 0.2; foes[1].hp = 1e9;
+  shoot();
+  ok(foes[1].hp === 1e9, 'a gun cannot hit a body inside its dead zone');
+  foes[1].x = F.player.x + 1.0; foes[1].hp = 1e9;
+  shoot();
+  ok(foes[1].hp < 1e9, 'and does hit the same body a tile further out');
+
+  // ── a shot spends a round. Without this the magazine never empties and the
+  //    whole reload cycle is unreachable.
+  F.player.fireCd = 0; F.player.reloadT = 0;
+  F.player.ammo = 20; F.player.clip = 6;
+  F.fire();
+  ok(F.player.clip === 5, `firing seats one round fewer (${F.player.clip})`);
+  ok(F.player.ammo === 19, `and spends one from the reserve (${F.player.ammo})`);
+}
+
+// ── the magazine contract ────────────────────────────────────────────────────
+//
+// player.ammo is the TOTAL and player.clip is what is seated, so the reserve is
+// (ammo - clip). Every guard below protects a different way of minting rounds.
+group('the magazine contract');
+{
+  const m = load({ htmlPath: process.env.WOLF3D_HTML });
+  const M = m.P;
+  M.startLevel(0);
+  M.player.weapon = 1;                                   // pistol
+  const cap = M.curWeapon().clip;
+
+  M.player.reloadT = 0; M.player.ammo = 24; M.player.clip = cap;
+  ok(M.startReload() === false, 'a full magazine does not start a reload');
+
+  M.player.reloadT = 0; M.player.clip = 2;
+  ok(M.startReload() === true, 'a partial one does');
+
+  M.player.reloadT = 0; M.player.ammo = 2; M.player.clip = 2;
+  ok(M.startReload() === false,
+     'and there is nothing to reload when every round you own is already seated');
+
+  // A reload seats what the reserve actually holds. Seating a full magazine
+  // regardless would turn the last five rounds into five forever.
+  M.player.reloadT = 0; M.player.ammo = 5; M.player.clip = 0;
+  ok(M.startReload() === true, 'test setup: five in reserve, none seated');
+  M.player.reloadT = 0.001;
+  m.run(2);
+  ok(M.player.reloadT === 0, 'test setup: the cycle completed');
+  ok(M.player.clip === 5, `a reload seats only what the reserve holds (${M.player.clip}, cap ${cap})`);
+  ok(M.player.ammo === 5, 'and does not mint any');
+
+  // The chaingun's barrels spin back down when the trigger is released, or the
+  // spin-up would be a one-time cost for the whole floor.
+  M.player.weapon = 3;
+  const spinUp = M.curWeapon().spinUp;
+  ok(spinUp > 0, `test setup: the chaingun has a ${spinUp}s spin-up`);
+  M.player.windT = spinUp;
+  m.run(1);                                              // trigger not held
+  ok(M.player.windT < spinUp, `releasing the trigger spins them down (${M.player.windT.toFixed(3)})`);
+  m.run(30);
+  ok(M.player.windT === 0, 'all the way to nothing');
+}
+
+// ── the tally pays once, and only for a clean sweep (fixture) ────────────────
+//
+// The existing perfect-tally group SKIPS the roll-up with use(), which is the
+// path finishTally takes — so the roll-up's own loop, which calls settleRow
+// every frame from the moment a row lands until the stage advances, was never
+// run by anything. Without settleRow's `paid` latch a clean sweep pays its
+// 2500 about nineteen times, and the suite stayed green.
+//
+// No S and no $ on this floor: ratio() reports an empty category as 100%, so
+// killing the one guard is a clean sweep for the price of one kill.
+group('the tally roll-up (fixture)');
+{
+  const f = loadWithLevel([
+    '##########',
+    '#@.......#',
+    '#..g.....#',
+    '#.......X#',
+    '##########',
+  ], { htmlPath: process.env.WOLF3D_HTML });
+  const F = f.P;
+  const foe = F.enemies()[0];
+  F.player.x = foe.x; F.player.y = foe.y + 1.0; F.player.a = -Math.PI / 2;
+  ok(F.hasLOS(F.player.x, F.player.y, foe.x, foe.y), 'test setup: the guard is in view');
+  F.player.ammo = 90; F.player.clip = 8;
+  for (let i = 0; i < 40 && foe.alive; i++) { F.fire(); f.run(20); F.player.hp = 100; }
+  ok(!foe.alive, 'test setup: the floor is swept');
+
+  const before = F.player.score;
+  F.clearLevel();
+  const t = F.tally();
+  ok(t.rows.every(r => r.pct === 100),
+     `test setup: all three categories read 100% (${t.rows.map(r => r.id + ' ' + r.pct).join('/')})`);
+
+  // watch it, do not skip it
+  let frames = 0;
+  while (frames < 600 && !F.tally().done) { f.run(1); frames++; }
+  ok(F.tally().done, `the roll-up finishes on its own (${frames} frames)`);
+  ok(F.player.score === before + t.timeBonus + 3 * 2500,
+     `and pays exactly once per category (${before} + ${t.timeBonus} + 7500 -> ${F.player.score})`);
+}
+
+// ── and a floor that is nearly perfect pays nothing for it ───────────────────
+group('the tally pays only at 100%');
+{
+  const y = load({ htmlPath: process.env.WOLF3D_HTML });
+  const Y = y.P;
+
+  // One kill short, deliberately: the ratio has to land in the NINETIES. A
+  // lower one (12 * 0.9 floors to 10, which is 83%) never reaches the branch
+  // under test, and a payout threshold dropped to 90% would survive it — which
+  // is exactly what the first version of this test did.
+  Y.startLevel(0);
+  Y.player.kills = Y.totalEnemies() - 1;
+  Y.player.score = 0;
+  Y.clearLevel();
+  const t = Y.tally();
+  ok(t.rows[0].pct >= 90 && t.rows[0].pct < 100,
+     `test setup: a kill ratio in the nineties but short of clean (${t.rows[0].pct}%)`);
+  Y.use();                                     // settle it
+  ok(Y.player.score === t.timeBonus,
+     `the entire payout is the time bonus — Wolf3D paid nothing for 99% ` +
+     `(${Y.player.score} vs a ${t.timeBonus} time bonus)`);
+
+  // Over par pays ZERO, never a negative. levelTime is driven directly here
+  // because reaching par honestly means simulating three minutes of frames.
+  Y.startLevel(0);
+  Y.setLevelTime(99999);
+  Y.clearLevel();
+  ok(Y.tally().timeBonus === 0,
+     `finishing far over par pays zero rather than subtracting (${Y.tally().timeBonus})`);
+}
+
+// ── the CEO re-tunes itself ──────────────────────────────────────────────────
+//
+// stepCeoPhase mutates e.spec in place, and every field it writes had been
+// asserted only through its consequences — which meant three of them could be
+// dropped entirely without the suite noticing.
+group('the CEO re-tunes itself');
+{
+  const b = load({ htmlPath: process.env.WOLF3D_HTML });
+  const B = b.P;
+  B.startLevel(B.levels().length - 1);
+  const ceo = B.boss();
+  ok(!!ceo && ceo.type === 'ceo', 'test setup: the last floor places a CEO');
+  const PH = B.ceoPhases();
+
+  ok(ceo.spec.speed === PH[0].speed && ceo.spec.dmg === PH[0].dmg && ceo.want === PH[0].want,
+     `it opens on ${PH[0].name}`);
+
+  for (let i = 1; i < PH.length; i++) {
+    ceo.hp = Math.floor(ceo.maxHp * PH[i].at) - 1;
+    b.run(1);
+    ok(ceo.phase === i,
+       `dropping under ${Math.round(PH[i].at * 100)}% enters ${PH[i].name}`);
+    ok(ceo.spec.speed === PH[i].speed, `taking its speed (${ceo.spec.speed})`);
+    ok(ceo.spec.dmg === PH[i].dmg,     `its damage (${ceo.spec.dmg})`);
+    ok(ceo.spec.cd === PH[i].cd,       `its cooldown (${ceo.spec.cd})`);
+    ok(ceo.want === PH[i].want,        `and closing to its standoff (${ceo.want})`);
+  }
+
+  // It also claims more room than a guard does, or the drones it just summoned
+  // stand inside its jacket.
+  const drone = B.enemies().find(e => e.type === 'drone' && e.alive);
+  ok(!!drone, 'test setup: the last phase summoned drones to crowd it with');
+  drone.x = ceo.x; drone.y = ceo.y;
+  for (let i = 0; i < 40; i++) B.separate();
+  const gap = Math.hypot(drone.x - ceo.x, drone.y - ceo.y);
+  ok(gap > 0.8,
+     `the CEO holds more room than a pair of guards would (${gap.toFixed(2)}u, two guards claim 0.70)`);
+}
+
+// ── touch controls (the seam) ────────────────────────────────────────────────
+//
+// The overlay is pointer events on DOM elements, and the stub delivers neither,
+// so what is tested here is the part that can be wrong in a way a player feels:
+// the stick math, and the claim that folding an analog vector into
+// updatePlayer left the KEYBOARD exactly where it was. That second one is why
+// updatePlayer's normalise became a clamp, and "identical" is a claim, not an
+// observation, until something measures it.
+group('touch controls');
+{
+  const t = load({ htmlPath: process.env.WOLF3D_HTML });
+  const T = t.P;
+
+  // ── the pure stick math
+  const zero = T.stickVector(0, 0);
+  ok(zero.x === 0 && zero.y === 0, 'dead centre is dead');
+  const dz = T.stickVector(6, 0);
+  ok(dz.x === 0 && dz.y === 0, 'and so is anything inside the dead zone');
+  // Just outside it the vector must start from ~0 rather than jump to a fifth
+  // of full deflection, which is exactly what dropping the rescale would do.
+  const edge = T.stickVector(10, 0);
+  ok(edge.x > 0 && edge.x < 0.05,
+     `leaving the dead zone starts from zero rather than jumping (${edge.x.toFixed(4)})`);
+  const full = T.stickVector(400, 0);
+  ok(Math.abs(full.x - 1) < 1e-9 && Math.abs(full.y) < 1e-9,
+     'past the rim clamps to exactly full deflection');
+  ok(full.run === true, 'and reads as running');
+  ok(T.stickVector(20, 0).run === false, 'a gentle push does not');
+  // screen-down is a POSITIVE delta and forward is up, so y is inverted
+  ok(T.stickVector(0, -400).y > 0.99, 'up the screen is forward');
+  ok(T.stickVector(0, 400).y < -0.99, 'and down the screen is backward');
+  const diag = T.stickVector(400, 400);
+  ok(Math.abs(Math.hypot(diag.x, diag.y) - 1) < 1e-9,
+     'a diagonal at the rim is still exactly one unit, not the square root of two');
+
+  // ── the seam into updatePlayer. ONE frame at a time: the quantity under test
+  //    is the speed the stick produces, and a single frame cannot reach a wall.
+  const oneFrame = (held, touch) => {
+    T.startLevel(0);
+    for (const e of T.enemies()) { e.state = 'hurt'; e.stateT = 1e9; }
+    T.setTouchMove(0, 0, false);
+    if (touch) T.setTouchMove(touch[0], touch[1], !!touch[2]);
+    const x0 = T.player.x, y0 = T.player.y;
+    t.run(1, held);
+    T.setTouchMove(0, 0, false);
+    return Math.hypot(T.player.x - x0, T.player.y - y0);
+  };
+  const key = oneFrame(['w'], null);
+  ok(key > 0.05, `test setup: W actually moves the player (${key.toFixed(4)}u in one frame)`);
+
+  const stick = oneFrame(null, [0, 1]);
+  ok(Math.abs(stick - key) < 1e-9,
+     `a fully deflected stick moves exactly as far as W (${key.toFixed(4)} vs ${stick.toFixed(4)})`);
+  const half = oneFrame(null, [0, 0.5]);
+  ok(Math.abs(half - key * 0.5) < 1e-9,
+     `and half deflection is half speed, which normalising could not give (${half.toFixed(4)})`);
+  // The regression guard the whole clamp rests on: a keyboard diagonal has a
+  // magnitude of the square root of two before scaling, and has to come out at
+  // walking speed exactly as it did when this line normalised.
+  const dg = oneFrame(['w', 'd'], null);
+  ok(Math.abs(dg - key) < 1e-9,
+     `a keyboard diagonal is still capped at walking speed (${dg.toFixed(4)})`);
+  ok(oneFrame(['w', 'shift'], null) > key * 1.7, 'shift still runs');
+  ok(oneFrame(null, [0, 1, true]) > key * 1.7, 'and so does the stick at the rim');
+  ok(Math.abs(oneFrame(null, [1, 0]) - key) < 1e-9, 'a sideways stick strafes at walking speed');
+
+  // ...and in the strafe DIRECTION, which distance alone cannot tell you:
+  // forward and sideways cover exactly the same ground, so a test that only
+  // measures how far the stick moves you passes with the two axes swapped.
+  T.startLevel(0);
+  for (const e of T.enemies()) { e.state = 'hurt'; e.stateT = 1e9; }
+  T.player.a = -Math.PI / 2;                       // facing north
+  const bx = T.player.x, by = T.player.y;
+  T.setTouchMove(1, 0, false);                     // hard right on the stick
+  t.run(1, null);
+  T.setTouchMove(0, 0, false);
+  const ddx = T.player.x - bx, ddy = T.player.y - by;
+  ok(ddx > 0.04 && Math.abs(ddy) < 1e-9,
+     `a right strafe while facing north goes east and only east ` +
+     `(${ddx.toFixed(4)}, ${ddy.toFixed(4)})`);
+
+  // ── look is banked between frames and applied once, by its sum
+  T.startLevel(0);
+  const a0 = T.player.a;
+  T.addTouchLook(0.10);
+  T.addTouchLook(0.20);
+  t.run(1);
+  ok(Math.abs(T.player.a - (a0 + 0.30)) < 1e-9,
+     'two look deltas inside one frame turn once, by their sum');
+  const a1 = T.player.a;
+  t.run(1);
+  ok(Math.abs(T.player.a - a1) < 1e-9, 'and the bank is consumed, not re-applied');
+
+  // ── the stick goes through blockAt like every other mover
+  {
+    T.startLevel(0);
+    for (const e of T.enemies()) { e.state = 'hurt'; e.stateT = 1e9; }
+    const grid = T.grid();
+    let spot = null;
+    for (let y = 2; y < grid.length - 1 && !spot; y++)
+      for (let x = 1; x < grid[y].length - 1; x++)
+        if (!grid[y][x] && grid[y - 1][x] && !grid[y + 1][x]) { spot = [x + 0.5, y + 0.5]; break; }
+    ok(!!spot, 'test setup: found a walkable tile with a wall directly north');
+    T.player.x = spot[0]; T.player.y = spot[1]; T.player.a = -Math.PI / 2;
+    T.setTouchMove(0, 1, true);
+    t.run(80);
+    T.setTouchMove(0, 0, false);
+    ok(!T.blockAt(T.player.x, T.player.y),
+       'a stick held into a wall does not push the player through it');
+    ok(T.player.y > spot[1] - 1,
+       `and it stops short of the wall (${(spot[1] - T.player.y).toFixed(2)}u travelled)`);
+  }
+}
+
+// ── high scores (storage fixtures) ───────────────────────────────────────────
+//
+// LAST in the file, and each block asserts against the handle it just made:
+// every load() replaces the process globals, so anything afterwards that still
+// reaches for an older instance is reading a game that has stopped stepping.
+//
+// The store is stubbed four ways because wolf3d/scores.js guards four
+// different failures — absent, hostile on access, refuses to write, holds
+// garbage — and a guard nobody has driven is a guess.
+group('high scores (storage fixtures)');
+{
+  const disk = {};                       // a backing map shared across loads
+  const f = load({ htmlPath: process.env.WOLF3D_HTML, storage: disk });
+  const S = f.P;
+
+  ok(S.scores().length === 0, 'a fresh install has an empty table');
+  ok(S.scoreSlots() === 5, `the table is ${S.scoreSlots()} slots`);
+
+  // ── dying files the run
+  S.startLevel(0);
+  S.player.score = 12345;
+  S.killPlayer();
+  ok(S.state() === 'dead', 'test setup: the floor is over');
+  ok(S.scores().length === 1, 'dying files the run');
+  ok(S.scores()[0].score === 12345, `at the score it ended on (${S.scores()[0].score})`);
+  ok(S.scores()[0].won === false, 'marked as a death rather than an escape');
+  ok(S.scores()[0].floor === 1, `and the floor it ended on (${S.scores()[0].floor})`);
+  ok(disk[S.scoresKey()] !== undefined, 'and it reached the store');
+
+  // ── ordering, and the rank recordScore hands back
+  ok(S.recordScore(99999, 3, 2, true) === 0, 'a better run takes the top slot');
+  ok(S.scores()[0].score === 99999 && S.scores()[1].score === 12345,
+     'and the table sorts descending');
+  for (const n of [50000, 40000, 30000, 20000]) S.recordScore(n, 1, 2, false);
+  ok(S.scores().length === 5, `the table caps at five (${S.scores().length})`);
+  ok(S.scores()[4].score === 20000,
+     `holding the five best (${S.scores().map(e => e.score).join(',')})`);
+  ok(S.recordScore(5, 1, 2, false) === -1, 'a run below the cut is not filed');
+  ok(S.scores().length === 5, 'and does not grow the table');
+  // A tie takes the slot. Ranking it below would tell a player they had missed
+  // a table they just equalled.
+  ok(S.recordScore(20000, 2, 2, false) === 4, 'a run that ties the last slot takes it');
+  ok(S.scores()[4].floor === 2, 'and it is the new run sitting there, not the old one');
+
+  // ── persistence, which is the entire point of the feature
+  const table = S.scores().map(e => e.score).join(',');
+  const f2 = load({ htmlPath: process.env.WOLF3D_HTML, storage: disk });
+  ok(f2.P.scores().map(e => e.score).join(',') === table,
+     `the table survives a fresh load off the same store (${table})`);
+
+  // ── garbage in the key degrades to an empty table rather than propagating
+  const K = f2.P.scoresKey();
+  const bad = {}; bad[K] = '{not json';
+  ok(load({ htmlPath: process.env.WOLF3D_HTML, storage: bad }).P.scores().length === 0,
+     'unparseable stored data reads as an empty table');
+  const notArr = {}; notArr[K] = JSON.stringify({ nope: true });
+  ok(load({ htmlPath: process.env.WOLF3D_HTML, storage: notArr }).P.scores().length === 0,
+     'and so does a stored value that is not an array');
+  const mixed = {};
+  mixed[K] = JSON.stringify([{ score: 10 }, 'garbage', null, { score: 'x' }, { score: 20 }]);
+  const f5 = load({ htmlPath: process.env.WOLF3D_HTML, storage: mixed });
+  ok(f5.P.scores().length === 2 && f5.P.scores()[0].score === 20,
+     `entries that are not scores are dropped and the rest survive (${f5.P.scores().length})`);
+
+  // ── a store that reads but refuses to write: Safari's private mode, and a
+  //    full quota. The game must boot, rank, and paint regardless.
+  const f6 = load({ htmlPath: process.env.WOLF3D_HTML, storage: 'throws' });
+  ok(f6.P.state() === 'playing', 'the game boots against a store that will not write');
+  ok(f6.P.recordScore(777, 1, 2, false) === 0, 'and the session still ranks its runs');
+  ok(f6.P.saveScores() === false, 'saveScores reports the failure instead of throwing');
+  f6.P.paintScores();
+  ok(f6.el('hsScore0').textContent === '000777',
+     `and the splash still paints it (${f6.el('hsScore0').textContent})`);
+  ok(f6.el('hs0').classList.contains('fresh'), 'marking the run that just ended');
+  ok(f6.el('hsNone').classList.contains('hide'), 'and hiding the empty-table notice');
+
+  // ── a store whose PROPERTY ACCESS throws. `typeof localStorage` is itself
+  //    the throwing expression here, which is why that typeof sits inside the
+  //    try in scoreStore() rather than in front of it.
+  const f7 = load({ htmlPath: process.env.WOLF3D_HTML, storage: 'hostile' });
+  ok(f7.P.state() === 'playing', 'the game boots where touching localStorage throws');
+  ok(f7.P.loadScores().length === 0, 'and reads as an empty table');
+  ok(f7.P.recordScore(42, 1, 2, false) === 0, 'while still ranking the session');
+  ok(f7.P.saveScores() === false, 'and reports that nothing persisted');
+
+  // ── no localStorage at all: the headless case, and any non-browser host
+  const f8 = load({ htmlPath: process.env.WOLF3D_HTML, storage: null });
+  ok(f8.P.state() === 'playing', 'and where there is no localStorage at all');
+  ok(f8.P.saveScores() === false, 'saving is a no-op it reports honestly');
+  ok(f8.P.loadScores().length === 0, 'and loading yields an empty table');
+
+  // ── a run ends by dying or by getting out, and by NOTHING else. Restarting
+  //    zeroes the score on startLevel's cold path, so filing there would enter
+  //    a partial run and then file the real one again when it ended.
+  const f9 = load({ htmlPath: process.env.WOLF3D_HTML, storage: {} });
+  f9.P.startLevel(0);
+  f9.P.player.score = 5000;
+  f9.P.startLevel(0);
+  ok(f9.P.scores().length === 0, 'restarting a floor does not file a run');
+  ok(f9.P.player.score === 0,
+     'because it resets the score, which is why filing there would be wrong');
+
+  f9.P.player.score = 8888;
+  f9.P.winGame();
+  ok(f9.P.scores().length === 1, 'getting out does file one');
+  ok(f9.P.scores()[0].won === true, 'marked as an escape');
+  ok(f9.P.state() === 'won', 'and the floor is won');
 }
 
 // ── report ───────────────────────────────────────────────────────────────────

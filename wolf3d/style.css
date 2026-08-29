@@ -408,3 +408,167 @@
     #stage::before { background: none; }
     canvas#screen { filter: none; }
   }
+
+  /* ─── HIGH SCORES (on the splash) ───────────────────────────
+     Fixed rows rather than generated ones, so scores.js only ever writes
+     textContent and classList — see paintScores(). */
+  #hiscores {
+    display: flex; flex-direction: column; align-items: center;
+    gap: 2px; margin: 2px 0 4px;
+    font-family: 'VT323', monospace;
+  }
+  #hiscores .hsTitle {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 10px; letter-spacing: 0.24em; text-transform: uppercase;
+    color: rgba(127,255,107,0.45);
+    margin-bottom: 3px;
+  }
+  #hsRows { list-style: none; display: flex; flex-direction: column; gap: 1px; }
+  #hsRows .hs {
+    display: grid;
+    grid-template-columns: 18px 74px auto;
+    align-items: baseline;
+    gap: 10px;
+    font-size: 17px; letter-spacing: 0.06em;
+    color: rgba(127,255,107,0.62);
+  }
+  #hsRows .hs.hide { display: none; }
+  #hsRows .hs .rank { color: rgba(255,149,0,0.5); text-align: right; }
+  #hsRows .hs .sc   { color: var(--crt); }
+  #hsRows .hs .meta {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 10px; letter-spacing: 0.14em;
+    color: rgba(127,255,107,0.38);
+  }
+  /* the run that just ended, so you can find yourself in the table */
+  #hsRows .hs.fresh .sc,
+  #hsRows .hs.fresh .rank { color: var(--sodium); text-shadow: 0 0 10px rgba(255,149,0,0.55); }
+  #hsRows .hs.fresh .meta { color: rgba(255,149,0,0.55); }
+  #hsNone {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 10px; letter-spacing: 0.2em;
+    color: rgba(127,255,107,0.28);
+  }
+  #hsNone.hide { display: none; }
+
+  /* ─── TOUCH CONTROLS ────────────────────────────────────────
+     z-index 7: ABOVE the CRT scanlines and vignette (5 and 6), so a thumb is
+     not reaching through them, and BELOW #banner / #tally (8) and #splash (10),
+     so a modal is never covered by a thumbstick.
+
+     Hidden until #stage carries .touch, which touch.js sets from
+     `(pointer: coarse)` or the first touchstart. A desktop browser never
+     renders any of it, and `display: none` means it cannot intercept a click
+     even by accident. */
+  #touch { display: none; }
+  #stage.touch #touch {
+    display: block;
+    position: absolute; inset: 0;
+    z-index: 7;
+    /* the layer itself is inert; only the controls in it take input */
+    pointer-events: none;
+    touch-action: none;
+    -webkit-user-select: none; user-select: none;
+  }
+  #stage.touch #touch * {
+    touch-action: none;
+    /* every tap on a control would otherwise flash the platform's own
+       highlight over the CRT palette */
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  /* The two capture surfaces. Transparent, and they split the viewport so a
+     thumb landing anywhere on its own side works — you never have to find the
+     ring. Buttons sit above them and take their taps first. */
+  #tStickPad, #tLook {
+    position: absolute; top: 0; bottom: 0;
+    pointer-events: auto;
+    background: none;
+  }
+  #tStickPad { left: 0;  width: 46%; }
+  #tLook     { right: 0; width: 54%; }
+
+  #tStick {
+    position: absolute; left: 26px; bottom: 74px;
+    width: 104px; height: 104px;
+    border: 1px solid rgba(127,255,107,0.22);
+    border-radius: 50%;
+    background: rgba(10,26,46,0.28);
+    pointer-events: none;
+  }
+  #tKnob {
+    position: absolute; left: 50%; top: 50%;
+    width: 44px; height: 44px; margin: -22px 0 0 -22px;
+    border: 1px solid rgba(127,255,107,0.5);
+    border-radius: 50%;
+    background: rgba(127,255,107,0.10);
+    transition: transform 0.05s linear;
+  }
+
+  #tBtns {
+    position: absolute; right: 22px; bottom: 66px;
+    display: flex; align-items: flex-end; gap: 12px;
+    pointer-events: none;
+  }
+  #touch .tb {
+    pointer-events: auto;
+    font-family: 'VT323', monospace;
+    font-size: 19px; letter-spacing: 0.08em;
+    width: 58px; height: 58px;
+    border: 1px solid rgba(127,255,107,0.32);
+    border-radius: 50%;
+    background: rgba(10,26,46,0.42);
+    color: rgba(127,255,107,0.8);
+  }
+  #touch .tb:active { background: rgba(127,255,107,0.18); color: var(--crt); }
+  #touch .tb-fire {
+    width: 88px; height: 88px;
+    font-size: 22px;
+    border-color: rgba(255,59,124,0.45);
+    color: rgba(255,59,124,0.85);
+  }
+  #touch .tb-fire:active { background: rgba(255,59,124,0.22); color: var(--neon-pink); }
+
+  #tWeapons {
+    position: absolute; right: 22px; top: 50%;
+    transform: translateY(-50%);
+    display: flex; flex-direction: column; gap: 6px;
+    pointer-events: none;
+  }
+  #touch .tw {
+    pointer-events: auto;
+    font-family: 'VT323', monospace;
+    font-size: 16px;
+    width: 34px; height: 30px;
+    border: 1px solid rgba(127,255,107,0.24);
+    background: rgba(10,26,46,0.42);
+    color: rgba(127,255,107,0.7);
+  }
+  #touch .tw:active { background: rgba(127,255,107,0.18); color: var(--crt); }
+
+  #tPause {
+    pointer-events: auto;
+    position: absolute; right: 16px; top: 8px;
+    font-family: 'VT323', monospace; font-size: 16px;
+    width: 34px; height: 26px;
+    border: 1px solid rgba(127,255,107,0.24);
+    background: rgba(10,26,46,0.5);
+    color: rgba(127,255,107,0.7);
+  }
+
+  /* #stage is min(100vw, 100vh * 1.4), so portrait is a letterboxed strip with
+     the controls crushed into it. The overlay lives INSIDE #stage so it scales
+     with the viewport rather than sitting on the black bars; this just says so. */
+  #rotate { display: none; }
+  @media (orientation: portrait) {
+    #stage.touch #rotate {
+      display: block;
+      position: absolute; left: 0; right: 0; top: 34%;
+      z-index: 9;
+      text-align: center;
+      font-family: 'VT323', monospace; font-size: 22px;
+      letter-spacing: 0.1em;
+      color: var(--sodium); text-shadow: 0 0 12px rgba(255,149,0,0.5);
+      pointer-events: none;
+    }
+  }

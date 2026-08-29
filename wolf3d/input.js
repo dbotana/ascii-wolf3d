@@ -34,6 +34,12 @@ addEventListener('keyup', e => keys.delete(e.key.toLowerCase()));
 
 canvas.addEventListener('mousedown', e => {
   if (e.button !== 0) return;
+  // A tap synthesises a mousedown AFTER the overlay's own handlers have run.
+  // Pointer lock on a touch device is at best a no-op and at worst swallows
+  // the shot, and preventDefault on the overlay cannot be relied on across
+  // every browser's mouse emulation. touch.js declares touchActive and loads
+  // after this file; the handler body only runs on an event, long after.
+  if (touchActive) return;
   if (!mouseLocked && canvas.requestPointerLock) { canvas.requestPointerLock(); return; }
   // both, deliberately: the edge drives the semi-auto path and the tally
   // screen, the held flag drives the auto weapons. frame() may act on both in

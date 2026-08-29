@@ -1,0 +1,29 @@
+# The mutation battery: inject a known bug into a copy of the game and require
+# the suite to go red for it. See reference/mutate.js.
+#
+# Deliberately NOT on push. The suite takes ~37s and the catalog is ~90 bugs, so
+# even parallel this is a quarter-hour job on a 2-4 core runner. It is a
+# periodic audit of whether the suite still covers what it claims to, not a
+# gate on a commit — green is not the same as covered, and this is the thing
+# that tells the two apart.
+
+name: mutate
+
+on:
+  workflow_dispatch:
+  schedule:
+    # Mondays, 06:00 UTC
+    - cron: '0 6 * * 1'
+
+jobs:
+  battery:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: mutation battery
+        run: node reference/mutate.js --jobs=4

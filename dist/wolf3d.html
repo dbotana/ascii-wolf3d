@@ -416,6 +416,170 @@
     #stage::before { background: none; }
     canvas#screen { filter: none; }
   }
+
+  /* ─── HIGH SCORES (on the splash) ───────────────────────────
+     Fixed rows rather than generated ones, so scores.js only ever writes
+     textContent and classList — see paintScores(). */
+  #hiscores {
+    display: flex; flex-direction: column; align-items: center;
+    gap: 2px; margin: 2px 0 4px;
+    font-family: 'VT323', monospace;
+  }
+  #hiscores .hsTitle {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 10px; letter-spacing: 0.24em; text-transform: uppercase;
+    color: rgba(127,255,107,0.45);
+    margin-bottom: 3px;
+  }
+  #hsRows { list-style: none; display: flex; flex-direction: column; gap: 1px; }
+  #hsRows .hs {
+    display: grid;
+    grid-template-columns: 18px 74px auto;
+    align-items: baseline;
+    gap: 10px;
+    font-size: 17px; letter-spacing: 0.06em;
+    color: rgba(127,255,107,0.62);
+  }
+  #hsRows .hs.hide { display: none; }
+  #hsRows .hs .rank { color: rgba(255,149,0,0.5); text-align: right; }
+  #hsRows .hs .sc   { color: var(--crt); }
+  #hsRows .hs .meta {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 10px; letter-spacing: 0.14em;
+    color: rgba(127,255,107,0.38);
+  }
+  /* the run that just ended, so you can find yourself in the table */
+  #hsRows .hs.fresh .sc,
+  #hsRows .hs.fresh .rank { color: var(--sodium); text-shadow: 0 0 10px rgba(255,149,0,0.55); }
+  #hsRows .hs.fresh .meta { color: rgba(255,149,0,0.55); }
+  #hsNone {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 10px; letter-spacing: 0.2em;
+    color: rgba(127,255,107,0.28);
+  }
+  #hsNone.hide { display: none; }
+
+  /* ─── TOUCH CONTROLS ────────────────────────────────────────
+     z-index 7: ABOVE the CRT scanlines and vignette (5 and 6), so a thumb is
+     not reaching through them, and BELOW #banner / #tally (8) and #splash (10),
+     so a modal is never covered by a thumbstick.
+
+     Hidden until #stage carries .touch, which touch.js sets from
+     `(pointer: coarse)` or the first touchstart. A desktop browser never
+     renders any of it, and `display: none` means it cannot intercept a click
+     even by accident. */
+  #touch { display: none; }
+  #stage.touch #touch {
+    display: block;
+    position: absolute; inset: 0;
+    z-index: 7;
+    /* the layer itself is inert; only the controls in it take input */
+    pointer-events: none;
+    touch-action: none;
+    -webkit-user-select: none; user-select: none;
+  }
+  #stage.touch #touch * {
+    touch-action: none;
+    /* every tap on a control would otherwise flash the platform's own
+       highlight over the CRT palette */
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  /* The two capture surfaces. Transparent, and they split the viewport so a
+     thumb landing anywhere on its own side works — you never have to find the
+     ring. Buttons sit above them and take their taps first. */
+  #tStickPad, #tLook {
+    position: absolute; top: 0; bottom: 0;
+    pointer-events: auto;
+    background: none;
+  }
+  #tStickPad { left: 0;  width: 46%; }
+  #tLook     { right: 0; width: 54%; }
+
+  #tStick {
+    position: absolute; left: 26px; bottom: 74px;
+    width: 104px; height: 104px;
+    border: 1px solid rgba(127,255,107,0.22);
+    border-radius: 50%;
+    background: rgba(10,26,46,0.28);
+    pointer-events: none;
+  }
+  #tKnob {
+    position: absolute; left: 50%; top: 50%;
+    width: 44px; height: 44px; margin: -22px 0 0 -22px;
+    border: 1px solid rgba(127,255,107,0.5);
+    border-radius: 50%;
+    background: rgba(127,255,107,0.10);
+    transition: transform 0.05s linear;
+  }
+
+  #tBtns {
+    position: absolute; right: 22px; bottom: 66px;
+    display: flex; align-items: flex-end; gap: 12px;
+    pointer-events: none;
+  }
+  #touch .tb {
+    pointer-events: auto;
+    font-family: 'VT323', monospace;
+    font-size: 19px; letter-spacing: 0.08em;
+    width: 58px; height: 58px;
+    border: 1px solid rgba(127,255,107,0.32);
+    border-radius: 50%;
+    background: rgba(10,26,46,0.42);
+    color: rgba(127,255,107,0.8);
+  }
+  #touch .tb:active { background: rgba(127,255,107,0.18); color: var(--crt); }
+  #touch .tb-fire {
+    width: 88px; height: 88px;
+    font-size: 22px;
+    border-color: rgba(255,59,124,0.45);
+    color: rgba(255,59,124,0.85);
+  }
+  #touch .tb-fire:active { background: rgba(255,59,124,0.22); color: var(--neon-pink); }
+
+  #tWeapons {
+    position: absolute; right: 22px; top: 50%;
+    transform: translateY(-50%);
+    display: flex; flex-direction: column; gap: 6px;
+    pointer-events: none;
+  }
+  #touch .tw {
+    pointer-events: auto;
+    font-family: 'VT323', monospace;
+    font-size: 16px;
+    width: 34px; height: 30px;
+    border: 1px solid rgba(127,255,107,0.24);
+    background: rgba(10,26,46,0.42);
+    color: rgba(127,255,107,0.7);
+  }
+  #touch .tw:active { background: rgba(127,255,107,0.18); color: var(--crt); }
+
+  #tPause {
+    pointer-events: auto;
+    position: absolute; right: 16px; top: 8px;
+    font-family: 'VT323', monospace; font-size: 16px;
+    width: 34px; height: 26px;
+    border: 1px solid rgba(127,255,107,0.24);
+    background: rgba(10,26,46,0.5);
+    color: rgba(127,255,107,0.7);
+  }
+
+  /* #stage is min(100vw, 100vh * 1.4), so portrait is a letterboxed strip with
+     the controls crushed into it. The overlay lives INSIDE #stage so it scales
+     with the viewport rather than sitting on the black bars; this just says so. */
+  #rotate { display: none; }
+  @media (orientation: portrait) {
+    #stage.touch #rotate {
+      display: block;
+      position: absolute; left: 0; right: 0; top: 34%;
+      z-index: 9;
+      text-align: center;
+      font-family: 'VT323', monospace; font-size: 22px;
+      letter-spacing: 0.1em;
+      color: var(--sodium); text-shadow: 0 0 12px rgba(255,149,0,0.5);
+      pointer-events: none;
+    }
+  }
 </style>
 
 <div id="stage">
@@ -472,6 +636,25 @@
     <small id="bHint">press P to restart</small>
   </div>
 
+  <div id="touch">
+    <div id="tStickPad"></div>
+    <div id="tLook"></div>
+    <div id="tStick"><div id="tKnob"></div></div>
+    <div id="tWeapons">
+      <button type="button" class="tw" id="tW0">1</button>
+      <button type="button" class="tw" id="tW1">2</button>
+      <button type="button" class="tw" id="tW2">3</button>
+      <button type="button" class="tw" id="tW3">4</button>
+    </div>
+    <div id="tBtns">
+      <button type="button" class="tb" id="tReload">R</button>
+      <button type="button" class="tb" id="tUse">E</button>
+      <button type="button" class="tb tb-fire" id="tFire">FIRE</button>
+    </div>
+    <button type="button" id="tPause">II</button>
+  </div>
+  <div id="rotate">ROTATE TO LANDSCAPE</div>
+
   <div id="splash">
     <h2>WOLFENSTAIN 3D</h2>
     <h3>NEON REICH</h3>
@@ -481,6 +664,17 @@
       <button type="button" class="diff" id="diff1"><b>2</b> DON'T HURT ME</button>
       <button type="button" class="diff" id="diff2"><b>3</b> BRING 'EM ON</button>
       <button type="button" class="diff" id="diff3"><b>4</b> I AM DEATH INCARNATE</button>
+    </div>
+    <div id="hiscores">
+      <div class="hsTitle">hall of former employees</div>
+      <ol id="hsRows">
+        <li class="hs hide" id="hs0"><span class="rank">1</span><span class="sc" id="hsScore0">000000</span><span class="meta" id="hsMeta0"></span></li>
+        <li class="hs hide" id="hs1"><span class="rank">2</span><span class="sc" id="hsScore1">000000</span><span class="meta" id="hsMeta1"></span></li>
+        <li class="hs hide" id="hs2"><span class="rank">3</span><span class="sc" id="hsScore2">000000</span><span class="meta" id="hsMeta2"></span></li>
+        <li class="hs hide" id="hs3"><span class="rank">4</span><span class="sc" id="hsScore3">000000</span><span class="meta" id="hsMeta3"></span></li>
+        <li class="hs hide" id="hs4"><span class="rank">5</span><span class="sc" id="hsScore4">000000</span><span class="meta" id="hsMeta4"></span></li>
+      </ol>
+      <div id="hsNone">NO RECORDS ON FILE</div>
     </div>
     <div class="keys">
       <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> move &nbsp;
@@ -607,6 +801,156 @@ const FACES = [
   ' ___ \n|x o|\n|/O\\|',   // 20-1
   ' ___ \n|x x|\n|_-_|',    // dead
 ];
+
+;
+'use strict';
+
+// Persistent high scores. The only state in the game that outlives the tab.
+//
+// localStorage is the whole mechanism, and it is guarded three ways, because it
+// fails in three genuinely different ways and one try/catch does not cover them:
+//
+//   1. It is ABSENT. The headless harness has no DOM at all, and neither does
+//      any non-browser host. `typeof` handles this.
+//   2. Touching the PROPERTY throws. A browser with site data blocked can
+//      define the getter and have it raise, so `typeof localStorage` is itself
+//      the throwing expression — which is why the typeof lives inside the try.
+//   3. It reads fine and setItem throws: Safari's private mode, and a full
+//      quota. Nothing before the write can predict this one.
+//
+// A table that cannot be persisted still works for the session — the game runs
+// identically, it just forgets. That is the repo's "everything degrades" rule:
+// the atlas, the audio graph and pointer lock each do the same.
+
+// ─── HIGH SCORES ────────────────────────────────────────────
+const SCORES_KEY  = 'wolf3d.scores.v1';   // versioned: a shape change gets a new key
+const SCORE_SLOTS = 5;
+
+// The table, in memory, newest-first within a tie. Nothing here runs at load —
+// growth rule 3 — so main.js is what calls loadScores() at boot.
+let highScores = [];
+// Which row the run that just ended landed in, so the splash can mark it. -1
+// when the last run missed the table entirely.
+let scoreFresh = -1;
+
+/** The backing store, or null if there isn't a usable one. See the header. */
+function scoreStore() {
+  try {
+    if (typeof localStorage === 'undefined' || !localStorage) return null;
+    return localStorage;
+  } catch (e) {
+    return null;                 // the property access itself threw
+  }
+}
+
+// Anything that is not this shape is discarded rather than repaired. The key
+// could hold another app's data, a half-written value, or a table written by a
+// future version — none of which should reach the splash.
+function validScore(e) {
+  return !!e && typeof e === 'object' &&
+         typeof e.score === 'number' && isFinite(e.score) && e.score >= 0;
+}
+
+function normScore(e) {
+  return {
+    score: Math.max(0, e.score | 0),
+    floor: Math.max(1, e.floor | 0),
+    diff:  Math.max(0, Math.min(DIFFICULTY.length - 1, e.diff | 0)),
+    won:   !!e.won,
+    at:    (typeof e.at === 'number' && isFinite(e.at)) ? e.at : 0,
+  };
+}
+
+// Newest first on a tie, so a run that matches the record appears ABOVE it.
+// Ranking a tie below would tell a player they did not make the table when
+// they just equalled the best score on it.
+const byScore = (a, b) => (b.score - a.score) || (b.at - a.at);
+
+function sortScores(list) {
+  return list.filter(validScore).map(normScore).sort(byScore).slice(0, SCORE_SLOTS);
+}
+
+/** Read the table off disk into `highScores`. Always leaves it a valid array. */
+function loadScores() {
+  highScores = [];
+  const store = scoreStore();
+  if (!store) return highScores;
+  try {
+    const raw = store.getItem(SCORES_KEY);
+    if (!raw) return highScores;
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return highScores;
+    highScores = sortScores(parsed);
+  } catch (e) {
+    highScores = [];             // unparseable is the same as absent
+  }
+  return highScores;
+}
+
+/** @returns {boolean} whether it actually persisted. */
+function saveScores() {
+  const store = scoreStore();
+  if (!store) return false;
+  try {
+    store.setItem(SCORES_KEY, JSON.stringify(highScores));
+    return true;
+  } catch (e) {
+    return false;                // quota, or a context that reads but will not write
+  }
+}
+
+/**
+ * Record the end of a run.
+ * @returns {number} 0-based rank in the table, or -1 if it missed the cut.
+ *
+ * A run ends by DYING or by getting out, and by nothing else. Restarting with
+ * `P` is deliberately not a record point: startLevel's cold path zeroes the
+ * score, so recording there would file a partial run and then file the real one
+ * again when it ends. Wolf3D's rule, and the reading of "a run ended" that a
+ * player would recognise.
+ *
+ * The entry keeps its object identity through the merge, which is how the rank
+ * is found: two runs can tie on every field, and the one that just happened is
+ * the one that earned the slot.
+ */
+function recordScore(score, floor, diff, won) {
+  const entry = normScore({ score, floor, diff, won, at: Date.now() });
+  // The new entry goes in FRONT, and that is what makes "newest wins a tie"
+  // actually true. byScore falls back to `at`, but Date.now() only has
+  // millisecond resolution — two runs recorded inside the same millisecond tie
+  // on that too, and a stable sort then keeps whichever came first in the
+  // input. Leading with the new entry decides it without consulting a clock.
+  const merged = [entry].concat(highScores).sort(byScore);
+  const rank = merged.indexOf(entry);
+  highScores = merged.slice(0, SCORE_SLOTS);
+  scoreFresh = rank < SCORE_SLOTS ? rank : -1;
+  saveScores();
+  return scoreFresh;
+}
+
+/**
+ * Paint the table onto the splash.
+ *
+ * Writes into a fixed set of rows rather than building elements, the same way
+ * the tally screen drives #tRowKill and friends. Fixed rows keep this to
+ * textContent and classList — which is all the headless harness's DOM stub
+ * implements, and all it should have to.
+ */
+function paintScores() {
+  for (let i = 0; i < SCORE_SLOTS; i++) {
+    const row = el('hs' + i);
+    if (!row) continue;
+    const e = highScores[i];
+    row.classList.toggle('hide', !e);
+    row.classList.toggle('fresh', !!e && i === scoreFresh);
+    if (!e) continue;
+    el('hsScore' + i).textContent = String(e.score).padStart(6, '0');
+    el('hsMeta' + i).textContent =
+      (e.won ? 'ESCAPED' : 'FLOOR ' + e.floor) + '  ·  ' + DIFFICULTY[e.diff].name;
+  }
+  const none = el('hsNone');
+  if (none) none.classList.toggle('hide', highScores.length > 0);
+}
 
 ;
 'use strict';
@@ -1805,6 +2149,12 @@ addEventListener('keyup', e => keys.delete(e.key.toLowerCase()));
 
 canvas.addEventListener('mousedown', e => {
   if (e.button !== 0) return;
+  // A tap synthesises a mousedown AFTER the overlay's own handlers have run.
+  // Pointer lock on a touch device is at best a no-op and at worst swallows
+  // the shot, and preventDefault on the overlay cannot be relied on across
+  // every browser's mouse emulation. touch.js declares touchActive and loads
+  // after this file; the handler body only runs on an event, long after.
+  if (touchActive) return;
   if (!mouseLocked && canvas.requestPointerLock) { canvas.requestPointerLock(); return; }
   // both, deliberately: the edge drives the semi-auto path and the tally
   // screen, the held flag drives the auto weapons. frame() may act on both in
@@ -1826,6 +2176,223 @@ addEventListener('mousemove', e => {
   if (!mouseLocked || gameState !== 'playing') return;
   player.a += e.movementX * 0.0022;
 });
+
+;
+'use strict';
+
+// Twin-stick touch controls. Binds its listeners at load, so like input.js it
+// must follow gfx.js — and it must follow input.js, whose state it writes.
+//
+// The overlay is the only new INPUT path; there is no new game logic behind it.
+// Firing sets the same `firePressed` edge and `mouseHeld` flag the mouse does,
+// so the semi-auto / hold-to-repeat split in frame() is reused rather than
+// reimplemented, and the buttons call use(), startReload(), togglePause() and
+// selectWeapon() — the same calls the key handlers make.
+//
+// The one thing that could not be reused is movement. The keyboard is binary
+// and a stick is analog, so `touchMove` is added to updatePlayer's vector and
+// the normalise there became a CLAMP. That change is behaviour-identical for
+// the keyboard — one key is a magnitude of exactly 1 and a diagonal is √2, and
+// clamping leaves both where normalising put them — which is the claim the
+// suite asserts rather than assumes.
+//
+// ── Layout
+//
+// Left: a FIXED ring at the bottom corner rather than one that appears under
+// the thumb. A fixed ring needs no getBoundingClientRect anywhere in this file
+// — the knob is a transform of the raw pointer delta — which keeps the whole
+// module free of layout reads, and free of the DOM surface the headless stub
+// does not implement.
+//
+// Right: a drag surface, not a second stick. It is what every mobile shooter
+// uses, it maps straight onto the mouse-look delta that already exists, and it
+// costs one element.
+
+// ─── TOUCH ──────────────────────────────────────────────────
+const TOUCH_DEADZONE  = 0.18;    // fraction of the ring radius that reads as centre
+const TOUCH_RADIUS    = 52;      // px from the ring's centre to full deflection
+const TOUCH_RUN_AT    = 0.85;    // deflection past which you are running
+const TOUCH_LOOK_RATE = 0.0042;  // radians of yaw per px dragged
+
+// x is strafe (screen-right positive), y is forward. Read by updatePlayer.
+let touchMove = { x: 0, y: 0 };
+let touchRun = false;
+// Yaw banked since the last frame. Accumulated rather than applied directly
+// because a pointermove can fire several times between frames, and applying it
+// on the spot would turn while the game is paused.
+let touchLookD = 0;
+// Has this device ever produced a touch? Gates the overlay, and gates the
+// canvas's pointer-lock request — a tap synthesises a mousedown, and asking a
+// phone for pointer lock on every shot is at best a no-op.
+let touchActive = false;
+
+/**
+ * Raw pixel offset from the ring's centre -> a movement vector.
+ *
+ * Pure, and deliberately so: it is the only part of the overlay a headless test
+ * can reach, and it holds every number worth getting wrong — the dead zone, the
+ * rescale, the clamp at the rim, and the run threshold.
+ *
+ * `y` is negated because screen-down is a positive delta and forward is up.
+ */
+function stickVector(dx, dy) {
+  const len = Math.hypot(dx, dy);
+  if (!len || len < TOUCH_RADIUS * TOUCH_DEADZONE) return { x: 0, y: 0, run: false };
+  const k = Math.min(1, len / TOUCH_RADIUS);
+  // Rescale so the edge of the dead zone is 0 rather than TOUCH_DEADZONE, or
+  // the stick jumps to a fifth of full speed the instant it leaves centre.
+  const t = (k - TOUCH_DEADZONE) / (1 - TOUCH_DEADZONE);
+  return { x: dx / len * t, y: -dy / len * t, run: k >= TOUCH_RUN_AT };
+}
+
+function setTouchMove(x, y, run) {
+  touchMove.x = x; touchMove.y = y;
+  touchRun = !!run;
+}
+function addTouchLook(d) { touchLookD += d; }
+/** Hand the banked yaw to updatePlayer and reset. */
+function consumeTouchLook() { const d = touchLookD; touchLookD = 0; return d; }
+
+// Everything below is DOM wiring, and every piece of it is optional: the
+// headless harness has no pointer events and no matchMedia, so each binding is
+// guarded and the module is inert there rather than throwing at load.
+
+function markTouchActive() {
+  if (touchActive) return;
+  touchActive = true;
+  const stage = document.getElementById('stage');
+  if (stage && stage.classList) stage.classList.add('touch');
+}
+
+function bind(id, type, fn) {
+  const node = document.getElementById(id);
+  if (!node || !node.addEventListener) return null;
+  node.addEventListener(type, fn);
+  return node;
+}
+
+// A button that does one thing on press. preventDefault stops the browser
+// synthesising a mousedown on the canvas underneath, which would ask for
+// pointer lock and, on the fire button, fire a second time.
+function tapButton(id, fn) {
+  bind(id, 'pointerdown', e => {
+    if (e && e.preventDefault) e.preventDefault();
+    markTouchActive();
+    fn();
+  });
+}
+
+// ── the movement stick
+(function bindStick() {
+  const pad = document.getElementById('tStickPad');
+  const knob = document.getElementById('tKnob');
+  if (!pad || !pad.addEventListener) return;
+  let id = null, ox = 0, oy = 0;
+
+  const moveKnob = (dx, dy) => {
+    if (!knob || !knob.style) return;
+    const len = Math.hypot(dx, dy) || 1;
+    const k = Math.min(1, TOUCH_RADIUS / len);
+    knob.style.transform = 'translate(' + (dx * k).toFixed(1) + 'px,' +
+                                          (dy * k).toFixed(1) + 'px)';
+  };
+
+  pad.addEventListener('pointerdown', e => {
+    if (e && e.preventDefault) e.preventDefault();
+    markTouchActive();
+    id = e.pointerId; ox = e.clientX; oy = e.clientY;
+    if (pad.setPointerCapture) { try { pad.setPointerCapture(id); } catch (err) { /* not captured; moves still arrive */ } }
+    moveKnob(0, 0);
+  });
+  pad.addEventListener('pointermove', e => {
+    if (id === null || e.pointerId !== id) return;
+    const dx = e.clientX - ox, dy = e.clientY - oy;
+    const v = stickVector(dx, dy);
+    setTouchMove(v.x, v.y, v.run);
+    moveKnob(dx, dy);
+  });
+  // Every way a touch can stop, including the one that delivers no pointerup:
+  // a gesture the system takes over. Without pointercancel the stick sticks and
+  // the player walks into a wall forever — the movement half of the held-fire
+  // bug that blur and pointerlockchange already exist to prevent.
+  const release = e => {
+    if (id === null || (e && e.pointerId !== id)) return;
+    id = null;
+    setTouchMove(0, 0, false);
+    moveKnob(0, 0);
+  };
+  pad.addEventListener('pointerup', release);
+  pad.addEventListener('pointercancel', release);
+  pad.addEventListener('pointerleave', release);
+})();
+
+// ── the look surface
+(function bindLook() {
+  const pad = document.getElementById('tLook');
+  if (!pad || !pad.addEventListener) return;
+  let id = null, lx = 0;
+
+  pad.addEventListener('pointerdown', e => {
+    if (e && e.preventDefault) e.preventDefault();
+    markTouchActive();
+    id = e.pointerId; lx = e.clientX;
+    if (pad.setPointerCapture) { try { pad.setPointerCapture(id); } catch (err) { /* moves still arrive */ } }
+  });
+  pad.addEventListener('pointermove', e => {
+    if (id === null || e.pointerId !== id) return;
+    const dx = e.clientX - lx;
+    lx = e.clientX;                 // tracked even when ignored, so no jump on resume
+    // The same guard the mouse-look handler carries. Without it a drag under
+    // the pause banner banks yaw that snaps the moment play resumes.
+    if (gameState !== 'playing') return;
+    addTouchLook(dx * TOUCH_LOOK_RATE);
+  });
+  const release = e => { if (id !== null && (!e || e.pointerId === id)) id = null; };
+  pad.addEventListener('pointerup', release);
+  pad.addEventListener('pointercancel', release);
+  pad.addEventListener('pointerleave', release);
+})();
+
+// ── fire, held. Sets both the edge and the held flag, exactly as the mouse
+//    does, so the pistol's one-shot-per-press and the SMG's hold-to-repeat both
+//    come out of frame() unchanged.
+(function bindFire() {
+  const btn = document.getElementById('tFire');
+  if (!btn || !btn.addEventListener) return;
+  btn.addEventListener('pointerdown', e => {
+    if (e && e.preventDefault) e.preventDefault();
+    markTouchActive();
+    firePressed = true;
+    mouseHeld = true;
+    if (btn.setPointerCapture && e.pointerId !== undefined) {
+      try { btn.setPointerCapture(e.pointerId); } catch (err) { /* still get up */ }
+    }
+  });
+  const release = () => { mouseHeld = false; };
+  btn.addEventListener('pointerup', release);
+  btn.addEventListener('pointercancel', release);
+  btn.addEventListener('pointerleave', release);
+})();
+
+tapButton('tUse',    () => use());
+tapButton('tReload', () => { if (gameState === 'playing') startReload(); });
+tapButton('tPause',  () => togglePause());
+for (let i = 0; i < 4; i++) {
+  (function (n) { tapButton('tW' + n, () => selectWeapon(n)); })(i);
+}
+
+// Show the overlay on a device that has no mouse, without waiting for the
+// first touch. A desktop browser matches neither branch and never sees it.
+(function detectTouch() {
+  try {
+    if (typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches) {
+      markTouchActive();
+    }
+  } catch (e) { /* no matchMedia: fall back to the first touchstart below */ }
+  if (typeof addEventListener === 'function') {
+    addEventListener('touchstart', markTouchActive, { once: true, passive: true });
+  }
+})();
 
 ;
 'use strict';
@@ -3820,24 +4387,37 @@ function advanceFromTally() {
   if (!nextLevel()) winGame();
 }
 
+// A run ends here or in killPlayer, and nowhere else. Restarting with P is
+// deliberately not a record point: startLevel's cold path zeroes the score, so
+// filing one there would enter a partial run and then file the real one again.
 function winGame() {
   gameState = 'won';
   hideTally();
   sfx('clear');
+  const rank = recordScore(player.score, levelIndex + 1, difficulty, true);
   showBanner('OUT',
     'YOU RESIGN, WITH PREJUDICE  ·  FINAL SCORE ' +
     String(player.score).padStart(6, '0'),
-    'press P to start over', false);
+    rank >= 0 ? 'NEW HIGH SCORE  #' + (rank + 1) + '  ·  press P to start over'
+              : 'press P to start over', false);
+  if (rank >= 0) sfx('key');
+  paintScores();
 }
 
 function killPlayer() {
   gameState = 'dead';
   if (document.exitPointerLock) document.exitPointerLock();
   sfx('die');
+  // hurtPlayer gates on gameState === 'playing', so this runs exactly once per
+  // death and needs no latch of its own.
+  const rank = recordScore(player.score, levelIndex + 1, difficulty, false);
   showBanner('TERMINATED',
     'YOUR EMPLOYMENT HAS BEEN CONCLUDED ON FLOOR ' + (levelIndex + 1) +
     '  ·  SCORE ' + String(player.score).padStart(6, '0'),
-    'press P or E to retake the floor', true);
+    rank >= 0 ? 'NEW HIGH SCORE  #' + (rank + 1) + '  ·  press P or E to retake the floor'
+              : 'press P or E to retake the floor', true);
+  if (rank >= 0) sfx('key');
+  paintScores();
 }
 
 function updatePrompt() {
@@ -3868,7 +4448,7 @@ function updatePrompt() {
 // ─── MOVEMENT ───────────────────────────────────────────────
 function updatePlayer(dt) {
   if (gameState !== 'playing') return;
-  const running = keys.has('shift');
+  const running = keys.has('shift') || touchRun;
   const speed = 3.4 * (running ? 1.75 : 1) * dt;
   const turn  = 2.2 * dt;
   const fx = Math.cos(player.a), fy = Math.sin(player.a);
@@ -3879,10 +4459,19 @@ function updatePlayer(dt) {
   if (keys.has('s') || keys.has('arrowdown')) { mx -= fx; my -= fy; }
   if (keys.has('a')) { mx -= sx; my -= sy; }
   if (keys.has('d')) { mx += sx; my += sy; }
+  // The touch stick is analog, so it joins the vector as a vector rather than
+  // as pretend key presses. That is the whole reason the line below clamps.
+  if (touchMove.y) { mx += fx * touchMove.y; my += fy * touchMove.y; }
+  if (touchMove.x) { mx += sx * touchMove.x; my += sy * touchMove.x; }
 
   const mag = Math.hypot(mx, my);
   if (mag > 0.001) {
-    mx = mx / mag * speed; my = my / mag * speed;
+    // CLAMP, not normalise, and it is behaviour-identical for the keyboard: a
+    // single key is a magnitude of exactly 1 and a diagonal is √2, and both
+    // come out exactly where normalising put them. What it adds is that a
+    // half-deflected stick moves at half speed instead of snapping to full.
+    const k = (mag > 1 ? 1 / mag : 1) * speed;
+    mx *= k; my *= k;
     const BUF = 0.24;
     if (!blockAt(player.x + mx + Math.sign(mx) * BUF, player.y)) player.x += mx;
     if (!blockAt(player.x, player.y + my + Math.sign(my) * BUF)) player.y += my;
@@ -3893,6 +4482,9 @@ function updatePlayer(dt) {
 
   if (keys.has('arrowleft'))  player.a -= turn;
   if (keys.has('arrowright')) player.a += turn;
+  // Banked by the look pad between frames, and applied here rather than in the
+  // handler so several pointermoves in one frame turn once, by their sum.
+  player.a += consumeTouchLook();
 
   if (player.fireCd > 0) player.fireCd -= dt;
   if (player.hurtT  > 0) player.hurtT  -= dt;
@@ -4025,6 +4617,12 @@ for (let i = 0; i < diffRows.length; i++) {
   diffRows[i].addEventListener('click', () => { setDifficulty(i); paintDiff(); begin(); });
 }
 paintDiff();
+
+// The high score table, read once at boot. scores.js deliberately runs nothing
+// at load — rule 3 — so this is the call that fills it in before the splash
+// is ever painted.
+loadScores();
+paintScores();
 
 addEventListener('keydown', e => {
   if (!splash.parentElement) return;

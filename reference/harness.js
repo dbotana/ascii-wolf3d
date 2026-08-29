@@ -105,6 +105,28 @@ const PROBE_SRC = `global.__PROBE = {
   musicVoices:   () => (typeof musicVoices !== "undefined" && musicVoices
                           ? musicVoices.map(v => ({ i: v.i, t: v.t })) : null),
   setMuted:      (v) => { muted = !!v; },
+  // A test hook, and an honest one: the over-par payout branch is otherwise
+  // reachable only by simulating three minutes of frames per assertion.
+  setLevelTime:  (v) => { levelTime = v; },
+  // Phase 5: persistent high scores.
+  loadScores:    (typeof loadScores  !== "undefined" ? loadScores  : null),
+  saveScores:    (typeof saveScores  !== "undefined" ? saveScores  : null),
+  recordScore:   (typeof recordScore !== "undefined" ? recordScore : null),
+  paintScores:   (typeof paintScores !== "undefined" ? paintScores : null),
+  winGame:       (typeof winGame     !== "undefined" ? winGame     : null),
+  killPlayer:    (typeof killPlayer  !== "undefined" ? killPlayer  : null),
+  scores:        () => (typeof highScores  !== "undefined" ? highScores : []),
+  scoreSlots:    () => (typeof SCORE_SLOTS !== "undefined" ? SCORE_SLOTS : 0),
+  scoresKey:     () => (typeof SCORES_KEY  !== "undefined" ? SCORES_KEY : null),
+  levelIndex2:   () => (typeof levelIndex !== "undefined" ? levelIndex : 0),
+  // Phase 5: touch. The overlay is pointer events on DOM elements, which the
+  // stub cannot deliver, so the probe exposes the SEAM instead: the pure stick
+  // math and the two values updatePlayer actually reads.
+  stickVector:   (typeof stickVector   !== "undefined" ? stickVector : null),
+  setTouchMove:  (typeof setTouchMove  !== "undefined" ? setTouchMove : null),
+  addTouchLook:  (typeof addTouchLook  !== "undefined" ? addTouchLook : null),
+  touchVec:      () => (typeof touchMove !== "undefined" ? { x: touchMove.x, y: touchMove.y } : null),
+  touchRunning:  () => (typeof touchRun  !== "undefined" ? touchRun : false),
 };`;
 
 // Names the probe exposes as direct function references. Every one of them is
@@ -122,6 +144,8 @@ const REQUIRED_FNS = [
   'hurtPlayer', 'hitDirAngle', 'hitDirCell', 'enemyShot',
   'pauseGame', 'resumeGame', 'togglePause', 'spillBlood',
   'musicTrackFor', 'stepMusic',
+  'loadScores', 'saveScores', 'recordScore', 'paintScores', 'winGame', 'killPlayer',
+  'stickVector', 'setTouchMove', 'addTouchLook',
 ];
 
 function assertProbe(P, htmlPath) {
@@ -142,6 +166,7 @@ function assertProbe(P, htmlPath) {
   if (!P.deathSeq || Object.keys(P.deathSeq()).length === 0) missing.push('DEATH_SEQ (gore.js)');
   if (!P.decalSpr || P.decalSpr().length === 0) missing.push('DECAL_SPR (gore.js)');
   if (!P.music || P.music().length === 0) missing.push('MUSIC (track table)');
+  if (!P.scoreSlots || !P.scoreSlots()) missing.push('SCORE_SLOTS (scores.js)');
   if (missing.length) {
     throw new Error(
       'incomplete game load from ' + htmlPath + ' — missing: ' + missing.join(', ') +
@@ -232,6 +257,53 @@ function fakeAudio() {
   return ctx;
 }
 
+/**
+ * A localStorage stand-in, for `load({ storage })`.
+ *
+ * wolf3d/scores.js guards THREE different failures and they are not the same
+ * failure: the object can be absent, the property access itself can throw, and
+ * setItem can throw on a store that reads perfectly well. A stand-in that only
+ * models the happy path would leave two of those guards as guesses, and the
+ * game boots through all three.
+ *
+ *   storage: undefined   a fresh, empty, working store
+ *   storage: {…}         that object as the backing map — so a SECOND load()
+ *                        sees what the first one wrote, which is the only way
+ *                        to test that a table actually persists
+ *   storage: 'throws'    reads fine, setItem raises (private mode, quota)
+ *   storage: 'hostile'   the PROPERTY ACCESS raises (site data blocked)
+ *   storage: null        no localStorage at all
+ */
+function fakeStorage(backing, throwOnWrite) {
+  const map = (backing && typeof backing === 'object') ? backing : {};
+  return {
+    _map: map,
+    getItem(k) { return Object.prototype.hasOwnProperty.call(map, k) ? map[k] : null; },
+    setItem(k, v) {
+      if (throwOnWrite) throw new Error('QuotaExceededError (fake)');
+      map[k] = String(v);
+    },
+    removeItem(k) { delete map[k]; },
+    clear() { for (const k of Object.keys(map)) delete map[k]; },
+  };
+}
+
+function installStorage(spec) {
+  delete global.localStorage;
+  if (spec === null) return;
+  if (spec === 'hostile') {
+    Object.defineProperty(global, 'localStorage', {
+      configurable: true,
+      get() { throw new Error('SecurityError (fake)'); },
+    });
+    return;
+  }
+  Object.defineProperty(global, 'localStorage', {
+    configurable: true, writable: true,
+    value: fakeStorage(spec === 'throws' ? null : spec, spec === 'throws'),
+  });
+}
+
 function load(opts) {
   const o = opts || {};
   const htmlPath = o.htmlPath || DEFAULT_GAME;
@@ -285,6 +357,7 @@ function load(opts) {
   // No AudioContext by default -> initAudio fails its try/catch and the game
   // runs silent. `load({ audio: true })` installs the stand-in above instead,
   // for the tests that need the music scheduler to actually execute.
+  installStorage(o.storage);
   const actx = o.audio ? fakeAudio() : null;
   global.window = actx ? { AudioContext: function () { return actx; } } : {};
   global.document = {
@@ -314,6 +387,8 @@ function load(opts) {
     P,
     els,
     audio: actx,
+    /** The backing store, or null where reading it throws. */
+    get storage() { try { return global.localStorage || null; } catch (e) { return null; } },
     /** Safe element accessor — creates on demand, exactly like getElementById.
      *  Prefer this over reaching into `els`, which is only populated once the
      *  game has actually asked for a given id. */

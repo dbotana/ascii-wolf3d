@@ -283,24 +283,37 @@ function advanceFromTally() {
   if (!nextLevel()) winGame();
 }
 
+// A run ends here or in killPlayer, and nowhere else. Restarting with P is
+// deliberately not a record point: startLevel's cold path zeroes the score, so
+// filing one there would enter a partial run and then file the real one again.
 function winGame() {
   gameState = 'won';
   hideTally();
   sfx('clear');
+  const rank = recordScore(player.score, levelIndex + 1, difficulty, true);
   showBanner('OUT',
     'YOU RESIGN, WITH PREJUDICE  ·  FINAL SCORE ' +
     String(player.score).padStart(6, '0'),
-    'press P to start over', false);
+    rank >= 0 ? 'NEW HIGH SCORE  #' + (rank + 1) + '  ·  press P to start over'
+              : 'press P to start over', false);
+  if (rank >= 0) sfx('key');
+  paintScores();
 }
 
 function killPlayer() {
   gameState = 'dead';
   if (document.exitPointerLock) document.exitPointerLock();
   sfx('die');
+  // hurtPlayer gates on gameState === 'playing', so this runs exactly once per
+  // death and needs no latch of its own.
+  const rank = recordScore(player.score, levelIndex + 1, difficulty, false);
   showBanner('TERMINATED',
     'YOUR EMPLOYMENT HAS BEEN CONCLUDED ON FLOOR ' + (levelIndex + 1) +
     '  ·  SCORE ' + String(player.score).padStart(6, '0'),
-    'press P or E to retake the floor', true);
+    rank >= 0 ? 'NEW HIGH SCORE  #' + (rank + 1) + '  ·  press P or E to retake the floor'
+              : 'press P or E to retake the floor', true);
+  if (rank >= 0) sfx('key');
+  paintScores();
 }
 
 function updatePrompt() {

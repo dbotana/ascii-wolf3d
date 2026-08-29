@@ -59,6 +59,25 @@
     <small id="bHint">press P to restart</small>
   </div>
 
+  <div id="touch">
+    <div id="tStickPad"></div>
+    <div id="tLook"></div>
+    <div id="tStick"><div id="tKnob"></div></div>
+    <div id="tWeapons">
+      <button type="button" class="tw" id="tW0">1</button>
+      <button type="button" class="tw" id="tW1">2</button>
+      <button type="button" class="tw" id="tW2">3</button>
+      <button type="button" class="tw" id="tW3">4</button>
+    </div>
+    <div id="tBtns">
+      <button type="button" class="tb" id="tReload">R</button>
+      <button type="button" class="tb" id="tUse">E</button>
+      <button type="button" class="tb tb-fire" id="tFire">FIRE</button>
+    </div>
+    <button type="button" id="tPause">II</button>
+  </div>
+  <div id="rotate">ROTATE TO LANDSCAPE</div>
+
   <div id="splash">
     <h2>WOLFENSTAIN 3D</h2>
     <h3>NEON REICH</h3>
@@ -68,6 +87,17 @@
       <button type="button" class="diff" id="diff1"><b>2</b> DON'T HURT ME</button>
       <button type="button" class="diff" id="diff2"><b>3</b> BRING 'EM ON</button>
       <button type="button" class="diff" id="diff3"><b>4</b> I AM DEATH INCARNATE</button>
+    </div>
+    <div id="hiscores">
+      <div class="hsTitle">hall of former employees</div>
+      <ol id="hsRows">
+        <li class="hs hide" id="hs0"><span class="rank">1</span><span class="sc" id="hsScore0">000000</span><span class="meta" id="hsMeta0"></span></li>
+        <li class="hs hide" id="hs1"><span class="rank">2</span><span class="sc" id="hsScore1">000000</span><span class="meta" id="hsMeta1"></span></li>
+        <li class="hs hide" id="hs2"><span class="rank">3</span><span class="sc" id="hsScore2">000000</span><span class="meta" id="hsMeta2"></span></li>
+        <li class="hs hide" id="hs3"><span class="rank">4</span><span class="sc" id="hsScore3">000000</span><span class="meta" id="hsMeta3"></span></li>
+        <li class="hs hide" id="hs4"><span class="rank">5</span><span class="sc" id="hsScore4">000000</span><span class="meta" id="hsMeta4"></span></li>
+      </ol>
+      <div id="hsNone">NO RECORDS ON FILE</div>
     </div>
     <div class="keys">
       <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> move &nbsp;
@@ -83,6 +113,7 @@
 </div>
 
 <script src="wolf3d/config.js"></script>
+<script src="wolf3d/scores.js"></script>
 <script src="wolf3d/levels.js"></script>
 <script src="wolf3d/art.js"></script>
 <script src="wolf3d/gore.js"></script>
@@ -90,6 +121,7 @@
 <script src="wolf3d/gfx.js"></script>
 <script src="wolf3d/audio.js"></script>
 <script src="wolf3d/input.js"></script>
+<script src="wolf3d/touch.js"></script>
 <script src="wolf3d/world.js"></script>
 <script src="wolf3d/level.js"></script>
 <script src="wolf3d/raycast.js"></script>

@@ -1,0 +1,42 @@
+#!/bin/sh
+# ─── PRE-COMMIT ──────────────────────────────────────────────────────────────
+#
+# Opt-in. Install with:
+#
+#   git config core.hooksPath reference/hooks
+#
+# and undo with `git config --unset core.hooksPath`. Pointed at a tracked
+# directory rather than copied into .git/hooks so the hook is version
+# controlled and the install is one reversible line.
+#
+# Two caveats, both of which are how this kind of hook usually lies to you:
+#
+#   1. It validates the WORKING TREE, not the index. A partially staged commit
+#      is checked against what is on disk, which is not what you are
+#      committing. The tools have no notion of a staged file and teaching them
+#      one would mean a temp checkout per run.
+#   2. `git commit --no-verify` skips it entirely.
+#
+# The two static tools run always — together they are well under a second and
+# they cover the stale-bundle and bad-geometry cases. The 37-second suite runs
+# only when a staged path can actually affect it, so a README typo does not
+# cost you a coffee.
+
+set -e
+
+root=$(git rev-parse --show-toplevel)
+cd "$root"
+
+echo "pre-commit: structure + levels"
+node reference/check-structure.js
+node reference/validate-level.js
+
+# Does this commit touch anything the suite reads? wolf3d.html is the manifest,
+# wolf3d/ is the source tree, reference/ is the tooling itself.
+if git diff --cached --name-only | grep -qE '^(wolf3d/|wolf3d\.html$|reference/)'; then
+  echo "pre-commit: game sources staged — running the suite (~40s)"
+  node reference/run-tests.js
+  WOLF3D_HTML=dist/wolf3d.html node reference/run-tests.js
+else
+  echo "pre-commit: no game sources staged — skipping the suite"
+fi

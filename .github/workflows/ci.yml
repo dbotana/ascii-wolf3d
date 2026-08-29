@@ -1,0 +1,45 @@
+# Runs the four reference/ tools on every push and pull request.
+#
+# There is no install step because there are no dependencies: the repo ships
+# vanilla JS with no build required to run or test, and the only build step —
+# the single-file bundle — is checked in as dist/wolf3d.html.
+#
+# Each tool is its own `run:` step so a failure is named in the UI rather than
+# buried in a chained shell line. check-structure.js goes first: it is instant
+# and it is the one that catches a stale dist/, which is the failure most likely
+# to be sitting in a push.
+#
+# The last two steps run the same checks against the SHIPPED BUNDLE. The split
+# tree and dist/wolf3d.html are the same program, but "the same program" is a
+# claim the bundler makes — this is what checks it.
+
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: structure (src tags resolve, no ESM, dist current, line budget)
+        run: node reference/check-structure.js
+
+      - name: level geometry
+        run: node reference/validate-level.js
+
+      - name: suite (development tree)
+        run: node reference/run-tests.js
+
+      - name: suite (shipped bundle)
+        run: WOLF3D_HTML=dist/wolf3d.html node reference/run-tests.js
+
+      - name: level geometry (shipped bundle)
+        run: node reference/validate-level.js dist/wolf3d.html

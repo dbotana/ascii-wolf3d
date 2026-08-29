@@ -8,7 +8,9 @@ split the single file into `wolf3d/*.js` and gave it a bundler. Phase 3 added
 the weapon roster, the semi-auto pistol, difficulty levels and a damage
 direction arc. Phase 4 is the presentation pass: thin-wall doors with frames,
 pause, music, death frames and blood, and a HUD that no longer escapes the CRT
-overlay. Open work is
+overlay. Phase 5 is the infrastructure pass: CI, the mutation battery kept as
+a tool rather than rebuilt every time, persistent high scores, touch controls
+and a deployment story. Open work is
 ordered roughly by value per hour of work; everything finished is collected
 under **Completed** at the bottom.
 
@@ -18,39 +20,67 @@ number — line numbers drift with every edit, and the file map in
 
 ---
 
-## Phase 5 — infrastructure
+## Phase 6 — closing the coverage gaps
 
-- [ ] **Wire the tools into CI.** All four are built and all four exit non-zero
-  already; nothing runs them automatically. A pre-commit hook or a GitHub action
-  calling `node reference/run-tests.js && node reference/validate-level.js &&
-  node reference/check-structure.js` — plus the same suite against
-  `WOLF3D_HTML=dist/wolf3d.html` — is the whole job.
-- [ ] **Keep the mutation battery.** The suite has been mutation-tested five
-  times by injecting bugs into copies of the game: 16 at the MVP, 20 over the
-  Phase 1 systems, 14 over the Phase 2 movement systems, 31 over Phase 3, and
-  11 over Phase 4 — of which **seven survived a fully green suite** across the
-  runs, and several turned out to be real gaps. Every pass has had to rebuild
-  the harness from scratch to check its own work, and every pass has found
-  something: Phase 4's survivor was a jamb rejection whose deletion the suite
-  could not see, because the one oblique ray under test pointed the direction
-  another guard already covered.
+`node reference/mutate.js` runs 147 injected bugs against the suite. **15 of
+them survive a fully green 463-assertion run**, and every one is a real
+behaviour with no assertion behind it. (Three more survive on purpose and are
+marked `unkillable` — they cannot be observed at all, so they are not on this
+list.) Each carries a `gap:` line in
+`reference/mutations.js` saying what it would take to close, so this is a work
+list rather than a failure — the battery is a ratchet, green while the list
+holds steady and red the moment it grows or one is closed without its marker
+being dropped.
 
-  All five batteries live only in session scratch. Porting them to
-  `reference/mutate.js` is the highest-value item in Phase 5 — the shape is
-  already stable (copy the tree, patch one file, run the suite against the
-  copy, assert it goes red), and Phase 4's was a ten-line shell script over a
-  directory of one-line Python patches. One caveat worth carrying over: a
-  mutation can be **unkillable by construction** rather than merely uncovered,
-  and Phase 4 has a documented example. The battery needs a way to mark those
-  so they are not chased twice.
-- [ ] **Persist high scores.** `localStorage`, guarded by try/catch — it throws
-  in some privacy contexts.
-- [ ] **Touch / mobile controls.** Currently keyboard + pointer-lock mouse only;
-  unplayable on a phone. A twin-stick overlay would work given the fixed
-  viewport.
-- [ ] **Deployment.** The city is served by a systemd unit and exposed via
-  `tailscale funnel` (see `README.md`). Decide whether the shooter joins it at a
-  second path or gets its own unit.
+Ordered by how much the behaviour would cost a player if it broke.
+
+- [ ] **Enemies route through moving push-walls** (`nav-ignores-slab`) and
+  **never re-seed the flow field on a tile crossing** (`nav-stale-until-timer`).
+  Both need a fixture: one where the only route runs through a slab mid-slide,
+  and one that walks the player across a tile line and watches `navSeedX`.
+- [ ] **A rotated guard is not harder to shoot** (`fire-span-follows-rotation`).
+  `fire()` measures against `SPR[e.type]` on purpose. Nothing asserts it, so
+  the deliberate choice looks like an oversight to the next reader.
+- [ ] **Corpses are scenery** (`separate-shoves-corpses`). Kill a body, crowd it
+  with live ones, assert it has not moved off its own blood.
+- [ ] **Patrol rules.** A closed door is a wall on patrol
+  (`patrol-through-doors`), the CEO does not pace (`patrol-ceo-paces`), and the
+  0.72 straight-line bias is what makes a corridor read as a route rather than
+  a shuffle (`patrol-never-straight`).
+- [ ] **The atlas bounds on the two quantised fades**
+  (`arc-alpha-unquantised`, `dmgpop-alpha-unquantised`). Both need an A/B over
+  equal frame counts — the neon flicker and the rain mint entries as the clock
+  runs, and a naive before/after bills those to the feature under test. Note
+  the boot-time `< 500` bound cannot simply be re-asserted late in the run;
+  that unit mismatch is already recorded in `reference/CLAUDE.md`.
+- [ ] **A secret beside a door keeps its panelling** (`jamb-tints-secrets`). A
+  secret that looks different is not a secret, and the `!n.secret` clause in
+  the jamb pass is the only thing enforcing it.
+- [ ] **Pause holds the clock and releases the mouse** (`pause-animates`,
+  `pause-keeps-mouse`). The first needs `animT` on the probe; the second needs
+  a call count on `document.exitPointerLock`, which the stub can carry.
+- [ ] **The dying window is `DEATH_TIME`** (`death-window-stretched`). The
+  death-frame test reads the sprite sequence, not the clock driving it.
+- [ ] **A splat sorts behind the corpse on it** (`decal-no-depth-bias`).
+  `drawSprites` builds its list internally, so this needs the list exposed or
+  the bias asserted directly.
+- [ ] **A door hit behind the entry face** (`ray-door-behind-face`). Needs a
+  door with a deliberately open flank — geometry `validate-level.js` refuses to
+  ship, so the fixture has to build it by hand.
+
+## Also open
+
+- [ ] **`separateEnemies` shoves exactly-coincident bodies the wrong way, once.**
+  The coincident branch substitutes `d = 1` as a direction magnitude, and that
+  same `1` lands in `shove = (R - d) * 0.5` — negative for any radius under a
+  tile, which every pair has. The bodies do come apart, by twice that and in
+  the reversed direction, and the following passes push properly once `d` is
+  real, so it self-corrects within a few frames and nothing visible is wrong.
+  But one call moves a coincident pair 0.10u where the radii say 0.90u, which
+  is why the CEO radius test has to iterate to convergence rather than measure
+  one pass. Found while writing that test. `shove` wants to be `R * 0.5` in the
+  coincident branch; left alone because changing separation is not a
+  test-writing change.
 
 ---
 
@@ -100,6 +130,125 @@ number — line numbers drift with every edit, and the file map in
 
 Newest first. Kept for the design notes — several record why an approach that
 looks obvious was not the one taken.
+
+- [x] **Phase 5 — infrastructure.** All five items, shipped together. The suite
+  went 350 assertions → 463, the mutation battery stopped being session scratch
+  and became `reference/mutate.js` + a 147-bug catalog, and **22 coverage gaps
+  were closed on the way** — including both of the Phase 3 survivors this file
+  has been carrying. The final run is 128 killed, 15 known gaps, 3 unkillable,
+  0 new survivors. Two of the five items turned out to rest on something that
+  was not true, and the battery found a flaky assertion and two guards that
+  cannot be tested at all; all of it is below.
+  - *CI is four tools and no dependencies.* `.github/workflows/ci.yml` runs
+    `check-structure` → `validate-level` → the suite → **the suite against
+    `dist/wolf3d.html`** → the validator against the bundle, as five named steps
+    so a failure is named rather than buried in a chained shell line.
+    `check-structure` goes first because it is instant and it is the one that
+    catches a stale `dist/`. No `package.json` was added: "no build step
+    required to run or test" is a property of this repo and the workflow needs
+    nothing from npm. The pre-commit hook is **opt-in** — `git config
+    core.hooksPath reference/hooks`, so it stays version controlled and the
+    install is one reversible line — and it runs the 40-second suite only when
+    a staged path is under `wolf3d/`, `wolf3d.html` or `reference/`.
+  - *The battery is a ratchet, not a wall.* 147 mutations, of which 15 survive.
+    Shipping a tool that exits non-zero forever would make it a check nobody
+    reads, so a triaged survivor carries `gap: '<what it would take>'` and is
+    reported loudly without failing the run. What fails is **movement in either
+    direction**: a survivor with no marker is a new hole, and a marked mutation
+    that dies is coverage being claimed where the marker says there is none.
+    The count can fall and never rise.
+  - **The anchor check is the whole reason the catalog can be trusted.** A
+    `find` string that has drifted makes its patch a no-op, and a no-op mutant
+    runs the *pristine* game: green, reported as SURVIVED, sending the next
+    reader after a gap that does not exist. Every anchor's occurrence count is
+    verified before anything runs, so `--list` alone tells you the catalog has
+    rotted. This is the failure mode that would have turned five previous
+    batteries into theatre if they had been kept.
+  - **The suite had a flaky assertion, and only the battery could have found
+    it.** `ok(chainHits < smgHits)` compared two random draws with no margin —
+    hit rates of about 0.52 and 0.40 over 200 shots — and reverses roughly
+    **one run in 25**. It surfaced because the battery reported a *door*
+    mutation as killed by that line, a verdict no door geometry could earn. Now
+    600 samples with a 0.92 margin, measured at 0.68-0.85 across 25 trials.
+    The direction of the damage is worth keeping: **a flaky suite makes the
+    battery under-report**, turning survivors into false kills and never the
+    reverse, so the survivor list can be trusted and the kill list cannot quite.
+  - **`attack delay ignores difficulty` was not a missing test — it was a test
+    measuring the wrong thing.** The assertion drove a guard through the FSM and
+    counted entries into `attack`, but it re-armed the state by hand every time
+    the guard left it, which skips `e.atkCd` entirely, and it let the player
+    die a second in. `stepEnemies` stops stepping live enemies the moment
+    `gameState` leaves `'playing'`, so `e.state` froze at `'attack'` with
+    `stateT === 0` and the counter ticked once per remaining frame: 195 against
+    236 "attacks" are exactly `(4000-864)/16` and `(4000-208)/16`. It was
+    measuring **time to death**, driven by `D.dmg` and `D.acc`. Now: never
+    re-arm, never let the player die, count FSM-driven volleys over 20s. Six
+    runs put the ratio between 1.64 and 1.90 against a table ratio of 1.875,
+    and the assertion sits at 1.35.
+  - **`thinning may empty a floor` was a guard no shipped table can reach.**
+    `Math.round(mob * keep) >= 1` for every `mob >= 1` whenever `keep >= 0.5`,
+    and the lowest `keep` in `DIFFICULTY` is 0.65 — so the `Math.max(1, ...)`
+    floor never fires, and the existing one-guard test passed identically with
+    it deleted. **This is the third Phase todo in a row to describe a problem
+    that was not there**, after the Phase 3 melee cone and the Phase 4 door
+    slide. The guard is still worth keeping, so the only honest test is to *be*
+    the future it defends against: the fixture drops `DIFFICULTY[0].keep` to
+    0.1 for two lines and puts it back.
+  - *High scores are five slots, four failure modes, and one clock problem.*
+    `localStorage` fails three genuinely different ways — absent, throwing on
+    the property access itself, and throwing only on `setItem` — so
+    `scoreStore()` guards all three and `load({ storage })` can produce each of
+    them plus a shared backing map, which is the only way to test that a table
+    actually persists across loads. A run ends by **dying or getting out and by
+    nothing else**: `P` restart zeroes the score on `startLevel`'s cold path, so
+    filing there would enter a partial run and then file the real one again.
+  - **The tie-break depended on the clock's resolution.** `recordScore` sorted
+    by score then by `at`, meaning to put the newest run above a tie — but
+    `Date.now()` is millisecond-resolution, two runs recorded inside one
+    millisecond tie on `at` as well, and a stable sort then keeps the *older*
+    one. Works in play, fails in any test fast enough to matter, and the test
+    caught it on the first run. Fixed by putting the new entry at the front of
+    the array before sorting, which decides it without consulting a clock.
+  - **Three of the new mutations survived, and only one was a real gap.** The
+    battery was run against the systems this pass added, which is the rule this
+    repo keeps failing to follow and now enforces. Two `scores.js` early-outs
+    turned out to be **unobservable**: delete `if (!store) return false` and
+    `null.setItem` throws inside the try two lines below, which returns false
+    by another route; delete the `Array.isArray` check and `parsed.filter`
+    throws inside the same try, and the catch produces the same empty table. A
+    broad catch subsumes its own guards. The third was real and cheap — the
+    stick test measured *distance*, and forward and strafe cover exactly the
+    same ground, so it passed with the two axes swapped. It asserts a direction
+    now.
+  - *Touch is one engine change, and it is behaviour-identical.* The overlay
+    reuses everything — fire sets the same `firePressed` edge and `mouseHeld`
+    flag the mouse does, so the semi-auto / hold-to-repeat split in `frame()` is
+    untouched, and the buttons call `use()`, `startReload()`, `togglePause()`
+    and `selectWeapon()`. The one thing that could not be reused is movement:
+    the keyboard is binary and a stick is analog, so `updatePlayer`'s
+    normalise became a **clamp**. A single key is a magnitude of exactly 1 and
+    a diagonal is √2, and both land where normalising put them — the whole
+    350-assertion suite stayed green through the change, and there is now an
+    assertion that a keyboard diagonal is still capped at walking speed.
+  - *A fixed ring, not one that appears under the thumb.* That choice keeps
+    `getBoundingClientRect` out of the file entirely — the knob is a transform
+    of the raw pointer delta — which means no layout reads and no DOM surface
+    the headless stub does not implement. The right half is a drag surface
+    rather than a second stick: it maps straight onto the mouse-look delta that
+    already existed, and it costs one element.
+  - *`pointercancel` is not optional.* A touch the system takes over never
+    delivers `pointerup`, so without it the stick sticks and the gun fires
+    forever — the same class of bug `blur` and `pointerlockchange` already
+    exist to prevent. The look pad also carries the mouse handler's
+    `gameState !== 'playing'` guard, or a drag under the pause banner banks yaw
+    that snaps the instant play resumes.
+  - *One unit, two paths.* The shooter joins the city on the same funnel rather
+    than getting its own service, and **that is only possible because the
+    bundle has no local dependencies**: a funnel path can be mapped straight at
+    `dist/wolf3d.html`, where the split tree would need the whole directory
+    proxied for its relative `src` paths. `deploy/ascii-city.service` is checked
+    in so the deployment stops being undocumented state in one machine's home
+    directory.
 
 - [x] **Phase 4 — presentation.** All six items, shipped together. The suite
   went 270 assertions → 350, and an 11-bug mutation battery covers the new
@@ -294,20 +443,14 @@ looks obvious was not the one taken.
     `startLevel` and `nextLevel` moved to `wolf3d/level.js`. Rule 4 says a file
     past 400 is a signal to split rather than a target to fill, and the note
     that says so also says not to answer it by shaving comments.
-  - **TO INVESTIGATE — two mutation-battery survivors, confirmed live against
-    the current tree, no fix yet for either:**
-    - `attack delay ignores difficulty` — deleting the
-      `DIFFICULTY[difficulty].cd` multiplier from the `e.atkCd` assignment in
-      the `attack` case of `stepEnemies` (`wolf3d/enemies.js`) still passes the
-      full suite (270/270). A prior attempt at a fix here did not reproduce red
-      against the actual mutation on direct re-check, so nothing currently
-      guards this multiplier — needs a real test, not another guess at one.
-    - `thinning may empty a floor` — changing the `keep` floor in
-      `populateEnemies` (`wolf3d/level.js`) from `Math.max(1, Math.round(mob *
-      D.keep))` to plain `Math.round(mob * D.keep)` also still passes the full
-      suite (270/270), even though a floor thinned to zero enemies is exactly
-      the case `hud.js`'s `ratio()` mishandles (an empty category reads as a
-      100% kill ratio). No fix attempted yet.
+  - **Both survivors are CLOSED in Phase 5, and neither was what this entry
+    said it was.** `attack delay ignores difficulty` had a test all along — it
+    was measuring time-to-death rather than an attack rate, because it re-armed
+    the FSM by hand and then counted frames after the player died.
+    `thinning may empty a floor` was a guard **no shipped difficulty table can
+    reach**: `Math.round(mob * 0.65) >= 1` for every `mob >= 1`. See the
+    Phase 5 entry above for both, and note that "no fix yet" here meant "no
+    diagnosis yet" — the fix was cheap once the measurement was right.
 
 - [x] **The restructure — split to develop, bundle to ship.** 2,883 lines of
   single-file HTML became a 91-line manifest, `wolf3d/style.css`, and fourteen

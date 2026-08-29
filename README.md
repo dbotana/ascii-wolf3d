@@ -50,6 +50,10 @@ keycards, and an elevator out.
 | `Esc`           | pause (also releases the mouse)   |
 | `M`             | mute audio and music              |
 
+On a touch device an overlay appears on its own: left half is an analog
+movement stick, right half drags to look, with fire, use, reload, pause and a
+weapon row. It is completely absent on a mouse machine.
+
 ### What it reuses
 
 The atlas glyph cache, DDA raycaster, billboard sprite projection with z-buffer
@@ -99,7 +103,7 @@ phases and summons drones on the last one.
 
 - Vanilla JS, no build step required to run or test
 - `ascii_city.html` is one self-contained file, ~34 KB
-- `wolf3d.html` is a 14-file source tree that bundles into one ~110 KB file
+- `wolf3d.html` is a 19-file source tree that bundles into one ~178 KB file
 - Google Fonts: VT323 + IBM Plex Mono
 - Palette: sodium orange / CRT green / neon pink+cyan / slate / warm wood
 - CSP-safe: no external scripts, images, or audio files
@@ -114,12 +118,85 @@ phases and summons drones on the last one.
   `node reference/bundle.js`; never edit it directly. This is the build to
   deploy or hand to someone.
 - `reference/` — headless test harness, level validator, bundler, structure
-  check, engine notes
+  check, mutation battery, engine notes
+- `.github/workflows/` — CI: the four checks on every push, and the mutation
+  battery weekly
+- `deploy/` — the systemd unit behind the live build
 
 The shooter is split for development and bundled for shipping: the two are the
 same program, and `reference/run-tests.js` is run against both. See
 `reference/CLAUDE.md` for the file map, the load order, and why the split is
 classic scripts rather than ES modules.
 
-Backing systemd unit: `~/.config/systemd/user/ascii-city.service`.
-Public exposure: `tailscale funnel --https=8443 --set-path=/city`.
+## Checks
+
+Nothing here needs a browser, and nothing needs `npm install` — there are no
+dependencies.
+
+```sh
+node reference/run-tests.js                               # 463 assertions against the real game loop
+WOLF3D_HTML=dist/wolf3d.html node reference/run-tests.js  # ...and against the shipped bundle
+node reference/validate-level.js                          # map geometry + key-gated reachability
+node reference/check-structure.js                         # src tags resolve, no ESM, dist current
+node reference/bundle.js                                  # rebuild dist/wolf3d.html
+node reference/mutate.js                                  # inject known bugs; the suite must go red
+```
+
+The mutation battery is a ratchet: it is green while its known gaps hold
+steady and red the moment a new one appears, or an old one is closed without
+dropping its marker.
+
+All of them exit non-zero on failure. GitHub Actions runs the first four on
+every push and pull request, against both the split tree and the bundle; the
+mutation battery runs weekly and on demand, because it is a quarter-hour job.
+
+There is an opt-in pre-commit hook that runs the same checks locally:
+
+```sh
+git config core.hooksPath reference/hooks     # undo: git config --unset core.hooksPath
+```
+
+It runs the two static tools always and the full suite only when a staged path
+can affect it. Note it validates the working tree rather than the index, so a
+partially staged commit is checked against what is on disk.
+
+## Deployment
+
+One server, two paths. A user systemd unit serves the **repo root** on
+`127.0.0.1:5060` — see `deploy/ascii-city.service`, which is checked in — and
+`tailscale funnel` is the only thing that exposes it:
+
+```sh
+# the city, as before
+tailscale funnel --bg --https=8443 --set-path=/city    http://127.0.0.1:5060/
+
+# the shooter, a second path on the same funnel and the same unit
+tailscale funnel --bg --https=8443 --set-path=/wolf3d  http://127.0.0.1:5060/dist/wolf3d.html
+
+tailscale funnel status
+```
+
+| | url |
+|---|---|
+| the city | `https://blackice.taila0726f.ts.net:8443/city/` |
+| the shooter | `https://blackice.taila0726f.ts.net:8443/wolf3d` |
+
+**A path can be mapped straight at the one file because the bundle has no local
+dependencies.** `dist/wolf3d.html` inlines its CSS and all nineteen scripts; the
+only request it makes is the Google Fonts stylesheet. The development tree could
+not be served this way — its relative `<script src>` paths would need the whole
+directory proxied — which is the practical reason the bundle exists at all,
+beyond being nice to hand to someone.
+
+Shipping a change:
+
+```sh
+node reference/bundle.js          # dist/wolf3d.html is GENERATED — never hand-edit it
+node reference/check-structure.js # fails if dist/ is stale, so this cannot ship half-done
+git commit && git push
+ssh <host> 'cd ~/Github/ascii-rain-city && git pull'
+```
+
+No restart: the unit serves files off disk, so a `git pull` is the deploy. The
+unit only needs `systemctl --user restart ascii-city` if the unit file itself
+changed.

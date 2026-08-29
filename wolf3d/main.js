@@ -6,7 +6,7 @@
 // ─── MOVEMENT ───────────────────────────────────────────────
 function updatePlayer(dt) {
   if (gameState !== 'playing') return;
-  const running = keys.has('shift');
+  const running = keys.has('shift') || touchRun;
   const speed = 3.4 * (running ? 1.75 : 1) * dt;
   const turn  = 2.2 * dt;
   const fx = Math.cos(player.a), fy = Math.sin(player.a);
@@ -17,10 +17,19 @@ function updatePlayer(dt) {
   if (keys.has('s') || keys.has('arrowdown')) { mx -= fx; my -= fy; }
   if (keys.has('a')) { mx -= sx; my -= sy; }
   if (keys.has('d')) { mx += sx; my += sy; }
+  // The touch stick is analog, so it joins the vector as a vector rather than
+  // as pretend key presses. That is the whole reason the line below clamps.
+  if (touchMove.y) { mx += fx * touchMove.y; my += fy * touchMove.y; }
+  if (touchMove.x) { mx += sx * touchMove.x; my += sy * touchMove.x; }
 
   const mag = Math.hypot(mx, my);
   if (mag > 0.001) {
-    mx = mx / mag * speed; my = my / mag * speed;
+    // CLAMP, not normalise, and it is behaviour-identical for the keyboard: a
+    // single key is a magnitude of exactly 1 and a diagonal is √2, and both
+    // come out exactly where normalising put them. What it adds is that a
+    // half-deflected stick moves at half speed instead of snapping to full.
+    const k = (mag > 1 ? 1 / mag : 1) * speed;
+    mx *= k; my *= k;
     const BUF = 0.24;
     if (!blockAt(player.x + mx + Math.sign(mx) * BUF, player.y)) player.x += mx;
     if (!blockAt(player.x, player.y + my + Math.sign(my) * BUF)) player.y += my;
@@ -31,6 +40,9 @@ function updatePlayer(dt) {
 
   if (keys.has('arrowleft'))  player.a -= turn;
   if (keys.has('arrowright')) player.a += turn;
+  // Banked by the look pad between frames, and applied here rather than in the
+  // handler so several pointermoves in one frame turn once, by their sum.
+  player.a += consumeTouchLook();
 
   if (player.fireCd > 0) player.fireCd -= dt;
   if (player.hurtT  > 0) player.hurtT  -= dt;
@@ -163,6 +175,12 @@ for (let i = 0; i < diffRows.length; i++) {
   diffRows[i].addEventListener('click', () => { setDifficulty(i); paintDiff(); begin(); });
 }
 paintDiff();
+
+// The high score table, read once at boot. scores.js deliberately runs nothing
+// at load — rule 3 — so this is the call that fills it in before the splash
+// is ever painted.
+loadScores();
+paintScores();
 
 addEventListener('keydown', e => {
   if (!splash.parentElement) return;
