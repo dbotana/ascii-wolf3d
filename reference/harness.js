@@ -55,6 +55,18 @@ const PROBE_SRC = `global.__PROBE = {
   tally:         () => (typeof tally !== "undefined" ? tally : null),
   itemAt:        (typeof itemAt !== "undefined" ? itemAt : null),
   ceoPhases:     () => (typeof CEO_PHASES !== "undefined" ? CEO_PHASES : []),
+  // Phase 2: pathfinding, separation, patrols and enemy rotations. Same
+  // typeof guard as everything above, so a pre-Phase-2 build still loads.
+  navAt:         (typeof navAt !== "undefined" ? navAt : null),
+  buildNav:      (typeof buildNavField !== "undefined" ? buildNavField : null),
+  navStep:       (typeof navStep !== "undefined" ? navStep : null),
+  navPassable:   (typeof navPassable !== "undefined" ? navPassable : null),
+  moveEnemy:     (typeof moveEnemy !== "undefined" ? moveEnemy : null),
+  openDoorAhead: (typeof openDoorAhead !== "undefined" ? openDoorAhead : null),
+  separate:      (typeof separateEnemies !== "undefined" ? separateEnemies : null),
+  enemySprite:   (typeof enemySprite !== "undefined" ? enemySprite : null),
+  spriteSpan:    (typeof spriteSpan !== "undefined" ? spriteSpan : null),
+  spr:           () => SPR,
 };`;
 
 function extractScript(htmlPath) {

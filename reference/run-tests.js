@@ -47,6 +47,21 @@ function place(e, dist) {
   return false;
 }
 const firstGuard = () => P.enemies().find(e => e.type === 'guard' && e.alive);
+
+/**
+ * Park every enemy where it stands, in a state the FSM will not move it out of.
+ *
+ * Since Phase 2 enemies patrol while idle and route around corners once woken,
+ * so a test that waits several seconds can no longer assume the geometry it set
+ * up is still empty. `stepDoors` refuses to close on an occupied tile, and a
+ * guard wandering into the frame made the door-hold assertion fail about one run
+ * in four. Call this straight after `startLevel()`, while everyone is still on
+ * their authored spawn tile — a spawn is never a door tile, so the frame is
+ * guaranteed clear.
+ */
+function freezeEnemies() {
+  for (const e of P.enemies()) { e.state = 'hurt'; e.stateT = 1e9; }
+}
 const exitTile = () => {
   const grid = P.grid();
   for (let y = 0; y < grid.length; y++)
@@ -107,6 +122,191 @@ if (spot) {
   ok(false, 'test setup: could not find a propagation vantage point');
 }
 
+// ── enemy movement: flow field, separation, patrols ──────────────────────────
+// The first two behaviours here were measured failures before Phase 2, not
+// suspicions: a guard jammed at 4.2u around a corner, and a group chase left two
+// guards 0.009u apart. Both numbers are in the assertion messages so a
+// regression reads as a regression rather than as a mystery.
+group('enemy movement');
+P.startLevel();
+P.player.x = 20.5; P.player.y = 38.5;
+run(4);
+ok(P.navAt(P.player.x | 0, P.player.y | 0) === 0,
+   'the flow field is seeded at zero on the player tile');
+{
+  const grid = P.grid();
+  let wall = null, open = null;
+  for (let y = 0; y < grid.length && !(wall && open); y++)
+    for (let x = 0; x < grid[y].length; x++) {
+      if (!wall && grid[y][x] && grid[y][x].tag === 'panel') wall = [x, y];
+      if (!open && !grid[y][x] && (x !== (P.player.x | 0) || y !== (P.player.y | 0))
+          && P.navAt(x, y) > 0) open = [x, y];
+    }
+  ok(wall && P.navAt(wall[0], wall[1]) === -1, 'a solid tile is unreachable in the field');
+  const manhattan = Math.abs(open[0] - (P.player.x | 0)) + Math.abs(open[1] - (P.player.y | 0));
+  ok(P.navAt(open[0], open[1]) >= manhattan,
+     `a step count can never beat the manhattan bound (${P.navAt(open[0], open[1])} >= ${manhattan})`);
+  ok(P.navAt(-1, 5) === -1 && P.navAt(5, 9999) === -1, 'off-map queries read as unreachable');
+}
+
+// enemies carry no keycards, so a locked door has to be a wall to the field —
+// otherwise it routes a guard at a door it can never open and the guard stands there
+{
+  const locked = P.doors().find(d => d.lock !== null);
+  const free   = P.doors().find(d => d.lock === null);
+  ok(locked && !P.navPassable(locked.gx, locked.gy),
+     'a locked door is impassable to the flow field');
+  ok(free && P.navPassable(free.gx, free.gy),
+     'an unlocked door is passable to the flow field');
+}
+
+// the catch-all: whatever moved a body — chasing, patrolling or being shoved —
+// it may never end up inside geometry
+P.startLevel();
+for (const e of P.enemies()) if (e.alive) e.state = 'chase';
+run(625);                                            // 10s of everyone converging
+{
+  const live = P.enemies().filter(e => e.alive);
+  ok(live.every(e => !P.blockAt(e.x, e.y)),
+     `every live enemy is on walkable ground after a 10s chase (${live.length} bodies)`);
+  let closest = Infinity;
+  for (let i = 0; i < live.length; i++)
+    for (let j = i + 1; j < live.length; j++)
+      closest = Math.min(closest, Math.hypot(live[i].x - live[j].x, live[i].y - live[j].y));
+  ok(closest > 0.6,
+     `a group chase keeps bodies apart (closest pair ${closest.toFixed(3)}u; was 0.009u pre-Phase-2)`);
+}
+
+// forced full overlap — this is the state summoned drones can spawn into
+P.startLevel();
+{
+  const stack = P.enemies().filter(e => e.alive).slice(0, 4);
+  for (const e of stack) { e.x = 20.5; e.y = 36.5; e.state = 'chase'; }
+  run(120);
+  let closest = Infinity;
+  for (let i = 0; i < stack.length; i++)
+    for (let j = i + 1; j < stack.length; j++)
+      closest = Math.min(closest, Math.hypot(stack[i].x - stack[j].x, stack[i].y - stack[j].y));
+  ok(closest > 0.6, `four enemies stacked on one point push apart (${closest.toFixed(3)}u)`);
+  ok(stack.every(e => !P.blockAt(e.x, e.y)), 'separation never shoves a body into a wall');
+}
+
+// patrols: the floor should be in motion before the first shot, but on a leash
+P.startLevel();
+{
+  const roster = P.enemies().filter(e => e.type !== 'ceo');
+  const home = roster.map(e => ({ e, x: e.x, y: e.y }));
+  P.player.x = 20.5; P.player.y = 38.5;              // spawn corner, out of everyone's sight
+  run(500);                                          // 8s
+  const moved = home.filter(h => Math.hypot(h.e.x - h.x, h.e.y - h.y) > 0.25).length;
+  ok(moved > 0, `idle enemies patrol rather than standing still (${moved}/${roster.length} moved)`);
+  // the leash bounds the tile a patrol will WALK TO, so a body can sit a little
+  // beyond it — at its centre, plus whatever separation shoved it. The strict
+  // version of this assertion lives in the long-corridor fixture below.
+  const worst = Math.max(...roster.map(e => Math.hypot(e.x - e.spawnX, e.y - e.spawnY)));
+  ok(worst <= 7.5, `a patrol stays near its leash (furthest ${worst.toFixed(2)}u from spawn)`);
+  ok(roster.some(e => Math.abs(e.heading + Math.PI / 2) > 0.01),
+     'patrolling turns a body — heading is not still the spawn default');
+  ok(roster.every(e => !e.alive || !P.blockAt(e.x, e.y)), 'a patrolling enemy stays out of walls');
+  ok(roster.every(e => e.state === 'idle' || Math.hypot(e.x - P.player.x, e.y - P.player.y) < e.spec.sight),
+     'patrolling does not wake enemies that never saw the player');
+}
+
+// the field is rebuilt on a timer, not only when the player crosses a tile line:
+// a push-wall landing or a door changing state alters the route under a player
+// who has not moved at all
+P.startLevel();
+{
+  const grid = P.grid();
+  P.player.x = 20.5; P.player.y = 38.5;
+  run(4);
+  let seal = null;
+  for (let y = 1; y < grid.length - 1 && !seal; y++)
+    for (let x = 1; x < grid[y].length - 1; x++)
+      if (!grid[y][x] && P.navAt(x, y) > 2) { seal = [x, y]; break; }
+  const wall = grid.flat().find(c => c && c.tag === 'panel');
+  grid[seal[1]][seal[0]] = wall;                     // brick up a tile, player stands still
+  run(40);                                           // 0.64s — longer than the rebuild period
+  ok(P.navAt(seal[0], seal[1]) === -1,
+     'the field refreshes on its timer while the player stays on one tile');
+  grid[seal[1]][seal[0]] = 0;
+}
+
+// heading is written by moveEnemy — the one primitive every mover goes through
+{
+  const e = firstGuard();
+  e.x = 20.5; e.y = 36.5; e.heading = 0;
+  P.moveEnemy(e, 0, 0.05);
+  ok(Math.abs(e.heading - Math.PI / 2) < 0.01,
+     `moving south records a southward heading (${e.heading.toFixed(2)})`);
+  P.moveEnemy(e, -0.05, 0);
+  ok(Math.abs(Math.abs(e.heading) - Math.PI) < 0.01,
+     `moving west records a westward heading (${e.heading.toFixed(2)})`);
+}
+
+// ── enemy facing ─────────────────────────────────────────────────────────────
+group('enemy facing');
+P.startLevel();
+{
+  const SPRT = P.spr();
+  const foe = firstGuard();
+
+  // the branches that existed before Phase 2 still win over any rotation
+  foe.state = 'attack';
+  ok(P.enemySprite(foe) === SPRT.guardFire, 'an attacking guard still shows the firing frame');
+  foe.alive = false; foe.state = 'dying';
+  ok(P.enemySprite(foe) === SPRT.guardDie, 'a dying guard still shows the death frame');
+  foe.state = 'dead';
+  ok(P.enemySprite(foe) === SPRT.guardDead, 'a dead guard still shows the corpse frame');
+  foe.alive = true; foe.state = 'chase';
+
+  // A drone is a symmetric ring of rotors and the CEO always squares up to you,
+  // so neither rotates — asserted so nobody "completes" the feature by accident.
+  const drone = P.enemies().find(e => e.type === 'drone' && e.alive);
+  if (drone) {
+    drone.state = 'chase';
+    drone.heading = 0;   const a = P.enemySprite(drone);
+    drone.heading = Math.PI;
+    ok(a === P.enemySprite(drone) && a === SPRT.drone, 'drones stay single-view');
+  } else {
+    ok(false, 'test setup: no live drone to check');
+  }
+
+  // Rotation pick, checked against the game's OWN projection rather than
+  // against the algebra. The first implementation had left and right swapped in
+  // all eight viewing cases and looked perfectly reasonable in review.
+  P.player.x = 20; P.player.y = 20; P.player.a = 0;
+  foe.x = 25; foe.y = 20;                            // five units straight ahead
+  const screenCol = (x, y) => {
+    const c = Math.cos(P.player.a), s = Math.sin(P.player.a);
+    const ex = x - P.player.x, ey = y - P.player.y;
+    return P.spriteSpan(ex * c + ey * s, -ex * s + ey * c, SPRT.guard.wW).centerCol;
+  };
+  foe.heading = 0;
+  ok(P.enemySprite(foe) === SPRT.guardBack, 'a guard walking away shows its back');
+  foe.heading = Math.PI;
+  ok(P.enemySprite(foe) === SPRT.guard, 'a guard walking at you shows its front');
+
+  let sides = 0, agree = 0;
+  for (const h of [-Math.PI / 2, Math.PI / 2]) {
+    foe.heading = h;
+    const drift = screenCol(foe.x + Math.cos(h) * 0.5, foe.y + Math.sin(h) * 0.5)
+                - screenCol(foe.x, foe.y);
+    const want = drift < 0 ? SPRT.guardLeft : SPRT.guardRight;
+    sides++;
+    if (P.enemySprite(foe) === want) agree++;
+  }
+  ok(agree === sides,
+     `the side sprite matches the way the guard actually travels on screen (${agree}/${sides})`);
+  foe.heading = -Math.PI / 2;  const sA = P.enemySprite(foe);
+  foe.heading =  Math.PI / 2;  const sB = P.enemySprite(foe);
+  ok(sA !== sB && sA !== SPRT.guard && sB !== SPRT.guard,
+     'the two profiles are distinct sprites, and neither is the front view');
+  ok([SPRT.guardBack, SPRT.guardLeft, SPRT.guardRight]
+       .every(a => a.wW === SPRT.guard.wW && a.wH === SPRT.guard.wH && a.foot === SPRT.guard.foot),
+     'every rotation keeps the front sprite\'s footprint, so turning never resizes a guard');
+}
+
 // ── combat ───────────────────────────────────────────────────────────────────
 group('combat');
 P.startLevel();
@@ -139,6 +339,7 @@ ok(P.player.kills === 0, 'shooting a wall hits nothing');
 // ── doors ────────────────────────────────────────────────────────────────────
 group('doors & keycards');
 P.startLevel();
+freezeEnemies();                     // this group is about doors, not about who walks into one
 const plain = P.doors().find(d => !d.lock);
 P.player.x = plain.gx + 0.5; P.player.y = plain.gy + 1.5; P.player.a = -Math.PI / 2;
 ok(P.blockAt(plain.gx + 0.5, plain.gy + 0.5), 'a closed door blocks movement');
@@ -156,6 +357,7 @@ run(400);
 ok(plain.phase !== 'closed', 'door refuses to close on top of the player');
 
 P.startLevel();
+freezeEnemies();
 const red = P.doors().find(d => d.lock === 'red');
 P.player.x = red.gx + 0.5; P.player.y = red.gy + 1.5; P.player.a = -Math.PI / 2;
 P.use(); run(10);
@@ -165,6 +367,7 @@ P.use(); run(40);
 ok(red.open >= 1, 'red door opens once the keycard is held');
 
 P.startLevel();
+freezeEnemies();
 const blue = P.doors().find(d => d.lock === 'blue');
 P.player.x = blue.gx + 0.5; P.player.y = blue.gy + 1.5; P.player.a = -Math.PI / 2;
 P.use(); run(10);
@@ -669,6 +872,187 @@ group('perfect tally (fixture)');
      `a clean sweep pays the time bonus plus 2500 per category ` +
      `(${before} + ${t.timeBonus} + 7500 -> ${F.player.score})`);
   ok(f.el('tRowKill').classList.contains('perfect'), 'a 100% row is flagged as perfect');
+}
+
+// ── pathfinding around geometry (fixture) ────────────────────────────────────
+// The shipped floors are open enough that a guard usually stumbles into the
+// player by accident. This is the exact shape that beat the pre-Phase-2 chase:
+// a guard in the east room, a player up the west leg, and no sightline between
+// them. The old build closed to 3.19u, dropped inside its own 3.2u standoff
+// with no line of sight, and stopped dead against the wall at (4.35, 2.93).
+//
+//   #@#......#     player up the one-wide west leg
+//   #.#....g.#     guard in the east room
+//   #.####...#     the only route is south, east, then north
+group('pathfinding (fixture)');
+{
+  const f = loadWithLevel([
+    '##########',
+    '#@#......#',
+    '#.#......#',
+    '#.#......#',
+    '#.#....g.#',
+    '#.#.....g#',
+    '#.####...#',
+    '#........#',
+    '#.......X#',
+    '##########',
+  ], { htmlPath: process.env.WOLF3D_HTML });
+  const F = f.P;
+  F.player.x = 1.5; F.player.y = 1.5; F.player.a = 0;
+  const foe = F.enemies().find(e => e.type === 'guard');
+  ok(!F.hasLOS(foe.x, foe.y, F.player.x, F.player.y),
+     'test setup: the guard starts with no sightline to the player');
+  foe.state = 'chase';
+
+  let arrived = -1;
+  for (let i = 0; i < 1250 && arrived < 0; i++) {          // up to 20s
+    f.step(16, []);
+    if (F.hasLOS(foe.x, foe.y, F.player.x, F.player.y)
+        && Math.hypot(foe.x - F.player.x, foe.y - F.player.y) < 3.4) arrived = i * 16 / 1000;
+  }
+  ok(arrived >= 0,
+     `a guard routes around a corner instead of grinding the wall (arrived at ${arrived.toFixed(1)}s)`);
+  ok(!F.blockAt(foe.x, foe.y), 'and it is standing on walkable ground when it gets there');
+
+  // Two bodies side by side ACROSS a one-wide corridor. The push wants to go
+  // straight into both walls, so separation has to give up rather than squeeze
+  // them out — a corridor that narrow simply cannot hold two guards abreast.
+  // Asserted on body clearance, not on tile occupancy: a shoulder 0.11u inside
+  // the wall still leaves the centre on a walkable tile, which is exactly how
+  // this would slip through review.
+  const pair = F.enemies().filter(e => e.alive).slice(0, 2);
+  if (pair.length === 2) {
+    // 'hurt' with a long timer parks the FSM so only separation is moving them
+    for (const e of pair) { e.state = 'hurt'; e.stateT = 999; e.y = 3.5; }
+    pair[0].x = 1.4; pair[1].x = 1.6;
+    f.run(90);
+    const B = 0.26;                                  // BODY_MARGIN in wolf3d.html
+    ok(pair.every(e => !F.blockAt(e.x - B, e.y) && !F.blockAt(e.x + B, e.y)),
+       `separation never squeezes a body into a corridor wall ` +
+       `(${pair.map(e => e.x.toFixed(2)).join(', ')})`);
+  } else {
+    ok(false, 'test setup: needed two live enemies for the corridor case');
+  }
+}
+
+// ── the standoff has to be gated on sight (fixture) ──────────────────────────
+// A route that doubles back past the player behind a thin wall. The guard's
+// straight-line distance drops under its own 3.2u standoff at (2,3) — one tile
+// short of turning the corner — while it still has no sightline. Hold the
+// standoff on raw distance and it freezes there having done all the walking.
+//
+//   #@.......#
+//   #.########     the only way through is column 1
+//   #...g....#
+group('sight-gated standoff (fixture)');
+{
+  const f = loadWithLevel([
+    '##########',
+    '#@.......#',
+    '#.########',
+    '#...g....#',
+    '##########',
+  ], { htmlPath: process.env.WOLF3D_HTML });
+  const F = f.P;
+  F.player.x = 1.5; F.player.y = 1.5; F.player.a = 0;
+  const foe = F.enemies().find(e => e.type === 'guard');
+  ok(!F.hasLOS(foe.x, foe.y, F.player.x, F.player.y)
+     && Math.hypot(foe.x - F.player.x, foe.y - F.player.y) > 3.2,
+     'test setup: no sightline, and the guard starts outside its standoff');
+  ok(!F.hasLOS(2.5, 3.5, F.player.x, F.player.y)
+     && Math.hypot(2.5 - F.player.x, 3.5 - F.player.y) < 3.2,
+     'test setup: the route passes inside 3.2u while still walled off');
+  foe.state = 'chase';
+  let arrived = false;
+  for (let i = 0; i < 1250 && !arrived; i++) {
+    f.step(16, []);
+    arrived = F.hasLOS(foe.x, foe.y, F.player.x, F.player.y);
+  }
+  ok(arrived, `the standoff yields to a blocked sightline instead of freezing the ` +
+              `guard mid-route (ended at ${foe.x.toFixed(2)},${foe.y.toFixed(2)})`);
+}
+
+// ── the patrol leash, strictly (fixture) ─────────────────────────────────────
+// A long straight corridor, with the player bricked into an alcove so nothing
+// ever wakes. Unleashed, a guard walks this end to end; leashed, it turns round
+// at 6u and comes back.
+group('patrol leash (fixture)');
+{
+  const f = loadWithLevel([
+    '#################################',
+    '#@#..g..........................#',
+    '#################################',
+  ], { htmlPath: process.env.WOLF3D_HTML });
+  const F = f.P;
+  const foe = F.enemies().find(e => e.type === 'guard');
+  ok(foe && foe.state === 'idle' && !F.hasLOS(foe.x, foe.y, F.player.x, F.player.y),
+     'test setup: one guard, idle, with the player sealed out of sight');
+  let far = 0, path = 0, px = foe.x, py = foe.y;
+  for (let i = 0; i < 2500; i++) {                   // 40s of patrolling
+    f.step(16, []);
+    far = Math.max(far, Math.hypot(foe.x - foe.spawnX, foe.y - foe.spawnY));
+    path += Math.hypot(foe.x - px, foe.y - py); px = foe.x; py = foe.y;
+  }
+  ok(foe.state === 'idle', 'the guard never spotted the sealed-off player');
+  ok(far > 2.0, `and it actually walked its beat (reached ${far.toFixed(2)}u from spawn)`);
+  ok(far <= 7.0, `a patrol never leaves its leash (furthest ${far.toFixed(2)}u of a 6u leash)`);
+  // A guard that dwelt at every tile centre rather than only at turns covered
+  // 12-13u here instead of 19u. That is the difference between walking a beat
+  // and shuffling, and it is invisible on the shipped floors.
+  ok(path > 16, `a patrol walks rather than shuffles (${path.toFixed(1)}u covered in 40s)`);
+}
+
+// ── enemies and doors (fixture) ──────────────────────────────────────────────
+// A shut door blocks the sightline by itself, so no corner is needed here.
+// `D` is unlocked and `R` needs the red keycard, which no enemy will ever hold.
+group('enemies and doors (fixture)');
+{
+  const openRun = (lockChar) => {
+    const f = loadWithLevel([
+      '##########',
+      '#@..' + lockChar + '...g#',
+      '##########',
+    ], { htmlPath: process.env.WOLF3D_HTML });
+    const F = f.P;
+    F.player.x = 1.5; F.player.y = 1.5; F.player.a = 0;
+    const foe = F.enemies().find(e => e.type === 'guard');
+    foe.state = 'chase';
+    f.run(750);                                            // 12s
+    return { F, foe, door: F.doors()[0] };
+  };
+
+  const un = openRun('D');
+  ok(un.door.phase !== 'closed',
+     `a chasing guard leans on an unlocked door (phase=${un.door.phase})`);
+  ok(un.F.hasLOS(un.foe.x, un.foe.y, un.F.player.x, un.F.player.y),
+     'and comes through it to reach the player');
+
+  const lk = openRun('R');
+  ok(lk.door.phase === 'closed' && lk.door.open === 0,
+     `a locked door stays shut — enemies carry no keycards (phase=${lk.door.phase})`);
+  ok((lk.foe.x | 0) !== lk.door.gx,
+     `and the guard never ends up inside it (guard at ${lk.foe.x.toFixed(2)}, door at ${lk.door.gx})`);
+  ok(!lk.F.blockAt(lk.foe.x, lk.foe.y), 'the balked guard is still on walkable ground');
+
+  // `navPassable` already keeps the field off locked doors, so openDoorAhead's
+  // own lock check never fires in play. It is tested directly rather than left
+  // as a branch nobody has ever seen work: enemies opening locked doors would
+  // unpick every keycard gate on all three floors, which is too load-bearing to
+  // leave resting on one caller happening to filter its arguments.
+  lk.foe.x = lk.door.gx + 1.4; lk.foe.y = lk.door.gy + 0.5;
+  lk.F.openDoorAhead(lk.foe, lk.door.gx, lk.door.gy);
+  ok(lk.door.phase === 'closed',
+     'openDoorAhead refuses a locked door even when handed one directly');
+  const un2 = un.door;
+  un2.phase = 'closed'; un2.open = 0;
+  un.foe.x = un2.gx + 1.4; un.foe.y = un2.gy + 0.5;
+  un.F.openDoorAhead(un.foe, un2.gx, un2.gy);
+  ok(un2.phase === 'opening', 'and opens an unlocked one from the same distance');
+  un.foe.x = un2.gx + 4.0;
+  un2.phase = 'closed'; un2.open = 0;
+  un.F.openDoorAhead(un.foe, un2.gx, un2.gy);
+  ok(un2.phase === 'closed', 'a door is only leaned on from arm\'s length, not across the room');
 }
 
 // ── report ───────────────────────────────────────────────────────────────────

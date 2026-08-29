@@ -749,6 +749,52 @@
       wW: 1.15, wH: 2.0, foot: 0.0,
       base: 'guardSuit', accent: '◘▀', accentColor: 'visor',
     },
+    // Three more views of the same guard. Wolf3D shipped 8 rotations; at five
+    // columns of ASCII the diagonals are indistinguishable from the cardinals,
+    // so this is 4. Every rotation keeps the front sprite's wW/wH/foot so the
+    // silhouette does not jump size as a guard turns, and fire() deliberately
+    // still measures its hit span against SPR.guard.
+    guardBack: {
+      rows: [
+        ' ▄▄▄ ',
+        '▐███▌',
+        ' ███ ',
+        '▟███▙',
+        ' ▐█▌ ',
+        ' █ █ ',
+        ' ▙ ▟ ',
+      ],
+      wW: 1.15, wH: 2.0, foot: 0.0,
+      base: 'guardSuit', accent: '', accentColor: 'visor',
+    },
+    // Edge-on there is no visor to catch the light, so the sides carry no
+    // accent glyph — the shoulder profile is the whole read.
+    guardLeft: {
+      rows: [
+        ' ▄▄  ',
+        '◘██  ',
+        '╱█▛  ',
+        ' ██  ',
+        ' ▐█  ',
+        ' █▌  ',
+        ' ▙▟  ',
+      ],
+      wW: 1.15, wH: 2.0, foot: 0.0,
+      base: 'guardSuit', accent: '◘', accentColor: 'visor',
+    },
+    guardRight: {
+      rows: [
+        '  ▄▄ ',
+        '  ██◘',
+        '  ▜█╲',
+        '  ██ ',
+        '  █▌ ',
+        '  ▐█ ',
+        '  ▙▟ ',
+      ],
+      wW: 1.15, wH: 2.0, foot: 0.0,
+      base: 'guardSuit', accent: '◘', accentColor: 'visor',
+    },
     guardFire: {
       rows: [
         ' ▄▄▄ ',
@@ -1005,6 +1051,8 @@
   let enemies = [], items = [], doorList = [];
   let secretList = [], movingSecrets = [];
   let totalEnemies = 0, totalSecrets = 0, secretsFound = 0;
+  // BFS flow field over the tile grid, seeded at the player — see NAVIGATION
+  let navDist = null, navQueue = null, navRebuildT = 0, navSeedX = -1, navSeedY = -1;
   // treasure is the crypto wallets only — the generic item loop also runs over
   // ramen, cells and keycards, and dropLoot() appends to `items` mid-level, so
   // the denominator has to be fixed at parse time from the '$' tiles alone
@@ -1049,6 +1097,11 @@
       hp: spec.hp, maxHp: spec.hp, spec,
       state: 'idle', stateT: 0, atkCd: 0, bob: Math.random() * 6.28,
       alive: true,
+      // which way the body is facing, in world radians. Set wherever the enemy
+      // moves; seeded rather than left undefined so enemySprite can rotate a
+      // guard that has never taken a step.
+      heading: -Math.PI / 2,
+      patrolDir: null, patrolT: Math.random() * 1.2, patrolTX: 0, patrolTY: 0,
       phase: 0, burst: 1, shotsLeft: 1,
       want: type === 'ceo' ? CEO_PHASES[0].want : undefined,
     };
@@ -1107,6 +1160,11 @@
     totalEnemies = enemies.length;
     totalSecrets = secretList.length;
     secretsFound = 0;
+    // sized with the map, so a floor of a different shape cannot read a stale field
+    navDist = new Int32Array(MAP_W * MAP_H).fill(-1);
+    navQueue = new Int32Array(MAP_W * MAP_H);   // hoisted: the field rebuilds ~3x a second
+    navSeedX = navSeedY = -1;
+    navRebuildT = 0;
   }
 
   /**
@@ -1236,6 +1294,103 @@
     if (d < 0.001) return true;
     const hit = castRay(ax, ay, Math.atan2(dy, dx), Math.min(MAX_DEPTH, d + 1));
     return hit.dist >= d - 0.25;
+  }
+
+  // ─── NAVIGATION ─────────────────────────────────────────────
+  //
+  // Enemies used to steer straight at the player, which works right up until a
+  // corner: a guard would close past its own standoff, lose line of sight and
+  // grind along the wall. The fix is a breadth-first flow field over the tile
+  // grid, and there is exactly ONE of them, seeded at the player rather than at
+  // each enemy. Every chaser wants the same destination, so N per-enemy fields
+  // would be N copies of one answer. A 40x40 floor is 1600 cells; rebuilding
+  // three times a second costs nothing.
+  //
+  // `navDist[i]` is the number of tile steps from that tile to the player, or
+  // -1 for unreachable.
+
+  const NAV_REBUILD = 0.35;      // seconds between rebuilds when the player sits still
+  const NAV_DIRS = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+
+  /**
+   * Can a body walk through this tile? Tile-granular sibling of `blockAt`.
+   * Enemies carry no keycards, so a locked door is a wall to them however open
+   * it happens to be — otherwise the field would route a guard at a door it can
+   * never pass and it would stand there.
+   */
+  function navPassable(gx, gy) {
+    if (gx < 0 || gy < 0 || gx >= MAP_W || gy >= MAP_H) return false;
+    if (movingSecrets.length && inSlab(gx + 0.5, gy + 0.5)) return false;
+    const c = grid[gy][gx];
+    if (!c) return true;
+    return c.tag === 'door' && c.lock === null;
+  }
+
+  function navAt(gx, gy) {
+    if (!navDist || gx < 0 || gy < 0 || gx >= MAP_W || gy >= MAP_H) return -1;
+    return navDist[gy * MAP_W + gx];
+  }
+
+  // Flat-array queue with a head index — never Array.prototype.shift(), which is
+  // O(n) and would make this quadratic in the number of tiles.
+  function buildNavField() {
+    if (!navDist) return;
+    const sx = player.x | 0, sy = player.y | 0;
+    if (!navPassable(sx, sy)) return;      // keep the last good field rather than blanking it
+    navDist.fill(-1);
+    navSeedX = sx; navSeedY = sy;
+    const q = navQueue;
+    let head = 0, tail = 0;
+    navDist[sy * MAP_W + sx] = 0;
+    q[tail++] = sy * MAP_W + sx;
+    while (head < tail) {
+      const at = q[head++];
+      const x = at % MAP_W, y = (at / MAP_W) | 0;
+      const d = navDist[at] + 1;
+      for (const [dx, dy] of NAV_DIRS) {
+        const nx = x + dx, ny = y + dy;
+        if (!navPassable(nx, ny)) continue;
+        const ni = ny * MAP_W + nx;
+        if (navDist[ni] >= 0) continue;
+        navDist[ni] = d;
+        q[tail++] = ni;
+      }
+    }
+  }
+
+  function stepNav(dt) {
+    navRebuildT -= dt;
+    // rebuild on the timer, or immediately when the player crosses a tile line —
+    // a stale field is only ever wrong by however far the player has walked
+    if (navRebuildT > 0 && (player.x | 0) === navSeedX && (player.y | 0) === navSeedY) return;
+    navRebuildT = NAV_REBUILD;
+    buildNavField();
+  }
+
+  /**
+   * One step down the flow field.
+   * @returns {{x:number,y:number,gx:number,gy:number}|null} unit vector toward
+   *   the centre of the next tile, or null if this enemy has no route (sealed
+   *   off, or standing on the player's own tile) — callers fall back to steering
+   *   straight at the player, which is what the whole roster did before.
+   */
+  function navStep(e) {
+    const gx = e.x | 0, gy = e.y | 0;
+    const here = navAt(gx, gy);
+    if (here <= 0) return null;
+    let bx = -1, by = -1, best = here;
+    for (const [dx, dy] of NAV_DIRS) {
+      const nx = gx + dx, ny = gy + dy;
+      const d = navAt(nx, ny);
+      if (d < 0 || d >= best) continue;
+      best = d; bx = nx; by = ny;
+    }
+    if (bx < 0) return null;
+    // aim at the tile centre, not the tile edge, or an enemy cutting a corner
+    // clips its shoulder on the wall it is rounding
+    const vx = (bx + 0.5) - e.x, vy = (by + 0.5) - e.y;
+    const len = Math.hypot(vx, vy) || 1;
+    return { x: vx / len, y: vy / len, gx: bx, gy: by };
   }
 
   // ─── INPUT ──────────────────────────────────────────────────
@@ -1667,8 +1822,153 @@
     hurtPlayer(Math.round(e.spec.dmg * falloff * (0.7 + Math.random() * 0.6)));
   }
 
+  // ─── ENEMY MOVEMENT ─────────────────────────────────────────
+  //
+  // Every system that moves a body goes through here: chasing, patrolling and
+  // separation. Two INDEPENDENT ifs, never `if/else if` followed by a bare
+  // `if` — that exact shape once shipped a guard with double sideways speed
+  // (see "Bugs already made here" in reference/CLAUDE.md).
+  const BODY_MARGIN = 0.26;
+
+  function moveEnemy(e, nx, ny) {
+    let moved = false;
+    if (nx && !blockAt(e.x + nx + Math.sign(nx) * BODY_MARGIN, e.y)) { e.x += nx; moved = true; }
+    if (ny && !blockAt(e.x, e.y + ny + Math.sign(ny) * BODY_MARGIN)) { e.y += ny; moved = true; }
+    if (moved) e.heading = Math.atan2(ny, nx);
+    return moved;
+  }
+
+  /**
+   * A chaser whose next waypoint is a shut door leans on it, the same two lines
+   * `use()` runs. Only unlocked doors: `navPassable` already refuses to route
+   * through a locked one, because enemies carry no keycards and a guard queuing
+   * at a door it can never open is worse than one that never came.
+   * `stepDoors` will not close on an occupied tile, so nobody is crushed here.
+   */
+  function openDoorAhead(e, gx, gy) {
+    const c = cellAt(gx, gy);
+    if (!c || c.tag !== 'door' || c.lock !== null || c.phase !== 'closed') return;
+    if (Math.hypot(gx + 0.5 - e.x, gy + 0.5 - e.y) > 1.2) return;
+    c.phase = 'opening';
+    sfx('door');
+  }
+
+  // How much room a body claims. The CEO is two and a half tiles across, so a
+  // single radius would let the drones it summons stand inside its jacket.
+  function bodyRadius(e) { return e.type === 'ceo' ? 0.55 : 0.35; }
+
+  /**
+   * Push overlapping enemies apart. Before this, six seconds of a group chase
+   * left the two closest guards 0.009u apart — one sprite doing the work of
+   * several. O(n²) over live bodies only; at 12-30 enemies that is a few hundred
+   * pairs a frame, and corpses are scenery that must stay where they fell.
+   *
+   * The shove is applied through `moveEnemy`, so separation can never push a
+   * body through a wall or off the map — the one way this kind of fix usually
+   * goes wrong.
+   */
+  function separateEnemies() {
+    for (let i = 0; i < enemies.length; i++) {
+      const a = enemies[i];
+      if (!a.alive) continue;
+      const ra = bodyRadius(a);
+      for (let j = i + 1; j < enemies.length; j++) {
+        const b = enemies[j];
+        if (!b.alive) continue;
+        const R = ra + bodyRadius(b);
+        let dx = b.x - a.x, dy = b.y - a.y;
+        if (dx > R || dx < -R || dy > R || dy < -R) continue;   // cheap reject
+        let d = Math.hypot(dx, dy);
+        if (d >= R) continue;
+        if (d < 1e-4) {
+          // exactly coincident — summoned drones can land like this. Pick a
+          // deterministic axis from the pair's index so the two never argue.
+          dx = ((i + j) & 1) ? 0 : 1; dy = ((i + j) & 1) ? 1 : 0; d = 1;
+        }
+        const shove = (R - d) * 0.5;
+        const ux = dx / d * shove, uy = dy / d * shove;
+        // heading belongs to where a body is *going*, not to being jostled
+        const ha = a.heading, hb = b.heading;
+        moveEnemy(a, -ux, -uy);
+        moveEnemy(b,  ux,  uy);
+        a.heading = ha; b.heading = hb;
+      }
+    }
+  }
+
+  // ─── PATROLS ────────────────────────────────────────────────
+  //
+  // Idle enemies used to stand exactly where the level placed them until they
+  // saw you, so a floor read as a diorama. This is a corridor random-walk, not
+  // pathfinding: pick a cardinal, walk it tile to tile, prefer to keep going
+  // straight, dwell at junctions. `spawnX`/`spawnY` have been on every enemy
+  // since the MVP with nothing reading them; they are the leash anchor, and the
+  // leash is what stops a patrol wandering onto the player's spawn or unpicking
+  // a floor's pacing.
+  const PATROL_LEASH = 6.0;
+  const PATROL_SPEED = 0.4;      // fraction of the enemy's chase speed
+
+  function patrolOpen(e, dir) {
+    const gx = (e.x | 0) + dir[0], gy = (e.y | 0) + dir[1];
+    // a closed door is a wall on patrol: only a chaser opens doors, or a floor
+    // of bored guards would cycle every door on it
+    const c = cellAt(gx, gy);
+    if (c) return false;
+    if (movingSecrets.length && inSlab(gx + 0.5, gy + 0.5)) return false;
+    return Math.hypot(gx + 0.5 - e.spawnX, gy + 0.5 - e.spawnY) <= PATROL_LEASH;
+  }
+
+  function pickPatrolDir(e) {
+    const open = NAV_DIRS.filter(d => patrolOpen(e, d));
+    if (!open.length) { e.patrolDir = null; return; }
+    // keep going straight if we still can — corridors should read as routes
+    if (e.patrolDir && open.some(d => d[0] === e.patrolDir[0] && d[1] === e.patrolDir[1])
+        && Math.random() < 0.72) return;
+    const back = e.patrolDir ? [-e.patrolDir[0], -e.patrolDir[1]] : null;
+    const fwd = back ? open.filter(d => d[0] !== back[0] || d[1] !== back[1]) : open;
+    const from = fwd.length ? fwd : open;          // reverse only out of a dead end
+    e.patrolDir = from[(Math.random() * from.length) | 0];
+  }
+
+  // Latch the destination when the direction is chosen. Deriving it from the
+  // enemy's CURRENT tile every frame walks the target ahead of the body forever
+  // — cross into the next tile and the goal moves with you — so the arrival
+  // test never fires, a direction is never re-picked, and the leash is never
+  // consulted a second time. That shipped for one build and a guard walked a
+  // 30-tile corridor end to end; the leash fixture is what caught it.
+  function patrolAim(e) {
+    e.patrolTX = (e.x | 0) + 0.5 + e.patrolDir[0];
+    e.patrolTY = (e.y | 0) + 0.5 + e.patrolDir[1];
+  }
+
+  function stepPatrol(e, dt) {
+    if (e.type === 'ceo') return;                  // the board does not pace the halls
+    if (e.patrolT > 0) { e.patrolT -= dt; return; }
+    if (!e.patrolDir) {
+      pickPatrolDir(e);
+      if (!e.patrolDir) { e.patrolT = 1.0; return; }
+      patrolAim(e);
+    }
+    const vx = e.patrolTX - e.x, vy = e.patrolTY - e.y;
+    const len = Math.hypot(vx, vy);
+    const sp = e.spec.speed * PATROL_SPEED * dt;
+    if (len > sp && moveEnemy(e, vx / len * sp, vy / len * sp)) return;
+    if (len <= sp) { e.x = e.patrolTX; e.y = e.patrolTY; }   // arrived; else we walked into something
+    const was = e.patrolDir;
+    pickPatrolDir(e);
+    if (!e.patrolDir) { e.patrolT = 1.0; return; }
+    patrolAim(e);
+    // Break stride only where the route actually turns. Dwelling at every tile
+    // centre made a corridor patrol read as a shuffle rather than a walk, and
+    // left a guard covering barely a third of its beat.
+    if (e.patrolDir[0] !== was[0] || e.patrolDir[1] !== was[1]) {
+      e.patrolT = 0.6 + Math.random() * 1.4;
+    }
+  }
+
   // ─── ENEMY FSM ──────────────────────────────────────────────
   function stepEnemies(dt) {
+    if (gameState === 'playing') stepNav(dt);
     for (const e of enemies) {
       e.bob += dt * 2.4;
       if (!e.alive) {
@@ -1687,6 +1987,7 @@
 
       switch (e.state) {
         case 'idle': {
+          stepPatrol(e, dt);
           e.stateT -= dt;
           if (e.stateT <= 0) {
             e.stateT = 0.25;
@@ -1715,17 +2016,26 @@
             e.state = 'attack';
             e.stateT = 0.22;
             e.shotsLeft = e.burst || 1;
+            e.heading = Math.atan2(dy, dx);       // you get shot at face-on
             break;
           }
-          // close the gap, but keep a little standoff
+          // Close the gap, but keep a little standoff. The standoff is only
+          // meaningful with line of sight: holding position at 3.2u through a
+          // wall is how a guard used to freeze one room short of the fight.
           const want = e.want !== undefined ? e.want
                      : e.type === 'guard' ? 3.2 : 2.2;
-          if (dist > want) {
+          if (!los || dist > want) {
             const sp = e.spec.speed * dt;
-            const nx = dx / dist * sp, ny = dy / dist * sp;
-            const B = 0.26;
-            if (!blockAt(e.x + nx + Math.sign(nx) * B, e.y)) e.x += nx;
-            if (!blockAt(e.x, e.y + ny + Math.sign(ny) * B)) e.y += ny;
+            // straight at the player while it can see them — that reads better
+            // in an open room than snapping between tile centres — and down the
+            // flow field the moment the geometry gets in the way
+            const w = los ? null : navStep(e);
+            if (w) {
+              moveEnemy(e, w.x * sp, w.y * sp);
+              openDoorAhead(e, w.gx, w.gy);
+            } else {
+              moveEnemy(e, dx / dist * sp, dy / dist * sp);
+            }
           }
           break;
         }
@@ -1745,6 +2055,7 @@
         }
       }
     }
+    if (gameState === 'playing') separateEnemies();
   }
 
   // ─── ITEMS ──────────────────────────────────────────────────
@@ -1820,10 +2131,32 @@
     }
   }
 
+  /**
+   * Which view of an enemy we are looking at.
+   *
+   * Guards get four rotations. Drones are a symmetric ring of rotors with no
+   * front to speak of, and the CEO is a boss that should always be squaring up
+   * to you, so both stay single-view — as do the firing, dying and dead frames
+   * for everyone (an enemy shooting at you is facing you by definition).
+   *
+   * `view` is the direction from the player TO the enemy, so a heading equal to
+   * it means the guard is walking away and we see its back.
+   */
   function enemySprite(e) {
     if (!e.alive) return e.state === 'dying' ? SPR[e.type + 'Die'] : SPR[e.type + 'Dead'];
     if (e.state === 'attack') return SPR[e.type + 'Fire'];
-    return SPR[e.type];
+    if (e.type !== 'guard') return SPR[e.type];
+    const view = Math.atan2(e.y - player.y, e.x - player.x);
+    let rel = view - e.heading;
+    rel -= Math.PI * 2 * Math.floor((rel + Math.PI) / (Math.PI * 2));   // -> [-π, π)
+    const a = Math.abs(rel);
+    if (a <= Math.PI / 4)     return SPR.guardBack;
+    if (a >= Math.PI * 0.75)  return SPR.guard;
+    // The sprite is named for the way the guard faces ON SCREEN. Which sign of
+    // `rel` that is was measured through the real projection, not derived: the
+    // first version had the pair swapped in all eight viewing cases, and a
+    // mirrored pair is invisible in review. See the rotation test.
+    return rel > 0 ? SPR.guardLeft : SPR.guardRight;
   }
 
   function drawSprites(zbuf, horizon) {

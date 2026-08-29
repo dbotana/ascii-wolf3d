@@ -185,16 +185,95 @@ drones have `burst: 1` and behave exactly as before. Line of sight is a
 distance. Gunfire and barks call `alertNear`, which wakes idle enemies in a
 radius — so a fight pulls in the room, not just the target.
 
-**Two known limitations, both measured, not suspected:**
+### Movement — one flow field, not N searches
 
-- **No pathfinding.** `chase` steers straight at the player with axis-separated
-  collision. A guard sent around a corner closed from 9.5u to 4.2u and jammed —
-  past its own 3.2u standoff, with no line of sight. It slid along the wall and
-  stopped.
-- **No enemy-to-enemy collision.** After 6.6s of a group chase the two closest
-  live enemies sat **0.009u apart**, fully overlapping.
+Everything that moves a body goes through **`moveEnemy`**: chasing, patrolling
+and separation. It is axis-separated collision with two *independent* `if`s.
+Never turn it into `if/else if` followed by a bare `if` — that exact shape once
+shipped a guard with double sideways speed.
 
-Both are in `todo.md` Phase 2. Don't be surprised by them; they're not new bugs.
+**Pathfinding is a single BFS flow field seeded at the player**, not one search
+per enemy. Every chaser wants the same destination, so per-enemy fields would be
+N copies of one answer; `navDist[y * MAP_W + x]` holds the step count to the
+player, `-1` for unreachable. `stepNav` rebuilds it every 0.35s, or immediately
+when the player crosses a tile line. A 40x40 floor is 1600 cells, so this is
+free — but the queue is a flat `Int32Array` with a head index, because
+`Array.prototype.shift()` would make it quadratic.
+
+Measured on a 40x40 floor: **20µs per rebuild**, against a whole frame — enemy
+FSM, wall pass, sprites and all — of 1.9ms. It does not need optimising.
+
+`chase` picks its steering per frame:
+
+```
+line of sight  -> steer straight at the player   (the pre-Phase-2 behaviour, kept:
+                                                  it reads better in an open room
+                                                  than snapping to tile centres)
+no sight       -> navStep(e), falling back to straight-line if the field has no
+                  route (sealed off, or standing on the player's own tile)
+```
+
+**The standoff is gated on line of sight**, and that is not cosmetic. `chase`
+used to hold its 3.2u standoff on raw euclidean distance, so a guard one room
+away would stop 3.2u from a player it could not see and had no route to. That is
+what the "jammed at 4.2u" note in the old todo actually was: with the field
+turned on but the standoff still ungated, the guard walks the corner and *then*
+freezes. Both halves are needed.
+
+`navPassable` is the tile-granular sibling of `blockAt`, with one difference
+that matters: **a locked door is a wall to enemies**, because they carry no
+keycards. Route them at one and they queue against it forever. Unlocked doors
+are passable, and `openDoorAhead` leans on them with the same two lines `use()`
+runs — `stepDoors` already refuses to close on an occupied tile, so nobody gets
+crushed in the frame.
+
+### Separation
+
+`separateEnemies` runs once after the FSM loop, O(n²) over **live** bodies only
+(corpses are scenery and must stay where they fell). Radii are per type — the
+CEO claims 0.55 against everyone else's 0.35, or the drones it summons stand
+inside its jacket. The shove goes through `moveEnemy`, so separation can never
+push a body through a wall; that is the way this kind of fix usually goes wrong.
+Exactly-coincident bodies (which summoned drones really do spawn as) get a
+deterministic axis from the pair's indices rather than a division by zero.
+
+Before this, 6.6s of a group chase left the two closest guards **0.009u apart**.
+It is 0.70u now, and there is an assertion carrying that number.
+
+### Patrols
+
+A corridor random-walk, not pathfinding: pick a cardinal, walk it tile to tile,
+prefer to keep going straight (0.72), dwell 0.6–2.0s at junctions, reverse only
+out of a dead end. **`spawnX`/`spawnY` had been on every enemy since the MVP
+with nothing reading them** — they are the leash anchor, and the 6u leash is
+what stops a patrol unpicking a floor's pacing or wandering onto the player's
+spawn. Patrols treat closed doors as walls: only chasers open doors, or a floor
+of bored guards would cycle every door on it. The CEO does not patrol.
+
+Nothing returns an alerted enemy to patrolling — once woken, woken for good.
+That is Wolf3D's behaviour and it is deliberate, not an oversight.
+
+### Facing
+
+`heading` is world radians, written by `moveEnemy` and snapped at the player on
+entering `attack`. It is seeded at spawn rather than left undefined so
+`enemySprite` can rotate a guard that has never taken a step.
+
+**Guards have four rotations; drones and the CEO have one.** A drone is a
+symmetric ring of rotors with no front, and the CEO should always be squaring up
+to you. Firing, dying and dead frames stay single-view for everyone — an enemy
+shooting at you is facing you by definition. Every rotation keeps the front
+sprite's `wW`/`wH`/`foot`, and **`fire()` deliberately still measures its hit
+span against `SPR[e.type]`**, so turning sideways never makes a guard harder to
+shoot.
+
+> The first implementation had `guardLeft` and `guardRight` **swapped in all
+> eight viewing cases**. It was found by measuring which way the sprite's
+> `centerCol` actually drifts through the game's own projection — not by
+> reasoning about the sign of `atan2`, which is what produced the bug. The
+> rotation test does that same measurement, so the pair cannot silently flip
+> back. This is the same class of bug as the view-dependent door slide still
+> open in Phase 4.
 
 ### The CEO
 
@@ -286,7 +365,7 @@ last floor sets `gameState = 'won'` and shows the OUT banner instead.
 Run both before shipping any change. Neither needs a browser.
 
 ```sh
-node reference/run-tests.js          # 137 assertions against the real game loop
+node reference/run-tests.js          # 177 assertions against the real game loop
 node reference/validate-level.js     # map geometry + key-gated reachability, all 3 floors
 ```
 
@@ -298,7 +377,8 @@ Point it at another build with `load({ htmlPath })`, or
 
 **`run-tests.js`** — boot, render, enemy AI, combat, doors, keycards, pickups,
 push-walls, death, restart, level clear, treasure counters, floor advance, the
-tally payout, and the CEO fight.
+tally payout, the CEO fight, and the Phase 2 movement systems (flow field,
+separation, patrols, rotations).
 
 Two ordering rules bite here. `startLevel()` with no argument restarts the
 **current** floor, so any test that has moved off floor 1 must reset explicitly
@@ -315,6 +395,12 @@ mutation for it and confirm the suite goes red.
 The Phase 1 battery covered the item guard, the treasure counters, the floor
 advance and its carry rules, every branch of the tally payout, and all four
 CEO behaviours (phases, summoning, the kill denominator, the elevator gate).
+
+The Phase 2 battery is 14 bugs across the flow field, door rules, separation,
+patrols and rotations. **Five survived a fully green 181-assertion suite on the
+first run**, and running them down found the two real bugs recorded below. It
+also exposed one assertion that was passing for the wrong reason: the leash
+check was measuring a bound the code was not actually enforcing.
 
 **Fixtures.** `loadWithLevel(rows, opts)` loads the real game with `LEVEL_1`
 swapped for a map you supply, derived from current source so it cannot go stale.
@@ -376,6 +462,24 @@ Both tools exit non-zero on failure, so they drop straight into CI.
 - `pushSecret` guarded its path with `cellAt` and `occupied` but not items, so a
   slab could land on a pickup and seal it away for good. Fixed with `itemAt`.
   Any new guard on a moving thing needs to ask what else can occupy a tile.
+- The `guardLeft` / `guardRight` pair shipped **swapped in all eight viewing
+  cases**, from reasoning about the sign of `atan2` instead of measuring. Any
+  sprite chosen by a relative angle needs its mapping confirmed against the real
+  projection — the test does that rather than hard-coding a pairing, so it stays
+  honest if the camera basis ever changes.
+- `stepPatrol` derived its destination from the enemy's CURRENT tile every
+  frame, so the target walked ahead of the body forever: the arrival test never
+  fired, the direction was never re-picked, and the leash was never consulted
+  again. **Every shipped-level assertion passed** — the floors are open enough
+  that a wandering guard looks like a working guard. It took a fixture that was
+  a single 30-tile corridor, and a 40-second run, to make it visible. Latch a
+  destination when you choose it; never recompute a goal from a position that is
+  moving toward it.
+- Enemies that can actually move made a **pre-existing** door test flaky: a guard
+  now reaches the doorway, and `stepDoors` will not close on an occupied tile.
+  `freezeEnemies()` in `run-tests.js` parks the roster for tests that are about
+  something other than where enemies walk. Expect any test that waits several
+  seconds and assumes empty geometry to need the same treatment.
 - That fix immediately failed three of the shipped level's own push-walls, whose
   treasure pockets were one-wide dead ends — geometry in which a two-tile slide
   can *never* leave the loot reachable, whatever the guard does. `todo.md` had

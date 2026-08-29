@@ -2,40 +2,14 @@
 
 Roadmap for `wolf3d.html`. Three floors, the CEO fight, core combat, sliding
 doors + keycards, secret push-walls, the magazine/feedback pass and the
-end-of-floor tally are in — Phase 1 is done. Open work is ordered roughly by
-value per hour of work; everything finished is collected under **Completed** at
-the bottom.
+end-of-floor tally are in — Phase 1 is done. Phase 2 closed the enemy engine
+gaps: pathfinding, separation, patrols and rotations. Open work is ordered
+roughly by value per hour of work; everything finished is collected under
+**Completed** at the bottom.
 
 File references are to `wolf3d.html` unless noted, and they drift every time the
 file grows — grep the function name if one looks wrong. Line numbers below
 predate the combat-feedback pass and have all shifted; treat them as hints.
-
----
-
-## Phase 2 — engine gaps that will bite as levels get bigger
-
-Both of the first two are **confirmed empirically**, not suspected.
-
-- [ ] **Enemy pathfinding.** `chase` (`:1113`) steers directly at the player with
-  axis-separated collision and no route planning. Measured: a guard asked to
-  reach a player around a corner closed from 9.5u to 4.2u and then jammed —
-  past its own 3.2u standoff, with no line of sight. It slid along the wall and
-  stopped. Fix with a coarse BFS/flow-field over the tile grid, recomputed
-  every ~0.5s per awake enemy (the map is only 40x40, this is cheap), and steer
-  toward the next waypoint instead of at the player.
-- [ ] **Enemy-to-enemy collision.** Measured: after 6.6s of a group chase the two
-  closest live enemies were **0.009u apart** — fully overlapping. Add a cheap
-  separation step in `stepEnemies` (`:1073`): push apart any two live enemies
-  within ~0.7u. O(n²) is fine at 12-30 enemies.
-- [ ] **Enemy patrols.** Idle enemies are stationary (`:1090`) — they stand still
-  until they see you. Give each a waypoint loop or a random-walk-along-corridor
-  behaviour so the floor feels inhabited before the shooting starts.
-- [ ] **Directional enemy sprites.** `enemySprite` (`:1221`) returns one
-  front-facing sprite regardless of viewing angle, so guards always face you
-  even when walking away. Wolf3D used 8 rotations. Even 4 (front/back/left/
-  right), picked from `atan2(e.y - player.y, e.x - player.x)` minus the enemy's
-  own heading, would be a large readability upgrade. Enemies need a `heading`
-  field first — `chase` currently never stores one.
 
 ---
 
@@ -91,9 +65,10 @@ Both of the first two are **confirmed empirically**, not suspected.
   automatically. A pre-commit hook or a GitHub action calling
   `node reference/run-tests.js && node reference/validate-level.js` is the whole
   job.
-- [ ] **Keep the mutation battery.** The suite has been mutation-tested twice by
-  injecting bugs into copies of the game: 16 at the MVP, 20 more over the
-  Phase 1 systems. It catches all of them, but only after the Phase 1 run
+- [ ] **Keep the mutation battery.** The suite has been mutation-tested three
+  times by injecting bugs into copies of the game: 16 at the MVP, 20 more over
+  the Phase 1 systems, 14 over the Phase 2 movement systems — of which **five
+  survived a fully green suite** and two turned out to be real bugs. It catches all of them, but only after the Phase 1 run
   exposed two behaviours with no assertion behind them. Three of the original sixteen
   initially slipped through, and one test was a false pass. Both batteries live
   only in session scratch — porting them to `reference/mutate.js` would keep the
@@ -159,6 +134,65 @@ Both of the first two are **confirmed empirically**, not suspected.
 
 Newest first. Kept for the design notes — several record why an approach that
 looks obvious was not the one taken.
+
+- [x] **Phase 2 — the enemy engine gaps.** All four items, shipped together. The
+  suite went 145 assertions → 191, and a 14-bug mutation battery covers the new
+  systems. **Five of those fourteen initially survived a fully green suite**, and
+  chasing them down found two genuine bugs that the feature tests had missed —
+  see the last two bullets. Green is not the same as covered; that has now been
+  true in this repo three passes running.
+  - *Pathfinding is one flow field, not N searches.* A single BFS over the tile
+    grid seeded at **the player**, rebuilt every 0.35s or the moment the player
+    crosses a tile line. Every chaser wants the same destination, so per-enemy
+    fields would have been N copies of one answer; the original plan's
+    "recompute per awake enemy" was more expensive and no better. `chase` still
+    steers straight at the player whenever it has line of sight — that reads
+    better in an open room than snapping between tile centres — and only drops
+    to the field when geometry gets in the way.
+  - *The standoff had to be gated on sight, and that was the other half of the
+    bug.* The 3.2u standoff was tested against raw euclidean distance, so a
+    guard would freeze 3.2u from a player it could not see and had no route to.
+    Turning the field on alone did not fix the reported jam: the guard walked
+    the corner and then froze one tile short. Both halves were needed, and there
+    is a fixture whose geometry doubles the route back past the player behind a
+    thin wall specifically to hold that gate honest.
+  - *Enemies open unlocked doors, and only unlocked ones.* `navPassable` treats a
+    locked door as a wall, because enemies carry no keycards and routing one at a
+    door it can never open just parks it there. `openDoorAhead` reuses the two
+    lines `use()` runs. Its own lock check is unreachable in play — `navPassable`
+    already filtered — so it is **tested directly** rather than left as a branch
+    nobody has ever seen work: enemies opening locked doors would unpick every
+    keycard gate on all three floors.
+  - *Separation.* O(n²) over live bodies only, per-type radii (the CEO claims
+    0.55 against everyone else's 0.35, or its summoned drones stand inside its
+    jacket), and the shove is applied **through `moveEnemy`** so it can never
+    push a body through a wall. The closest live pair after a 6.6s group chase
+    went from 0.009u to 0.70u.
+  - *Patrols are a leashed corridor random-walk.* Authored waypoint routes were
+    rejected: they would have meant new level syntax, validator rules and edits
+    to all three floors, for a floor that only needs to look inhabited before the
+    first shot. `spawnX`/`spawnY` had been on every enemy since the MVP with
+    nothing reading them; they are the leash anchor.
+  - *Guards got 4 rotations; drones and the CEO did not.* A drone is a symmetric
+    ring of rotors with no front, and the CEO should always be squaring up to
+    you. 8 rotations were rejected because at five columns of ASCII the diagonals
+    are not distinguishable from the cardinals. `fire()` deliberately still
+    measures its hit span against `SPR[e.type]`, so turning sideways never makes
+    a guard harder to shoot.
+  - **The left/right sprite pair shipped swapped in all eight viewing cases.**
+    It was found by measuring which way a guard's `centerCol` actually drifts
+    through the game's own projection — not by reasoning about the sign of
+    `atan2`, which is exactly what produced the bug. The rotation test now does
+    that same measurement rather than asserting a hard-coded pairing, so it
+    cannot silently flip back.
+  - **The patrol target was recomputed from the enemy's current tile every
+    frame**, so it walked ahead of the body forever: the arrival test never
+    fired, the direction was never re-picked, and the leash was never consulted a
+    second time. A guard walked a 30-tile corridor end to end. Every
+    shipped-level assertion passed throughout — the floors are open enough that
+    a wandering guard looks like a working guard. It took a fixture built as a
+    single long corridor, and a 40s run, to make the failure visible. The
+    destination is now latched when the direction is chosen.
 
 - [x] **Phase 1 — the rest of the Wolf3D feature set.** Three items, shipped
   together; the suite went 74 assertions → 145, and a 20-bug mutation battery
