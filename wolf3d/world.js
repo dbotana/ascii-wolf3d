@@ -135,8 +135,19 @@ function mkItem(kind, x, y) {
 }
 
 // ─── GRID QUERIES ───────────────────────────────────────────
+// Is this tile on the floor at all? Five callers ran the same four comparisons
+// inline; nav.js and minimap.js index flat arrays off it, where an out-of-range
+// tile reads a neighbouring row rather than nothing.
+function inMap(x, y) { return x >= 0 && y >= 0 && x < MAP_W && y < MAP_H; }
+
+// Which keycard a lock wants. An ordinary door (`null`) wants none, so callers
+// can ask this about any door without testing for a lock first.
+function hasKey(lock) {
+  return lock === 'red' ? player.keyRed : lock === 'blue' ? player.keyBlue : true;
+}
+
 function cellAt(x, y) {
-  if (x < 0 || y < 0 || x >= MAP_W || y >= MAP_H) return 0;
+  if (!inMap(x, y)) return 0;
   return grid[y][x];
 }
 // solid for movement — an open-enough door lets bodies through
@@ -266,7 +277,7 @@ function pushSecret(s) {
   let span = 0;
   for (let n = 1; n <= 2; n++) {
     const nx = s.gx + dx * n, ny = s.gy + dy * n;
-    if (nx < 0 || ny < 0 || nx >= MAP_W || ny >= MAP_H) break;
+    if (!inMap(nx, ny)) break;
     if (cellAt(nx, ny) || occupied(nx, ny) || itemAt(nx, ny)) break;
     span = n;
   }
@@ -300,8 +311,9 @@ function use() {
   const c = f.cell;
   if (c.tag === 'door') {
     if (c.phase === 'opening' || c.phase === 'open') { c.timer = 4.0; return; }
-    if (c.lock === 'red'  && !player.keyRed)  { toast('SEALED — NEEDS RED KEYCARD');  sfx('deny'); return; }
-    if (c.lock === 'blue' && !player.keyBlue) { toast('SEALED — NEEDS BLUE KEYCARD'); sfx('deny'); return; }
+    if (!hasKey(c.lock)) {
+      toast('SEALED — NEEDS ' + c.lock.toUpperCase() + ' KEYCARD'); sfx('deny'); return;
+    }
     c.phase = 'opening';
     sfx('door');
   } else if (c.secret && c.phase === 'idle') {

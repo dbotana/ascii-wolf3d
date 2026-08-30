@@ -72,23 +72,21 @@ function drawChar(col, row, ch, color) {
 }
 
 // ─── WALL SHADING ───────────────────────────────────────────
-function neonHex(key) {
-  switch (key) {
-    case 'pink':   return COLOR.pink;
-    case 'cyan':   return COLOR.cyan;
-    case 'crt':    return COLOR.crt;
-    case 'window': return COLOR.window;
-    default:       return COLOR.sodium;
-  }
+// NEON_PAL holds the keys, COLOR holds the values — the switch this replaced
+// was a third copy of that pairing, kept in step by hand.
+function neonHex(key) { return COLOR[key] || COLOR.sodium; }
+
+// What a lock is painted, wherever it is painted: the wall face here, and the
+// door glyph on the auto-map.
+function lockColor(lock) {
+  return lock === 'red' ? COLOR.keyRed : lock === 'blue' ? COLOR.keyBlue : COLOR.steel;
 }
 function wallBase(cell) {
   switch (cell.tag) {
     case 'neon':   return neonHex(cell.signColor);
     case 'window': return COLOR.window;
     case 'exit':   return COLOR.crt;
-    case 'door':   return cell.lock === 'red'  ? COLOR.keyRed
-                        : cell.lock === 'blue' ? COLOR.keyBlue
-                        : COLOR.steel;
+    case 'door':   return lockColor(cell.lock);
     default:       return COLOR.slate;
   }
 }

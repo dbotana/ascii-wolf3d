@@ -234,9 +234,9 @@ function updatePrompt() {
   const c = f.cell;
   let msg = null;
   if (c.tag === 'door' && c.phase === 'closed') {
-    if (c.lock === 'red')       msg = player.keyRed  ? 'RED DOOR  [E] OPEN'  : 'RED DOOR  — LOCKED';
-    else if (c.lock === 'blue') msg = player.keyBlue ? 'BLUE DOOR  [E] OPEN' : 'BLUE DOOR — LOCKED';
-    else                        msg = '[E] OPEN';
+    msg = c.lock ? c.lock.toUpperCase() + ' DOOR' +
+                   (hasKey(c.lock) ? '  [E] OPEN' : '  — LOCKED')
+                 : '[E] OPEN';
   } else if (c.tag === 'exit') {
     msg = (boss && boss.alive) ? 'ELEVATOR — HELD BY THE BOARD'
         : levelIndex + 1 >= LEVELS.length ? 'ELEVATOR  [E] SURFACE'

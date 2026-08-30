@@ -51,6 +51,19 @@ function updatePlayer(dt) {
 
 // ─── FRAME ──────────────────────────────────────────────────
 let last = performance.now(), hudTick = 0, animT = 0;
+// Hoisted out of frame(). drawWalls writes every one of COLS entries before
+// anything reads them, so a single buffer for the life of the page is exactly
+// equivalent to a fresh one per frame and stops allocating 60 of them a second.
+const zbuf = new Float32Array(COLS);
+
+// A full-screen wash that fades on its own timer. The muzzle flash and the
+// hurt flash are the same three lines and differ only in colour, length and
+// peak opacity.
+function screenFlash(t, dur, rgb, peak) {
+  if (t <= 0) return;
+  ctx.fillStyle = 'rgba(' + rgb + ',' + (t / dur * peak).toFixed(3) + ')';
+  ctx.fillRect(0, 0, CANVAS_W, CANVAS_H);
+}
 
 function frame(now) {
   const dt = Math.min(0.05, (now - last) / 1000);
@@ -100,7 +113,6 @@ function frame(now) {
   ctx.fillRect(0, 0, CANVAS_W, CANVAS_H);
 
   const horizon = Math.floor(ROWS * 0.5);
-  const zbuf = new Float32Array(COLS);
 
   // ── WALL / FLOOR / CEILING PASS
   drawWalls(zbuf, horizon, animT);
@@ -124,14 +136,8 @@ function frame(now) {
   drawMinimap();
 
   // ── SCREEN FLASHES
-  if (player.flashT > 0) {
-    ctx.fillStyle = 'rgba(255,225,160,' + (player.flashT / 0.09 * 0.13).toFixed(3) + ')';
-    ctx.fillRect(0, 0, CANVAS_W, CANVAS_H);
-  }
-  if (player.hurtT > 0) {
-    ctx.fillStyle = 'rgba(220,30,50,' + (player.hurtT / 0.28 * 0.30).toFixed(3) + ')';
-    ctx.fillRect(0, 0, CANVAS_W, CANVAS_H);
-  }
+  screenFlash(player.flashT, 0.09, '255,225,160', 0.13);   // muzzle
+  screenFlash(player.hurtT,  0.28, '220,30,50',   0.30);   // taking a hit
 
   // ── HUD refresh (cheap, every ~12 frames)
   if ((++hudTick % 12) === 0) syncHud();

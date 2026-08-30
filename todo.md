@@ -70,9 +70,6 @@ number — line numbers drift with every edit, and the file map in
   thin-wall door branch added in Phase 4 divides by the same `cosA`/`sinA` and
   lands harmlessly: a near-zero divisor yields a huge `t`, which fails the
   `t > limit` test and marches on.
-- `zbuf` is a fresh `new Float32Array(COLS)` every frame, allocated in `frame()`
-  in `wolf3d/main.js`. Harmless at 160 columns, but it is per-frame garbage;
-  hoist it if the profile ever matters.
 - `frontCell` (`wolf3d/world.js`) probes three fixed distances (0.6 / 1.1 / 1.6)
   along the facing vector to find what you are trying to use. Crude, and it can
   pick a diagonal neighbour at odd angles.
@@ -93,6 +90,44 @@ number — line numbers drift with every edit, and the file map in
 
 Newest first. Kept for the design notes — several record why an approach that
 looks obvious was not the one taken.
+
+- [x] **A cleanup pass over the rest of `wolf3d/`.** Same brief as the tally
+  split that preceded it — reuse, simplification, dead weight — applied to
+  every other source file rather than to one. Nine files changed, no behaviour
+  moved, 580 assertions and all 161 mutations unchanged.
+
+  - **Three duplicated pairings became one each.** `neonHex`'s five-case switch
+    was a third copy of the `NEON_PAL`/`COLOR` pairing kept in step by hand, and
+    is now `COLOR[key] || COLOR.sodium`. The `red → keyRed / blue → keyBlue /
+    else steel` ternary appeared in `wallBase` and in `miniCell`, and is now
+    `lockColor()`. The four-comparison map-bounds test appeared in five
+    functions across three files, and is now `inMap()`.
+  - **`hasKey(lock)` retired the red/blue branch pairs.** `use()` and
+    `updatePrompt()` each carried one, and each now builds its message from
+    `lock.toUpperCase()`. This is also what fixed `BLUE DOOR — LOCKED`, which
+    had one space where its three siblings had two.
+  - **`zbuf` is hoisted** out of `frame()` — the note that used to sit in the
+    list above. `drawWalls` writes all `COLS` entries before anything reads
+    them, so one buffer for the life of the page is exactly equivalent.
+  - **A stray keycard glyph on the auto-map.** The keycard loop in
+    `drawMinimap` tested `seen` but not the 25x25 window, so a key you had
+    seen and walked away from still drew — at a column outside the map box,
+    loose on the game view. It now makes the same window test the threat loop
+    three lines below it always made. The only behaviour change in the pass,
+    and the one thing here that was a defect rather than a tidy-up.
+  - **`inMap` was measured before it went into `cellAt`,** which the DDA calls
+    ~7700 times a frame: 0.24ns per call, about 1.8µs against a 1.9ms frame.
+    A helper in a hot path is worth a number rather than an opinion.
+  - **What was left alone, and why.** `spriteList`'s three depth loops look
+    like one helper, but `decal-no-depth-bias` anchors the exact `list.push`
+    line a helper would delete. `mkEnemy`'s spec ternary looks like rule 1
+    asking for a table — but rule 1 cites `mkEnemy` as an example of the good
+    pattern, and `e.spec` is mutated in place by `stepCeoPhase`, so a shared
+    table row would need a defensive copy to stay correct. `sfx`'s 23-case
+    switch is already one row per sound; a data table would need a DSL to
+    express it and would read worse. `combat.js` and `enemies.js` were left
+    almost untouched: 62 of the 161 mutations anchor into them, which is the
+    catalog saying that is where behaviour lives.
 
 - [x] **`hud.js` split: the tally moved out to `wolf3d/tally.js`.** 398 lines
   against a 400-line budget, which reads as two lines of headroom and is

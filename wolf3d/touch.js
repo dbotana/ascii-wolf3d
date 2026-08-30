@@ -84,6 +84,16 @@ function markTouchActive() {
   if (stage && stage.classList) stage.classList.add('touch');
 }
 
+// Every way a pointer can stop being down. `pointercancel` is the one that
+// delivers no pointerup — a gesture the system takes over — and without it the
+// stick sticks and the player walks into a wall forever; that is the movement
+// half of the held-fire bug blur and pointerlockchange already guard against.
+function onRelease(node, fn) {
+  node.addEventListener('pointerup', fn);
+  node.addEventListener('pointercancel', fn);
+  node.addEventListener('pointerleave', fn);
+}
+
 function bind(id, type, fn) {
   const node = document.getElementById(id);
   if (!node || !node.addEventListener) return null;
@@ -131,19 +141,13 @@ function tapButton(id, fn) {
     setTouchMove(v.x, v.y, v.run);
     moveKnob(dx, dy);
   });
-  // Every way a touch can stop, including the one that delivers no pointerup:
-  // a gesture the system takes over. Without pointercancel the stick sticks and
-  // the player walks into a wall forever — the movement half of the held-fire
-  // bug that blur and pointerlockchange already exist to prevent.
   const release = e => {
     if (id === null || (e && e.pointerId !== id)) return;
     id = null;
     setTouchMove(0, 0, false);
     moveKnob(0, 0);
   };
-  pad.addEventListener('pointerup', release);
-  pad.addEventListener('pointercancel', release);
-  pad.addEventListener('pointerleave', release);
+  onRelease(pad, release);
 })();
 
 // ── the look surface
@@ -168,9 +172,7 @@ function tapButton(id, fn) {
     addTouchLook(dx * TOUCH_LOOK_RATE);
   });
   const release = e => { if (id !== null && (!e || e.pointerId === id)) id = null; };
-  pad.addEventListener('pointerup', release);
-  pad.addEventListener('pointercancel', release);
-  pad.addEventListener('pointerleave', release);
+  onRelease(pad, release);
 })();
 
 // ── fire, held. Sets both the edge and the held flag, exactly as the mouse
@@ -188,18 +190,13 @@ function tapButton(id, fn) {
       try { btn.setPointerCapture(e.pointerId); } catch (err) { /* still get up */ }
     }
   });
-  const release = () => { mouseHeld = false; };
-  btn.addEventListener('pointerup', release);
-  btn.addEventListener('pointercancel', release);
-  btn.addEventListener('pointerleave', release);
+  onRelease(btn, () => { mouseHeld = false; });
 })();
 
 tapButton('tUse',    () => use());
 tapButton('tReload', () => { if (gameState === 'playing') startReload(); });
 tapButton('tPause',  () => togglePause());
-for (let i = 0; i < 4; i++) {
-  (function (n) { tapButton('tW' + n, () => pickWeapon(n)); })(i);
-}
+for (let i = 0; i < 4; i++) tapButton('tW' + i, () => pickWeapon(i));
 
 // Show the overlay on a device that has no mouse, without waiting for the
 // first touch. A desktop browser matches neither branch and never sees it.

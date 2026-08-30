@@ -28,7 +28,7 @@ const NAV_DIRS = [[1, 0], [-1, 0], [0, 1], [0, -1]];
  * never pass and it would stand there.
  */
 function navPassable(gx, gy) {
-  if (gx < 0 || gy < 0 || gx >= MAP_W || gy >= MAP_H) return false;
+  if (!inMap(gx, gy)) return false;
   if (movingSecrets.length && inSlab(gx + 0.5, gy + 0.5)) return false;
   const c = grid[gy][gx];
   if (!c) return true;
@@ -36,7 +36,7 @@ function navPassable(gx, gy) {
 }
 
 function navAt(gx, gy) {
-  if (!navDist || gx < 0 || gy < 0 || gx >= MAP_W || gy >= MAP_H) return -1;
+  if (!navDist || !inMap(gx, gy)) return -1;
   return navDist[gy * MAP_W + gx];
 }
 

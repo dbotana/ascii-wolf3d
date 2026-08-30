@@ -35,7 +35,7 @@ let miniOn = true;
 function toggleMinimap() { miniOn = !miniOn; return miniOn; }
 
 function markSeen(gx, gy) {
-  if (!seen || gx < 0 || gy < 0 || gx >= MAP_W || gy >= MAP_H) return;
+  if (!seen || !inMap(gx, gy)) return;
   seen[gy * MAP_W + gx] = 1;
 }
 
@@ -75,11 +75,7 @@ function markVisible() {
 // else is structure.
 function miniCell(c) {
   if (!c) return ['·', COLOR.slate];
-  if (c.tag === 'door') {
-    return ['+', c.lock === 'red'  ? COLOR.keyRed
-              : c.lock === 'blue' ? COLOR.keyBlue
-              : COLOR.steel];
-  }
+  if (c.tag === 'door') return ['+', lockColor(c.lock)];
   if (c.tag === 'exit')   return ['X', COLOR.crt];
   if (c.tag === 'window') return ['▒', COLOR.window];
   return ['▒', COLOR.slateHi];
@@ -112,9 +108,13 @@ function drawMinimap() {
     if (it.kind !== 'keyRed' && it.kind !== 'keyBlue') continue;
     const gx = it.x | 0, gy = it.y | 0;
     if (!seen[gy * MAP_W + gx]) continue;
+    // the same window test the threat loop below makes. Without it a key you
+    // have seen and then walked away from still draws, at a column outside the
+    // map box — a loose 'r' sitting on the game view.
+    if (gx < x0 || gy < y0 || gx >= x0 + MINI_TILES || gy >= y0 + MINI_TILES) continue;
+    const red = it.kind === 'keyRed';
     drawChar(MINI_COL0 + (gx - x0), MINI_ROW0 + (gy - y0),
-             it.kind === 'keyRed' ? 'r' : 'b',
-             it.kind === 'keyRed' ? COLOR.keyRed : COLOR.keyBlue);
+             red ? 'r' : 'b', red ? COLOR.keyRed : COLOR.keyBlue);
   }
 
   // Only what is HUNTING you, and only close by. Plotting every body on the

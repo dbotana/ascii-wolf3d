@@ -68,11 +68,11 @@ the bundler and the harness both read it rather than keeping their own list.
 | `wolf3d/art.js` | 307 | `SPR` sprite table, the pistol's `GUN_*` view-model frames |
 | `wolf3d/gore.js` | 107 | `DEATH_SEQ` death-frame sequences, `DECAL_SPR` blood splats |
 | `wolf3d/weapons.js` | 208 | knife / SMG / chaingun art, the `WEAPONS` table, `WEAPON_UNLOCK` |
-| `wolf3d/gfx.js` | 94 | glyph atlas, `drawChar`, wall shading |
+| `wolf3d/gfx.js` | 92 | glyph atlas, `drawChar`, wall shading, `neonHex`/`lockColor` |
 | `wolf3d/audio.js` | 289 | the Web Audio graph, and the `MUSIC` table + its scheduler |
 | `wolf3d/input.js` | 64 | keyboard, mouse-look, pointer lock, the pause hooks |
-| `wolf3d/touch.js` | 215 | the twin-stick overlay: stick math, look pad, buttons |
-| `wolf3d/world.js` | 314 | grid + entities, difficulty, pause, grid queries, doors, push-walls |
+| `wolf3d/touch.js` | 212 | the twin-stick overlay: stick math, look pad, buttons |
+| `wolf3d/world.js` | 326 | grid + entities, difficulty, pause, grid queries (`inMap`, `cellAt`, `hasKey`), doors, push-walls |
 | `wolf3d/level.js` | 183 | `populateEnemies`, `parseLevel` (incl. the door-axis pass), `startLevel`, `nextLevel` |
 | `wolf3d/raycast.js` | 92 | DDA raycast incl. thin-wall doors, `hasLOS`, `spriteSpan` |
 | `wolf3d/nav.js` | 103 | the BFS flow field |
@@ -81,8 +81,8 @@ the bundler and the harness both read it rather than keeping their own list.
 | `wolf3d/render.js` | 399 | `drawWalls`, sprites, decals, the weapon view-model, crosshair, the damage arc |
 | `wolf3d/minimap.js` | 137 | the auto-map: `seen`, the reveal sweep, `drawMinimap` |
 | `wolf3d/hud.js` | 247 | toasts, banners, status bar, health bar, the weapon strip, the objective line |
-| `wolf3d/tally.js` | 168 | the end-of-floor percentage screen, its payout, `clearLevel`, `advanceFromTally` |
-| `wolf3d/main.js` | 197 | `updatePlayer`, `frame`, boot |
+| `wolf3d/tally.js` | 169 | the end-of-floor percentage screen, its payout, `clearLevel`, `advanceFromTally` |
+| `wolf3d/main.js` | 203 | `updatePlayer`, `frame`, boot |
 
 **Order matters only for top-level execution.** Function declarations hoist
 across the whole shared scope, so a function body may call anything in any file

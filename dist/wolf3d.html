@@ -1913,23 +1913,21 @@ function drawChar(col, row, ch, color) {
 }
 
 // ─── WALL SHADING ───────────────────────────────────────────
-function neonHex(key) {
-  switch (key) {
-    case 'pink':   return COLOR.pink;
-    case 'cyan':   return COLOR.cyan;
-    case 'crt':    return COLOR.crt;
-    case 'window': return COLOR.window;
-    default:       return COLOR.sodium;
-  }
+// NEON_PAL holds the keys, COLOR holds the values — the switch this replaced
+// was a third copy of that pairing, kept in step by hand.
+function neonHex(key) { return COLOR[key] || COLOR.sodium; }
+
+// What a lock is painted, wherever it is painted: the wall face here, and the
+// door glyph on the auto-map.
+function lockColor(lock) {
+  return lock === 'red' ? COLOR.keyRed : lock === 'blue' ? COLOR.keyBlue : COLOR.steel;
 }
 function wallBase(cell) {
   switch (cell.tag) {
     case 'neon':   return neonHex(cell.signColor);
     case 'window': return COLOR.window;
     case 'exit':   return COLOR.crt;
-    case 'door':   return cell.lock === 'red'  ? COLOR.keyRed
-                        : cell.lock === 'blue' ? COLOR.keyBlue
-                        : COLOR.steel;
+    case 'door':   return lockColor(cell.lock);
     default:       return COLOR.slate;
   }
 }
@@ -2378,6 +2376,16 @@ function markTouchActive() {
   if (stage && stage.classList) stage.classList.add('touch');
 }
 
+// Every way a pointer can stop being down. `pointercancel` is the one that
+// delivers no pointerup — a gesture the system takes over — and without it the
+// stick sticks and the player walks into a wall forever; that is the movement
+// half of the held-fire bug blur and pointerlockchange already guard against.
+function onRelease(node, fn) {
+  node.addEventListener('pointerup', fn);
+  node.addEventListener('pointercancel', fn);
+  node.addEventListener('pointerleave', fn);
+}
+
 function bind(id, type, fn) {
   const node = document.getElementById(id);
   if (!node || !node.addEventListener) return null;
@@ -2425,19 +2433,13 @@ function tapButton(id, fn) {
     setTouchMove(v.x, v.y, v.run);
     moveKnob(dx, dy);
   });
-  // Every way a touch can stop, including the one that delivers no pointerup:
-  // a gesture the system takes over. Without pointercancel the stick sticks and
-  // the player walks into a wall forever — the movement half of the held-fire
-  // bug that blur and pointerlockchange already exist to prevent.
   const release = e => {
     if (id === null || (e && e.pointerId !== id)) return;
     id = null;
     setTouchMove(0, 0, false);
     moveKnob(0, 0);
   };
-  pad.addEventListener('pointerup', release);
-  pad.addEventListener('pointercancel', release);
-  pad.addEventListener('pointerleave', release);
+  onRelease(pad, release);
 })();
 
 // ── the look surface
@@ -2462,9 +2464,7 @@ function tapButton(id, fn) {
     addTouchLook(dx * TOUCH_LOOK_RATE);
   });
   const release = e => { if (id !== null && (!e || e.pointerId === id)) id = null; };
-  pad.addEventListener('pointerup', release);
-  pad.addEventListener('pointercancel', release);
-  pad.addEventListener('pointerleave', release);
+  onRelease(pad, release);
 })();
 
 // ── fire, held. Sets both the edge and the held flag, exactly as the mouse
@@ -2482,18 +2482,13 @@ function tapButton(id, fn) {
       try { btn.setPointerCapture(e.pointerId); } catch (err) { /* still get up */ }
     }
   });
-  const release = () => { mouseHeld = false; };
-  btn.addEventListener('pointerup', release);
-  btn.addEventListener('pointercancel', release);
-  btn.addEventListener('pointerleave', release);
+  onRelease(btn, () => { mouseHeld = false; });
 })();
 
 tapButton('tUse',    () => use());
 tapButton('tReload', () => { if (gameState === 'playing') startReload(); });
 tapButton('tPause',  () => togglePause());
-for (let i = 0; i < 4; i++) {
-  (function (n) { tapButton('tW' + n, () => pickWeapon(n)); })(i);
-}
+for (let i = 0; i < 4; i++) tapButton('tW' + i, () => pickWeapon(i));
 
 // Show the overlay on a device that has no mouse, without waiting for the
 // first touch. A desktop browser matches neither branch and never sees it.
@@ -2646,8 +2641,19 @@ function mkItem(kind, x, y) {
 }
 
 // ─── GRID QUERIES ───────────────────────────────────────────
+// Is this tile on the floor at all? Five callers ran the same four comparisons
+// inline; nav.js and minimap.js index flat arrays off it, where an out-of-range
+// tile reads a neighbouring row rather than nothing.
+function inMap(x, y) { return x >= 0 && y >= 0 && x < MAP_W && y < MAP_H; }
+
+// Which keycard a lock wants. An ordinary door (`null`) wants none, so callers
+// can ask this about any door without testing for a lock first.
+function hasKey(lock) {
+  return lock === 'red' ? player.keyRed : lock === 'blue' ? player.keyBlue : true;
+}
+
 function cellAt(x, y) {
-  if (x < 0 || y < 0 || x >= MAP_W || y >= MAP_H) return 0;
+  if (!inMap(x, y)) return 0;
   return grid[y][x];
 }
 // solid for movement — an open-enough door lets bodies through
@@ -2777,7 +2783,7 @@ function pushSecret(s) {
   let span = 0;
   for (let n = 1; n <= 2; n++) {
     const nx = s.gx + dx * n, ny = s.gy + dy * n;
-    if (nx < 0 || ny < 0 || nx >= MAP_W || ny >= MAP_H) break;
+    if (!inMap(nx, ny)) break;
     if (cellAt(nx, ny) || occupied(nx, ny) || itemAt(nx, ny)) break;
     span = n;
   }
@@ -2811,8 +2817,9 @@ function use() {
   const c = f.cell;
   if (c.tag === 'door') {
     if (c.phase === 'opening' || c.phase === 'open') { c.timer = 4.0; return; }
-    if (c.lock === 'red'  && !player.keyRed)  { toast('SEALED — NEEDS RED KEYCARD');  sfx('deny'); return; }
-    if (c.lock === 'blue' && !player.keyBlue) { toast('SEALED — NEEDS BLUE KEYCARD'); sfx('deny'); return; }
+    if (!hasKey(c.lock)) {
+      toast('SEALED — NEEDS ' + c.lock.toUpperCase() + ' KEYCARD'); sfx('deny'); return;
+    }
     c.phase = 'opening';
     sfx('door');
   } else if (c.secret && c.phase === 'idle') {
@@ -3134,7 +3141,7 @@ const NAV_DIRS = [[1, 0], [-1, 0], [0, 1], [0, -1]];
  * never pass and it would stand there.
  */
 function navPassable(gx, gy) {
-  if (gx < 0 || gy < 0 || gx >= MAP_W || gy >= MAP_H) return false;
+  if (!inMap(gx, gy)) return false;
   if (movingSecrets.length && inSlab(gx + 0.5, gy + 0.5)) return false;
   const c = grid[gy][gx];
   if (!c) return true;
@@ -3142,7 +3149,7 @@ function navPassable(gx, gy) {
 }
 
 function navAt(gx, gy) {
-  if (!navDist || gx < 0 || gy < 0 || gx >= MAP_W || gy >= MAP_H) return -1;
+  if (!navDist || !inMap(gx, gy)) return -1;
   return navDist[gy * MAP_W + gx];
 }
 
@@ -4339,7 +4346,7 @@ let miniOn = true;
 function toggleMinimap() { miniOn = !miniOn; return miniOn; }
 
 function markSeen(gx, gy) {
-  if (!seen || gx < 0 || gy < 0 || gx >= MAP_W || gy >= MAP_H) return;
+  if (!seen || !inMap(gx, gy)) return;
   seen[gy * MAP_W + gx] = 1;
 }
 
@@ -4379,11 +4386,7 @@ function markVisible() {
 // else is structure.
 function miniCell(c) {
   if (!c) return ['·', COLOR.slate];
-  if (c.tag === 'door') {
-    return ['+', c.lock === 'red'  ? COLOR.keyRed
-              : c.lock === 'blue' ? COLOR.keyBlue
-              : COLOR.steel];
-  }
+  if (c.tag === 'door') return ['+', lockColor(c.lock)];
   if (c.tag === 'exit')   return ['X', COLOR.crt];
   if (c.tag === 'window') return ['▒', COLOR.window];
   return ['▒', COLOR.slateHi];
@@ -4416,9 +4419,13 @@ function drawMinimap() {
     if (it.kind !== 'keyRed' && it.kind !== 'keyBlue') continue;
     const gx = it.x | 0, gy = it.y | 0;
     if (!seen[gy * MAP_W + gx]) continue;
+    // the same window test the threat loop below makes. Without it a key you
+    // have seen and then walked away from still draws, at a column outside the
+    // map box — a loose 'r' sitting on the game view.
+    if (gx < x0 || gy < y0 || gx >= x0 + MINI_TILES || gy >= y0 + MINI_TILES) continue;
+    const red = it.kind === 'keyRed';
     drawChar(MINI_COL0 + (gx - x0), MINI_ROW0 + (gy - y0),
-             it.kind === 'keyRed' ? 'r' : 'b',
-             it.kind === 'keyRed' ? COLOR.keyRed : COLOR.keyBlue);
+             red ? 'r' : 'b', red ? COLOR.keyRed : COLOR.keyBlue);
   }
 
   // Only what is HUNTING you, and only close by. Plotting every body on the
@@ -4677,9 +4684,9 @@ function updatePrompt() {
   const c = f.cell;
   let msg = null;
   if (c.tag === 'door' && c.phase === 'closed') {
-    if (c.lock === 'red')       msg = player.keyRed  ? 'RED DOOR  [E] OPEN'  : 'RED DOOR  — LOCKED';
-    else if (c.lock === 'blue') msg = player.keyBlue ? 'BLUE DOOR  [E] OPEN' : 'BLUE DOOR — LOCKED';
-    else                        msg = '[E] OPEN';
+    msg = c.lock ? c.lock.toUpperCase() + ' DOOR' +
+                   (hasKey(c.lock) ? '  [E] OPEN' : '  — LOCKED')
+                 : '[E] OPEN';
   } else if (c.tag === 'exit') {
     msg = (boss && boss.alive) ? 'ELEVATOR — HELD BY THE BOARD'
         : levelIndex + 1 >= LEVELS.length ? 'ELEVATOR  [E] SURFACE'
@@ -4735,13 +4742,12 @@ function openTally(finalFloor) {
     ],
     stage: 0,        // 0 = time row, 1..3 = the ratio rows, 4 = score + hint
     stageT: 0,
-    shown: [0, 0, 0],
     lastTick: [-1, -1, -1],
     done: false,
   };
   el('tTitle').textContent = finalFloor ? 'ARCOLOGY CLEARED' : 'FLOOR CLEARED';
   el('tSub').textContent = 'FLOOR ' + (levelIndex + 1) + '  ·  ' + FLOOR_NAMES[levelIndex];
-  for (const id of ['Time', 'Kill', 'Secret', 'Treasure']) {
+  for (const id of ['Time', ...tally.rows.map(r => r.id)]) {
     const r = el('tRow' + id);
     r.classList.add('hide');
     r.classList.remove('perfect');
@@ -4759,6 +4765,15 @@ function hideTally() {
   el('tally').classList.remove('show');
 }
 
+// Painted identically by the roll-up and by the skip. The payout beside it
+// stays duplicated on purpose: `tally-skip-pays-nothing` mutates finishTally's
+// copy, and one shared site would make that divergence unexpressible.
+function paintTimeRow() {
+  el('tRowTime').classList.remove('hide');
+  el('tTimeB').textContent = 'PAR ' + mmss(tally.par) +
+    (tally.timeBonus > 0 ? '  +' + tally.timeBonus : '');
+}
+
 function paintScoreRow() {
   el('tScore').textContent = 'SCORE ' + String(player.score).padStart(6, '0');
 }
@@ -4767,7 +4782,6 @@ function paintScoreRow() {
 // finishTally(), so skipping the animation pays out exactly the same.
 function settleRow(i) {
   const r = tally.rows[i];
-  tally.shown[i] = r.pct;
   el('t' + r.id).textContent = r.pct + '%';
   el('tRow' + r.id).classList.remove('hide');
   if (r.pct >= 100 && !r.paid) {
@@ -4785,9 +4799,7 @@ function finishTally() {
     tally.timePaid = true;
     player.score += tally.timeBonus;
   }
-  el('tRowTime').classList.remove('hide');
-  el('tTimeB').textContent = 'PAR ' + mmss(tally.par) +
-    (tally.timeBonus > 0 ? '  +' + tally.timeBonus : '');
+  paintTimeRow();
   for (let i = 0; i < tally.rows.length; i++) settleRow(i);
   paintScoreRow();
   el('tScore').classList.remove('hide');
@@ -4796,7 +4808,6 @@ function finishTally() {
     : 'press E to descend  ·  P to replay this floor';
   el('tHint').classList.remove('hide');
   tally.done = true;
-  tally.stage = 5;
   sfx('clear');
   syncHud();
 }
@@ -4809,9 +4820,7 @@ function stepTally(dt) {
     if (!tally.timePaid) {
       tally.timePaid = true;
       player.score += tally.timeBonus;
-      el('tRowTime').classList.remove('hide');
-      el('tTimeB').textContent = 'PAR ' + mmss(tally.par) +
-        (tally.timeBonus > 0 ? '  +' + tally.timeBonus : '');
+      paintTimeRow();
       sfx('pickup');
     }
     if (tally.stageT >= ROW_GAP) { tally.stage = 1; tally.stageT = 0; }
@@ -4828,7 +4837,6 @@ function stepTally(dt) {
   el('tRow' + r.id).classList.remove('hide');
   const k = Math.min(1, tally.stageT / ROW_ROLL);
   const v = Math.round(r.pct * k);
-  tally.shown[i] = v;
   el('t' + r.id).textContent = v + '%';
   // one tick every few percent, so a 100% row is a run of ticks and a 0% row
   // is a single one — the audio reads as the number climbing
@@ -4913,6 +4921,19 @@ function updatePlayer(dt) {
 
 // ─── FRAME ──────────────────────────────────────────────────
 let last = performance.now(), hudTick = 0, animT = 0;
+// Hoisted out of frame(). drawWalls writes every one of COLS entries before
+// anything reads them, so a single buffer for the life of the page is exactly
+// equivalent to a fresh one per frame and stops allocating 60 of them a second.
+const zbuf = new Float32Array(COLS);
+
+// A full-screen wash that fades on its own timer. The muzzle flash and the
+// hurt flash are the same three lines and differ only in colour, length and
+// peak opacity.
+function screenFlash(t, dur, rgb, peak) {
+  if (t <= 0) return;
+  ctx.fillStyle = 'rgba(' + rgb + ',' + (t / dur * peak).toFixed(3) + ')';
+  ctx.fillRect(0, 0, CANVAS_W, CANVAS_H);
+}
 
 function frame(now) {
   const dt = Math.min(0.05, (now - last) / 1000);
@@ -4962,7 +4983,6 @@ function frame(now) {
   ctx.fillRect(0, 0, CANVAS_W, CANVAS_H);
 
   const horizon = Math.floor(ROWS * 0.5);
-  const zbuf = new Float32Array(COLS);
 
   // ── WALL / FLOOR / CEILING PASS
   drawWalls(zbuf, horizon, animT);
@@ -4986,14 +5006,8 @@ function frame(now) {
   drawMinimap();
 
   // ── SCREEN FLASHES
-  if (player.flashT > 0) {
-    ctx.fillStyle = 'rgba(255,225,160,' + (player.flashT / 0.09 * 0.13).toFixed(3) + ')';
-    ctx.fillRect(0, 0, CANVAS_W, CANVAS_H);
-  }
-  if (player.hurtT > 0) {
-    ctx.fillStyle = 'rgba(220,30,50,' + (player.hurtT / 0.28 * 0.30).toFixed(3) + ')';
-    ctx.fillRect(0, 0, CANVAS_W, CANVAS_H);
-  }
+  screenFlash(player.flashT, 0.09, '255,225,160', 0.13);   // muzzle
+  screenFlash(player.hurtT,  0.28, '220,30,50',   0.30);   // taking a hit
 
   // ── HUD refresh (cheap, every ~12 frames)
   if ((++hudTick % 12) === 0) syncHud();

@@ -43,13 +43,12 @@ function openTally(finalFloor) {
     ],
     stage: 0,        // 0 = time row, 1..3 = the ratio rows, 4 = score + hint
     stageT: 0,
-    shown: [0, 0, 0],
     lastTick: [-1, -1, -1],
     done: false,
   };
   el('tTitle').textContent = finalFloor ? 'ARCOLOGY CLEARED' : 'FLOOR CLEARED';
   el('tSub').textContent = 'FLOOR ' + (levelIndex + 1) + '  ·  ' + FLOOR_NAMES[levelIndex];
-  for (const id of ['Time', 'Kill', 'Secret', 'Treasure']) {
+  for (const id of ['Time', ...tally.rows.map(r => r.id)]) {
     const r = el('tRow' + id);
     r.classList.add('hide');
     r.classList.remove('perfect');
@@ -67,6 +66,15 @@ function hideTally() {
   el('tally').classList.remove('show');
 }
 
+// Painted identically by the roll-up and by the skip. The payout beside it
+// stays duplicated on purpose: `tally-skip-pays-nothing` mutates finishTally's
+// copy, and one shared site would make that divergence unexpressible.
+function paintTimeRow() {
+  el('tRowTime').classList.remove('hide');
+  el('tTimeB').textContent = 'PAR ' + mmss(tally.par) +
+    (tally.timeBonus > 0 ? '  +' + tally.timeBonus : '');
+}
+
 function paintScoreRow() {
   el('tScore').textContent = 'SCORE ' + String(player.score).padStart(6, '0');
 }
@@ -75,7 +83,6 @@ function paintScoreRow() {
 // finishTally(), so skipping the animation pays out exactly the same.
 function settleRow(i) {
   const r = tally.rows[i];
-  tally.shown[i] = r.pct;
   el('t' + r.id).textContent = r.pct + '%';
   el('tRow' + r.id).classList.remove('hide');
   if (r.pct >= 100 && !r.paid) {
@@ -93,9 +100,7 @@ function finishTally() {
     tally.timePaid = true;
     player.score += tally.timeBonus;
   }
-  el('tRowTime').classList.remove('hide');
-  el('tTimeB').textContent = 'PAR ' + mmss(tally.par) +
-    (tally.timeBonus > 0 ? '  +' + tally.timeBonus : '');
+  paintTimeRow();
   for (let i = 0; i < tally.rows.length; i++) settleRow(i);
   paintScoreRow();
   el('tScore').classList.remove('hide');
@@ -104,7 +109,6 @@ function finishTally() {
     : 'press E to descend  ·  P to replay this floor';
   el('tHint').classList.remove('hide');
   tally.done = true;
-  tally.stage = 5;
   sfx('clear');
   syncHud();
 }
@@ -117,9 +121,7 @@ function stepTally(dt) {
     if (!tally.timePaid) {
       tally.timePaid = true;
       player.score += tally.timeBonus;
-      el('tRowTime').classList.remove('hide');
-      el('tTimeB').textContent = 'PAR ' + mmss(tally.par) +
-        (tally.timeBonus > 0 ? '  +' + tally.timeBonus : '');
+      paintTimeRow();
       sfx('pickup');
     }
     if (tally.stageT >= ROW_GAP) { tally.stage = 1; tally.stageT = 0; }
@@ -136,7 +138,6 @@ function stepTally(dt) {
   el('tRow' + r.id).classList.remove('hide');
   const k = Math.min(1, tally.stageT / ROW_ROLL);
   const v = Math.round(r.pct * k);
-  tally.shown[i] = v;
   el('t' + r.id).textContent = v + '%';
   // one tick every few percent, so a 100% row is a run of ticks and a 0% row
   // is a single one — the audio reads as the number climbing
