@@ -11,7 +11,10 @@ pause, music, death frames and blood, and a HUD that no longer escapes the CRT
 overlay. Phase 5 is the infrastructure pass: CI, the mutation battery kept as
 a tool rather than rebuilt every time, persistent high scores, touch controls
 and a deployment story. Phase 6 closed every coverage gap the battery had
-triaged, and the battery now reports none. Open work is
+triaged, and the battery now reports none. Phase 7 is the navigation pass: the
+three floors rewritten to one layout language, an auto-map and an objective
+line, and a weapon roster you earn five kills at a time rather than one that
+ships fully owned and entirely invisible. Open work is
 ordered roughly by value per hour of work; everything finished is collected
 under **Completed** at the bottom.
 
@@ -47,6 +50,24 @@ number — line numbers drift with every edit, and the file map in
   fact rather than something re-derived by hand every few phases; then check
   whether the boot bound *should* have caught it, because a `< 500` check that
   sails through an unbounded palette is measuring the wrong thing.
+
+- [ ] **`hud.js` is at 398 lines against the 400-line budget, and that is a
+  signal rather than headroom.** Phase 7 added the weapon strip and the
+  objective line to it, both of which belong there — it is the file that owns
+  the DOM half of the interface. What does not have to be there is the
+  end-of-floor tally: `openTally` / `stepTally` / `finishTally` / the payout
+  table are ~120 lines of a self-contained screen that runs at one moment in
+  the game and shares nothing with the status bar but `el()`. Splitting it to
+  `wolf3d/tally.js` puts hud.js back near 280 and costs one `<script>` tag in
+  document order. Rule 4 says a file past 400 is a signal to split, not a
+  target to fill; 398 is filling it.
+
+- [ ] **`PAR_TIME` has not been re-timed since the floors were rewritten.** It
+  is still `[150, 180, 210]`, measured against maps that were four or five very
+  large open halls. The new floors have a spine and a ring and traverse faster,
+  so the time bonus (10/sec under par) is probably now more generous than it
+  reads. It wants a stopwatch on a real playthrough at BRING 'EM ON, not a
+  guess — which is why it was left alone rather than adjusted blind.
 
 - [ ] **`separateEnemies` shoves exactly-coincident bodies the wrong way, once.**
   The coincident branch substitutes `d = 1` as a direction magnitude, and that
@@ -108,6 +129,79 @@ number — line numbers drift with every edit, and the file map in
 
 Newest first. Kept for the design notes — several record why an approach that
 looks obvious was not the one taken.
+
+- [x] **Phase 7 — the navigation pass, and earning the roster.** Prompted by a
+  full playthrough that finished **on the starting pistol**, on floors the
+  player could not read. Both halves of that turned out to be the same bug: the
+  game never told anyone anything.
+  - **The roster was already there.** `weapons: [1, 1, 1, 1]`, keys `1`-`4`
+    already bound to `selectWeapon`, four touch buttons already wired. Nothing
+    on screen mentioned any of it — the status bar showed one name, the splash
+    key list omitted the number keys entirely, and the touch buttons had no
+    owned-or-not styling. The feature was not missing; it was invisible. Worth
+    writing down because the instinct on reading the report was to go and build
+    a weapon-pickup system, and the first hour of the pass would have been spent
+    on something the game already had.
+  - **So the guns are earned instead.** `WEAPON_UNLOCK = [0, 0, 5, 10]` is a
+    column of the `WEAPONS` table — cumulative kills for the run — and
+    `checkWeaponUnlock()` grants the first row you have paid for and **puts it
+    straight up**. A weapon you have to go and select is one a player never
+    learns they own, which is the whole lesson of the paragraph above.
+    `player.runKills` is deliberately not `player.kills`: `startLevel` zeroes
+    that every floor for the tally's per-floor ratio, so spending it here would
+    reset progress on every descent and make the chaingun cost ten kills on one
+    floor. The grant carries 20 rounds, because a 50-round chaingun over a
+    24-round reserve is two seconds of trigger.
+  - **The floors were four or five very large open halls each.** Rewritten to
+    one layout language rather than three maps: a 3-wide spine north from the
+    spawn with every room hanging off it, bays of about 7x6 instead of halls,
+    locked doors *on* the spine so the floor states its puzzle before it asks
+    you to solve it, and a ring corridor so backtracking is never retracing.
+    Written up in `reference/CLAUDE.md`.
+  - *Two shape bugs the validator caught on the first run, and two it could
+    not.* It refused three free-standing doors — a door in a 3-wide spine is
+    flanked by nothing — which is why `gate()` in the builder narrows the spine
+    to one tile. What it happily passed was a 3-wide secret pocket sitting flush
+    against the 3-wide spine, on two floors: legal geometry, reachable loot, and
+    a "secret" you walk into without ever finding the push-wall. Found by
+    reading the printed grid. **The validator proves a floor is playable, not
+    that it is the floor you meant.**
+  - **The auto-map samples along its rays rather than marking what they hit.**
+    Marking hit cells alone fills in the walls across a room while the floor
+    between them stays blank. It plots alerted enemies within 8u and no others:
+    what is hunting you is information you earned by making noise, where every
+    body on the floor stands is a wallhack.
+  - *Five tests carried map coordinates as literals.* Four spelled `20.5 / 38.5`
+    — floor 1's spawn corner at the time, and the south window wall after the
+    rewrite, so the player sat inside a wall and the flow field silently refused
+    to build. The CEO standoff test had `x = 8.5`, inside the old boardroom. All
+    five now derive their spot from the floor.
+  - *And the battery found a flaky control by reporting the opposite of one.*
+    `ray-axis-vs-side` is marked `unkillable`, and it came back MARKED, BUT
+    DIED — on the CEO fixture's control, which proves a guard patrols while the
+    boss does not. That control measured **net displacement** from spawn over
+    8s, bounded at 0.25u, and a patrol reverses out of dead ends: twelve seeded
+    trials put it anywhere from 0.14u to 4.09u. Accumulated path length is
+    2.71-4.09 over the same trials. A flake in a control turns an unkillable
+    into a false kill, which is the one direction the battery's asymmetry does
+    NOT hide — so this was visible only because a marked mutation "died".
+  - **And the rewrite disarmed the Phase 6 arc A/B without touching it.** Its
+    idle arm was a flat `run(FRAMES)` on a floor whose spawn was a quiet corner;
+    the new floor 1 spawns you in an atrium with four guards, so the idle arm
+    took fire, drew arcs of its own and then died. 310 entries against the
+    driven arm's 265 — a cost of **-45** against a bound of `< 24` — and
+    `arc-alpha-unquantised` survived a fully green suite. Both arms now freeze
+    the roster and top up health. Phase 6's lesson was that the arms must start
+    equally cold; this is the sibling: **they have to stay equal, and an idle
+    arm is only idle if the level lets it be.** Found only because the battery
+    was re-run after the maps changed — nothing about redrawing a floor looks
+    like it touches the glyph atlas.
+  - *And one new assertion could not fail.* The ammo-with-the-gun check set
+    `player.ammo = 30`, killed a guard through a helper that sets
+    `player.ammo = 200` itself, and asserted `> 30`. The mutation deleting the
+    grant survived a green suite. Same family as the Phase 6 atlas A/Bs: ask
+    what else moves the number you are measuring. Ten Phase 7 mutations, all
+    killed once that was split out.
 
 - [x] **Phase 6 — closing the coverage gaps.** All fifteen, in one pass. The
   suite went 463 assertions → 523 and the battery now reports **0 known gaps**:

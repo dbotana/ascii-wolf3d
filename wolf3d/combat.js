@@ -37,6 +37,63 @@ function selectWeapon(i) {
   return true;
 }
 
+// ─── EARNING THE ROSTER ─────────────────────────────────────
+//
+// The guns are a reward, not a menu. WEAPON_UNLOCK is a column of the WEAPONS
+// table, so this is a walk rather than a branch per weapon, and a fifth gun
+// needs nothing here.
+
+/**
+ * Kills earn guns. Called once per kill from fire()'s death branch.
+ *
+ * Grants the first unowned weapon the run has paid for and puts it straight
+ * up — Wolf3D hands you the gun the moment you find it, and a weapon you have
+ * to go and select is a weapon a player never learns they have. One per kill:
+ * the thresholds are far enough apart that two can never come due together,
+ * and returning keeps the toast readable if they ever are.
+ *
+ * Ownership is written BEFORE selectWeapon, which refuses an index you do not
+ * own. The ammo comes with it because the reserve is sized for the pistol —
+ * unlocking a 50-round chaingun over 24 rounds of reserve is under two seconds
+ * of trigger, which reads as a broken reward rather than a generous one.
+ */
+function checkWeaponUnlock() {
+  for (let i = 0; i < WEAPONS.length; i++) {
+    if (player.weapons[i] || player.runKills < WEAPON_UNLOCK[i]) continue;
+    player.weapons[i] = 1;
+    player.ammo = Math.min(99, player.ammo + 20);
+    toast(WEAPONS[i].name + ' UNLOCKED  \u00b7  PRESS [' + (i + 1) + ']');
+    selectWeapon(i);
+    return true;
+  }
+  return false;
+}
+
+/**
+ * The player-facing wrapper around selectWeapon, and what the number keys and
+ * the touch buttons actually call.
+ *
+ * selectWeapon returns a silent false for four different refusals and the
+ * suite and the mutation catalog both pin that contract, so the one refusal a
+ * player can act on — "you have not earned it yet" — is answered here instead
+ * of inside it. Saying how many kills are left is the whole point: a key that
+ * does nothing teaches a player the key does not exist.
+ */
+function pickWeapon(i) {
+  if (selectWeapon(i)) return true;
+  if (gameState === 'playing' && WEAPONS[i] && !player.weapons[i]) {
+    toast(WEAPONS[i].name + '  \u00b7  ' + player.runKills + '/' + WEAPON_UNLOCK[i] + ' KILLS');
+    sfx('deny');
+  }
+  return false;
+}
+
+/** Back to the cold-start loadout. Called by startLevel on a non-carry start. */
+function resetWeapons() {
+  player.runKills = 0;
+  player.weapons = WEAPON_UNLOCK.map(n => (n === 0 ? 1 : 0));
+}
+
 // ─── COMBAT ─────────────────────────────────────────────────
 // Reserve rounds live in player.ammo; player.clip is what is actually seated.
 // Firing empties the clip, then the reload cycle moves reserve into it.
@@ -136,10 +193,12 @@ function fire() {
     best.state = 'dying';
     best.stateT = 0;
     player.kills++;
+    player.runKills++;
     player.score += KILL_SCORE[best.type] || 150;
     dropLoot(best);
     spillBlood(best);
     sfx('kill');
+    checkWeaponUnlock();      // before syncHud, so the strip paints the new gun
     syncHud();
   } else {
     addDmgPop(best, dmg, false);

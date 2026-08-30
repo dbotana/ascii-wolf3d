@@ -11,6 +11,10 @@ let secretList = [], movingSecrets = [];
 let totalEnemies = 0, totalSecrets = 0, secretsFound = 0;
 // BFS flow field over the tile grid, seeded at the player — see NAVIGATION
 let navDist = null, navQueue = null, navRebuildT = 0, navSeedX = -1, navSeedY = -1;
+// the auto-map's exploration record: 1 where the player has stood or looked.
+// Sized with the map in parseLevel, like navDist, so a floor of a different
+// shape cannot read a stale one. See wolf3d/minimap.js.
+let seen = null;
 // treasure is the crypto wallets only — the generic item loop also runs over
 // ramen, cells and keycards, and dropLoot() appends to `items` mid-level, so
 // the denominator has to be fixed at parse time from the '$' tiles alone
@@ -22,10 +26,15 @@ const player = {
   keyRed: false, keyBlue: false,
   fireCd: 0, bob: 0, hurtT: 0, flashT: 0,
   reloadT: 0, clip: CLIP_SIZE,
-  // Which weapon is up, and which ones you own. Everything is unlocked today;
-  // `weapons` exists so drops or level pickups are a one-line change rather
-  // than a new concept — selectWeapon already refuses an index that is 0 here.
-  weapon: PISTOL, weapons: [1, 1, 1, 1],
+  // Which weapon is up, and which ones you own. You start with the knife and
+  // the pistol; the SMG and the chaingun are earned — see WEAPON_UNLOCK and
+  // checkWeaponUnlock(). selectWeapon refuses any index that is 0 here.
+  weapon: PISTOL, weapons: [1, 1, 0, 0],
+  // Kills for the whole RUN, which is what buys guns. Deliberately NOT
+  // player.kills: startLevel zeroes that every floor because the tally reports
+  // a per-floor ratio, so spending it here would reset your progress toward
+  // the next weapon on every descent.
+  runKills: 0,
   // reloadMax latches the current weapon's cycle length so the view-model
   // animation stays correct for magazines that take longer than the pistol's.
   reloadMax: RELOAD_TIME,

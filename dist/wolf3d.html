@@ -191,6 +191,60 @@
   #sKeys i.red.on  { background: #FF3B4E; border-color: #FF8A96; box-shadow: 0 0 8px #FF3B4E; }
   #sKeys i.blue.on { background: #4FA8FF; border-color: #A6D4FF; box-shadow: 0 0 8px #4FA8FF; }
 
+  /* ── the weapon strip ─────────────────────────────────────
+     Four slots rather than one name, because the single name was the whole
+     reason a playthrough could end without the player learning the other
+     three exist. A locked slot shows its price in kills, so the strip is
+     also the progress bar toward the next gun. */
+  #sWeapons { display: flex; gap: 4px; justify-content: center; margin-top: 3px; }
+  #sWeapons i {
+    display: block;
+    font-family: 'IBM Plex Mono', monospace;
+    font-style: normal;
+    font-size: 9px; letter-spacing: 0.08em;
+    padding: 3px 5px;
+    min-width: 40px; text-align: center;
+    border: 1px solid rgba(255,255,255,0.12);
+    background: rgba(255,255,255,0.03);
+    color: rgba(255,255,255,0.28);
+    white-space: nowrap;
+  }
+  /* owned but holstered: readable, not shouting */
+  #sWeapons i.owned {
+    border-color: rgba(255,149,0,0.35);
+    background: rgba(255,149,0,0.07);
+    color: rgba(255,208,122,0.75);
+  }
+  /* in your hands */
+  #sWeapons i.on {
+    border-color: rgba(255,149,0,0.9);
+    background: rgba(255,149,0,0.20);
+    color: #FFD07A;
+    text-shadow: 0 0 8px rgba(255,149,0,0.7);
+  }
+  /* the kill the strip is counting down to */
+  #sWeapons i.locked { color: rgba(127,255,107,0.40); }
+
+  /* ── the objective line ───────────────────────────────────
+     What you are for on this floor, in three words. It names the goal and
+     never the corridor — updatePrompt already handles the at-the-door case. */
+  #objective {
+    position: absolute;
+    left: 50%; bottom: 74px;
+    transform: translateX(-50%);
+    z-index: 3;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 10px; letter-spacing: 0.24em;
+    text-transform: uppercase;
+    color: rgba(127,255,107,0.62);
+    text-shadow: 0 0 8px rgba(127,255,107,0.30);
+    pointer-events: none;
+    white-space: nowrap;
+    opacity: 0;
+    transition: opacity 0.3s ease;
+  }
+  #objective.show { opacity: 1; }
+
   /* ── boss bar: only up while the CEO is awake and alive ──── */
   #bossBar {
     position: absolute;
@@ -553,6 +607,16 @@
     color: rgba(127,255,107,0.7);
   }
   #touch .tw:active { background: rgba(127,255,107,0.18); color: var(--crt); }
+  /* Owned, holstered, locked — the same three states the desktop strip shows.
+     Without these the row is four identical buttons, three of which silently
+     do nothing, which is the touch half of the bug this whole pass is about. */
+  #touch .tw.owned { border-color: rgba(255,149,0,0.45); color: rgba(255,208,122,0.85); }
+  #touch .tw.on {
+    border-color: var(--sodium);
+    background: rgba(255,149,0,0.22);
+    color: #FFD07A;
+  }
+  #touch .tw.locked { opacity: 0.42; }
 
   #tPause {
     pointer-events: auto;
@@ -598,6 +662,7 @@
   </div>
 
   <div id="prompt"></div>
+  <div id="objective"></div>
   <div id="toast"></div>
 
   <div id="statusbar">
@@ -610,7 +675,11 @@
     <div class="slot" id="sHpWrap"><span class="lbl">health</span><span class="val" id="sHp">100</span>
       <div id="hpBar"><div id="hpChip"></div><div id="hpFill"></div></div>
     </div>
-    <div class="slot"><span class="lbl">weapon</span><span class="val" id="sWeapon">PISTOL</span></div>
+    <div class="slot"><span class="lbl">weapon</span>
+      <div id="sWeapons">
+        <i id="sW0"></i><i id="sW1"></i><i id="sW2"></i><i id="sW3"></i>
+      </div>
+    </div>
     <div class="slot"><span class="lbl">ammo</span><span class="val" id="sAmmo">8/24</span></div>
     <div class="slot"><span class="lbl">keycards</span>
       <div id="sKeys"><i class="red"></i><i class="blue"></i></div>
@@ -682,7 +751,9 @@
       <kbd>&uArr;</kbd> run<br>
       <kbd>Space</kbd> / click fire &nbsp;
       <kbd>E</kbd> use door &middot; switch &middot; search walls &nbsp;
-      <kbd>R</kbd> reload<br>
+      <kbd>R</kbd> reload &nbsp;
+      <kbd>1</kbd>&hellip;<kbd>4</kbd> swap weapon &nbsp;
+      <kbd>Tab</kbd> map<br>
       <kbd>P</kbd> restart floor &nbsp; <kbd>M</kbd> mute &nbsp; <kbd>Esc</kbd> pause &middot; release mouse
     </div>
     <small>click to enter</small>
@@ -961,145 +1032,181 @@ function paintScores() {
 // them by that token: validate-level.js scrapes them without booting the game,
 // and harness.js loadWithLevel() substitutes a fixture into LEVEL_1. Inlining
 // them into the LEVELS literal would blind both.
-
+//
+// ─── HOW THESE FLOORS ARE SHAPED ────────────────────────────
+// The first draft was four or five very large open halls per floor, and keys,
+// doors and enemies all dissolved into that space. Every floor here is built
+// the same way instead:
+//
+//   * ONE 3-wide spine runs north from the spawn to the elevator, and every
+//     room hangs off it. You are always at most one turn from a corridor you
+//     recognise. The spawn faces along it — startLevel sets the heading to
+//     north unconditionally.
+//   * Rooms are bays of about 7x6, never halls. A room you can take in at a
+//     glance is a room you can find a keycard in.
+//   * Locked doors sit ON the spine, so you meet the lock before you go
+//     looking for its key and the floor states its own puzzle up front. Each
+//     door narrows the spine to one tile, which is also what gives the slab an
+//     axis to retract into — see validate-level.js.
+//   * A ring corridor loops the floor so backtracking is never retracing.
+//   * Enemies come in room-sized clusters rather than sprinkled across a hall,
+//     which is also what paces the weapon unlocks (5 kills, then 10).
+//   * Every push-wall pocket is 3x3 with the loot off the slab's own row: the
+//     slab travels up to two tiles and stops SHORT of any pickup, so a
+//     one-wide pocket can never be opened. See CLAUDE.md.
+//
 // ─── LEVEL ──────────────────────────────────────────────────
 // #  panel   |  window   N  neon sign   X  exit switch
 // D  door    R  red-locked door   B  blue-locked door   S  secret push-wall
-// g  salaryman guard   d  sec-drone
+// g  salaryman guard   d  sec-drone   C  the CEO (floor 3 only)
 // +  ramen   a  battery cell   r/b  keycard   $  crypto wallet   @  spawn
+
+// FLOOR 1 — ATRIUM · SUBLEVEL. The teaching floor: a plain door on the spine
+// first, then the red door, then the blue one, in the order you can solve
+// them. The atrium you spawn in and the two bays either side of it hold
+// enough bodies to buy the SMG before you reach the red door.
 const LEVEL_1 = [
   '########################################',
+  '####################X###################',
+  '#################.......################',
+  '#################...$...################',
+  '#################.......################',
+  '####################B####NN###NN########',
+  '#########.......###...###.......########',
+  '#########a$.....###...###......$########',
+  '#########.....................b.########',
+  '#########.+.....S##...###...g...########',
+  '#########.....$a.$#...###a$.....########',
+  '#########.........#...###.....a.########',
+  '################a$#...##################',
+  '###################...##################',
+  '#########.......###...###.......########',
+  '#########.$....a###...###.$....a########',
+  '#########....d.............d....########',
+  '#########a....$.###...###a....$.########',
+  '#########.......###...###.......########',
+  '#########NN###NN####R###################',
+  '#########.......###...###.......########',
+  '#####$a.#.$....a###...###.$....a#..$####',
+  '#####...S..r....................S...####',
+  '#####$..#..g....###...###...g...#.a$####',
+  '#########a....$.###...###a....$.########',
+  '#########.......###...###.......########',
+  '#####..............................#####',
+  '#####.......d..............+d......#####',
+  '#####..............................#####',
+  '#########.......###...###.......########',
+  '#########.$....a###...###.$....a########',
+  '#########..g.g...D.....D...d.g..########',
+  '#########a....$.###...###a....$.########',
+  '#########.......####D####.......########',
+  '#######....#................#....#######',
+  '#######.a......###....###......a.#######',
+  '#######..g.#.+g###....###g+.#.g..#######',
+  '#######....#........@.......#....#######',
+  '#||||||||||||||||||||||||||||||||||||||#',
   '########################################',
-  '###############.......#$a###############',
-  '###############.a$X$..S..###############',
-  '###############.......#.$###############',
-  '###############NN#B#NN##################',
-  '#################...####################',
-  '#################...####################',
-  '#################...#####...........####',
-  '#################.a.#####.$..a..$..a####',
-  '#################...##$a#...d...d...####',
-  '##############$a#.g.##..S..a.....a..####',
-  '##############..S...#####$....b....$####',
-  '#################...#####...........####',
-  '#################...##########R#########',
-  '###..................................###',
-  '###..##..a##....#..a.#....##..a##....###',
-  '###..................................###',
-  '########.#########.###########.#########',
-  '###............##...####.............###',
-  '###..g......g..##...####....d...d....###',
-  '###............##...####.###.....###.###',
-  '###..#......#..##...####.#.........#.###',
-  '###..#..++..#..##.a.####.#....r....#.###',
-  '###............##...####.#.........#.###',
-  '###..#......#..##...####.###.....###.###',
-  '###..a......a..##.a.####.....d....a..###',
-  '###............##...####.............###',
-  '###..g......g..##...####....g...g....###',
-  '###............##...####.............###',
-  '########D########...##########D#########',
-  '###..................................###',
-  '###...a..........................a...###',
-  '###......NNNN........NNNN............###',
-  '###......#..#........#..#............###',
-  '###......#$a#........#+$#............###',
-  '###......#..#........#..#............###',
-  '###..................................###',
-  '###......a..........@..........a.....###',
-  '#####||||||||||||||||||||||||||||||#####',
 ];
 
+// FLOOR 2 — R&D · SERVER FARM. Both keycards sit in mirrored lab wings behind
+// plain doors, so the floor asks you to sweep two sides rather than walk one
+// line. The server bays below are four sealed cells off the ring, each with
+// its own door — they must not touch the spine, or the door is scenery.
 const LEVEL_2 = [
   '########################################',
-  '#################..XX..#################',
-  '#################......#################',
-  '###################BB###################',
-  '##########....$..........$....##########',
-  '#########N..d..............d..N#########',
-  '##########...####....####.....##########',
-  '#########N...#a$#....#$a#.....N#########',
-  '##########..g..............g..##########',
-  '###################RR###################',
-  '###..a..........$..........$......a..###',
-  '###.##....##....##....##....##....##.###',
-  '###..................................###',
-  '###............##########............###',
-  '###...######...##.$..$.##...######...###',
-  '###...Dr..$#....S......S....#$..bD...###',
-  '###...######...##.$..$.##...######...###',
-  '###..g......g..##########..d......d..###',
-  '###............##########............###',
-  '########..####################..########',
-  '###..................................###',
-  '###...##...##...##...##...##...##....###',
-  '###...##.a.##.$.##...##.a.##.$.##....###',
-  '###....g........d........g.......d...###',
-  '###...##...##...##...##...##...##....###',
-  '###..$.....a........a.....$......a...###',
-  '#####...########################...#####',
-  '#####...########################...#####',
-  '#####.a.#.$...$.################...#####',
-  '#####...S.......################.a.#####',
-  '#####.g.#.$...$.################.d.#####',
-  '#####...#..d....################...#####',
-  '#####.$.########################.$.#####',
-  '#####...########################...#####',
-  '###...a..........................a...###',
-  '###..####......####......####......a.###',
-  '###..#$a#......#a$#......#$a#........###',
-  '###.................@................###',
-  '###||||||||||||||||||||||||||||||||||###',
+  '####################X###################',
+  '#################.......################',
+  '#################...$...################',
+  '#################.......################',
+  '#########NN###NN####B####NN###NN########',
+  '#########.......###...###.......########',
+  '#########a$.....###...###.....$a########',
+  '#########..g................g...########',
+  '#########.......S##...###.......########',
+  '#########.....$a.$#.d.###a$.....########',
+  '#########.........#...###.......########',
+  '################a$#...##################',
+  '####################R###################',
+  '###################...##################',
+  '######........#####...####........######',
+  '######.....$.a#####...####.$.....a######',
+  '##$a.#...##...#####...####...##...#..$##',
+  '##...S.r.##...D..........D...##.b.S...##',
+  '##$..#...##g..#####...####..g##...#.a$##',
+  '######a.....$.#####...####a.$.....######',
+  '######........#####...####........######',
+  '###################...##################',
+  '#####..............................#####',
+  '#####.+.$.d.....$......$.....d.$.+.#####',
+  '#####..............................#####',
+  '########D######D###...###D#####D########',
+  '######......#.....#...#.....#......#####',
+  '######.$..$.#.$.$.#...#.$.$.#.$..$.#####',
+  '######..d...#..d..#...#..d..#..d...#####',
+  '######....a.#...a.#...#...a.#....a.#####',
+  '######......#.....#...#.....#......#####',
+  '###################...##################',
+  '########........................########',
+  '########.a..###..g....g..###..a.########',
+  '########.g+.###....a.a...###.+g.########',
+  '########............@...........########',
+  '#||||||||||||||||||||||||||||||||||||||#',
+  '########################################',
   '########################################',
 ];
 
+// FLOOR 3 — EXECUTIVE SUITE. A cubicle farm of 4x3 bays around two inner
+// corridors and an outer loop, the red keycard in a corner office off the
+// aisle, and the boardroom behind the red door. The boardroom is the one
+// deliberately large room on any floor: the CEO opens at a 5.2u standoff and
+// needs the space to use it.
 const LEVEL_3 = [
   '########################################',
-  '#################..XX..#################',
-  '#################......#################',
-  '######............................######',
-  '######..NN....................NN..######',
-  '######............................######',
-  '##.$.#...####..............####...#.$.##',
-  '##...S...#$a#..............#a$#...S...##',
-  '##.$.#............................#.$.##',
-  '######..............C.............######',
-  '######....d..............d........######',
-  '######............................######',
-  '######..g......................g..######',
-  '###################RR###################',
-  '###..................................###',
-  '###.####...####...####...####...####.###',
-  '###.#$a#...#a$#...#$a#...#a$#...#$a#.###',
-  '###..................................###',
-  '###..g.....d.....g.....d.....g.....a.###',
-  '###..................................###',
-  '########..####################..########',
-  '###..................................###',
-  '###..####........####........####....###',
-  '###..#r.#........#$a#........#a$#....###',
-  '###..................................###',
-  '###....g...........d...........g.....###',
-  '###............##########............###',
-  '###............##.$$$$.##............###',
-  '###.............S......S.............###',
-  '###............##.$$$$.##............###',
-  '###............##########............###',
-  '###..................................###',
-  '###..####......####......####......a.###',
-  '###..#$a#......#a$#......#$a#........###',
-  '###..................................###',
-  '###...a....d..........d....a.........###',
-  '###.................@................###',
-  '###..a............................a..###',
-  '###||||||||||||||||||||||||||||||||||###',
+  '####################X###################',
+  '#################.......################',
+  '#################...$...################',
+  '#################.......################',
+  '###########NN#######D#######NN##########',
+  '#######$a.#...................#..$######',
+  '#######...S..$.............$..S...######',
+  '#######$..#..####.......####..#.a$######',
+  '###########..####.......####..##########',
+  '###########.a...............a.##########',
+  '###########.........C.........##########',
+  '###########...................##########',
+  '###########..$.............$..##########',
+  '###########...................##########',
+  '####################R###################',
+  '###################...##################',
+  '#####...........$.......$..........#####',
+  '#####.$....$...####...###$....$....#####',
+  '#####..g....d..####...###........g.#####',
+  '#####+...a....a####.d.###...a....a+#####',
+  '#####.####.########...#######.####.#####',
+  '#####..............................#####',
+  '#$a.#.$....$...####...###$....$....#..$#',
+  '#...S.......g..####...###.g......d.S...#',
+  '#$..#....a....a####.d.###...a....a.#.a$#',
+  '#####.####.########...#######.####.#####',
+  '#####..............................#####',
+  '#####.$....$...####...###$....$....#####',
+  '#####..g....d..####...###.d......g.#####',
+  '#####+...a....a####.d.###...a....a+#####',
+  '#####.####.########...#######.####.#####',
+  '#####...........$.......$..........#####',
+  '###################...##################',
+  '######.......######.g.#####.....$.######',
+  '######.r.....D..g.......g.D.+.....######',
+  '######.......######...#####.....$.######',
+  '###################.@.##################',
+  '#||||||||||||||||||||||||||||||||||||||#',
   '########################################',
 ];
 
 // Floors in play order. Each stays its own `const LEVEL_*` array so
 // reference/validate-level.js keeps finding them by name.
 const LEVELS = [LEVEL_1, LEVEL_2, LEVEL_3];
-const FLOOR_NAMES = ['ATRIUM · SUBLEVEL', 'R&D · SERVER FARM', 'EXECUTIVE SUITE'];
+const FLOOR_NAMES = ['ATRIUM \u00b7 SUBLEVEL', 'R&D \u00b7 SERVER FARM', 'EXECUTIVE SUITE'];
 // seconds a competent run takes; drives the time bonus on the tally screen
 const PAR_TIME = [150, 180, 210];
 
@@ -1725,6 +1832,12 @@ const WEAPONS = [
 
 const PISTOL = 1;   // the weapon a cold start hands you
 
+// Cumulative kills THIS RUN that earn each weapon; 0 means you start with it.
+// Indexed like WEAPONS, so earning a gun is a column of that table rather than
+// a branch anywhere — checkWeaponUnlock() walks it and grants the first row it
+// has paid for. A fifth weapon is a row here and a row there, still no code.
+const WEAPON_UNLOCK = [0, 0, 5, 10];
+
 ;
 'use strict';
 
@@ -2129,7 +2242,7 @@ let mouseHeld = false;
 addEventListener('keydown', e => {
   const k = e.key.toLowerCase();
   if (['arrowleft','arrowright','arrowup','arrowdown','w','a','s','d','e','r',' ',
-       '1','2','3','4'].includes(k)) e.preventDefault();
+       '1','2','3','4','tab'].includes(k)) e.preventDefault();
   if (keys.has(k)) return;
   keys.add(k);
   if (k === ' ')     firePressed = true;
@@ -2143,7 +2256,8 @@ addEventListener('keydown', e => {
   if (k === 'escape') togglePause();
   if (k === 'r')     { if (gameState === 'playing') startReload(); }
   if (k === 'p')     startLevel(gameState === 'won' ? 0 : levelIndex);
-  if (k >= '1' && k <= '4') selectWeapon(+k - 1);
+  if (k >= '1' && k <= '4') pickWeapon(+k - 1);
+  if (k === 'tab')   toggleMinimap();
 });
 addEventListener('keyup', e => keys.delete(e.key.toLowerCase()));
 
@@ -2187,7 +2301,7 @@ addEventListener('mousemove', e => {
 // Firing sets the same `firePressed` edge and `mouseHeld` flag the mouse does,
 // so the semi-auto / hold-to-repeat split in frame() is reused rather than
 // reimplemented, and the buttons call use(), startReload(), togglePause() and
-// selectWeapon() — the same calls the key handlers make.
+// pickWeapon() — the same calls the key handlers make.
 //
 // The one thing that could not be reused is movement. The keyboard is binary
 // and a stick is analog, so `touchMove` is added to updatePlayer's vector and
@@ -2378,7 +2492,7 @@ tapButton('tUse',    () => use());
 tapButton('tReload', () => { if (gameState === 'playing') startReload(); });
 tapButton('tPause',  () => togglePause());
 for (let i = 0; i < 4; i++) {
-  (function (n) { tapButton('tW' + n, () => selectWeapon(n)); })(i);
+  (function (n) { tapButton('tW' + n, () => pickWeapon(n)); })(i);
 }
 
 // Show the overlay on a device that has no mouse, without waiting for the
@@ -2408,6 +2522,10 @@ let secretList = [], movingSecrets = [];
 let totalEnemies = 0, totalSecrets = 0, secretsFound = 0;
 // BFS flow field over the tile grid, seeded at the player — see NAVIGATION
 let navDist = null, navQueue = null, navRebuildT = 0, navSeedX = -1, navSeedY = -1;
+// the auto-map's exploration record: 1 where the player has stood or looked.
+// Sized with the map in parseLevel, like navDist, so a floor of a different
+// shape cannot read a stale one. See wolf3d/minimap.js.
+let seen = null;
 // treasure is the crypto wallets only — the generic item loop also runs over
 // ramen, cells and keycards, and dropLoot() appends to `items` mid-level, so
 // the denominator has to be fixed at parse time from the '$' tiles alone
@@ -2419,10 +2537,15 @@ const player = {
   keyRed: false, keyBlue: false,
   fireCd: 0, bob: 0, hurtT: 0, flashT: 0,
   reloadT: 0, clip: CLIP_SIZE,
-  // Which weapon is up, and which ones you own. Everything is unlocked today;
-  // `weapons` exists so drops or level pickups are a one-line change rather
-  // than a new concept — selectWeapon already refuses an index that is 0 here.
-  weapon: PISTOL, weapons: [1, 1, 1, 1],
+  // Which weapon is up, and which ones you own. You start with the knife and
+  // the pistol; the SMG and the chaingun are earned — see WEAPON_UNLOCK and
+  // checkWeaponUnlock(). selectWeapon refuses any index that is 0 here.
+  weapon: PISTOL, weapons: [1, 1, 0, 0],
+  // Kills for the whole RUN, which is what buys guns. Deliberately NOT
+  // player.kills: startLevel zeroes that every floor because the tally reports
+  // a per-floor ratio, so spending it here would reset your progress toward
+  // the next weapon on every descent.
+  runKills: 0,
   // reloadMax latches the current weapon's cycle length so the view-model
   // animation stays correct for magazines that take longer than the pistol's.
   reloadMax: RELOAD_TIME,
@@ -2841,6 +2964,7 @@ function parseLevel(src) {
   // sized with the map, so a floor of a different shape cannot read a stale field
   navDist = new Int32Array(MAP_W * MAP_H).fill(-1);
   navQueue = new Int32Array(MAP_W * MAP_H);   // hoisted: the field rebuilds ~3x a second
+  seen = new Uint8Array(MAP_W * MAP_H);       // the auto-map starts every floor blind
   navSeedX = navSeedY = -1;
   navRebuildT = 0;
 }
@@ -2857,7 +2981,7 @@ function startLevel(n, carry) {
                                     n === undefined ? levelIndex : n));
   parseLevel(LEVELS[levelIndex]);
   player.a = -Math.PI / 2;
-  if (!carry) { player.hp = 100; player.ammo = 24; player.score = 0; player.weapon = PISTOL; }
+  if (!carry) { player.hp = 100; player.ammo = 24; player.score = 0; player.weapon = PISTOL; resetWeapons(); }
   // kills and keycards are per-floor even on a descent: the ratio on the
   // tally screen is this floor's, and last floor's keys open nothing here
   player.kills = 0;
@@ -3505,6 +3629,63 @@ function selectWeapon(i) {
   return true;
 }
 
+// ─── EARNING THE ROSTER ─────────────────────────────────────
+//
+// The guns are a reward, not a menu. WEAPON_UNLOCK is a column of the WEAPONS
+// table, so this is a walk rather than a branch per weapon, and a fifth gun
+// needs nothing here.
+
+/**
+ * Kills earn guns. Called once per kill from fire()'s death branch.
+ *
+ * Grants the first unowned weapon the run has paid for and puts it straight
+ * up — Wolf3D hands you the gun the moment you find it, and a weapon you have
+ * to go and select is a weapon a player never learns they have. One per kill:
+ * the thresholds are far enough apart that two can never come due together,
+ * and returning keeps the toast readable if they ever are.
+ *
+ * Ownership is written BEFORE selectWeapon, which refuses an index you do not
+ * own. The ammo comes with it because the reserve is sized for the pistol —
+ * unlocking a 50-round chaingun over 24 rounds of reserve is under two seconds
+ * of trigger, which reads as a broken reward rather than a generous one.
+ */
+function checkWeaponUnlock() {
+  for (let i = 0; i < WEAPONS.length; i++) {
+    if (player.weapons[i] || player.runKills < WEAPON_UNLOCK[i]) continue;
+    player.weapons[i] = 1;
+    player.ammo = Math.min(99, player.ammo + 20);
+    toast(WEAPONS[i].name + ' UNLOCKED  \u00b7  PRESS [' + (i + 1) + ']');
+    selectWeapon(i);
+    return true;
+  }
+  return false;
+}
+
+/**
+ * The player-facing wrapper around selectWeapon, and what the number keys and
+ * the touch buttons actually call.
+ *
+ * selectWeapon returns a silent false for four different refusals and the
+ * suite and the mutation catalog both pin that contract, so the one refusal a
+ * player can act on — "you have not earned it yet" — is answered here instead
+ * of inside it. Saying how many kills are left is the whole point: a key that
+ * does nothing teaches a player the key does not exist.
+ */
+function pickWeapon(i) {
+  if (selectWeapon(i)) return true;
+  if (gameState === 'playing' && WEAPONS[i] && !player.weapons[i]) {
+    toast(WEAPONS[i].name + '  \u00b7  ' + player.runKills + '/' + WEAPON_UNLOCK[i] + ' KILLS');
+    sfx('deny');
+  }
+  return false;
+}
+
+/** Back to the cold-start loadout. Called by startLevel on a non-carry start. */
+function resetWeapons() {
+  player.runKills = 0;
+  player.weapons = WEAPON_UNLOCK.map(n => (n === 0 ? 1 : 0));
+}
+
 // ─── COMBAT ─────────────────────────────────────────────────
 // Reserve rounds live in player.ammo; player.clip is what is actually seated.
 // Firing empties the clip, then the reload cycle moves reserve into it.
@@ -3604,10 +3785,12 @@ function fire() {
     best.state = 'dying';
     best.stateT = 0;
     player.kills++;
+    player.runKills++;
     player.score += KILL_SCORE[best.type] || 150;
     dropLoot(best);
     spillBlood(best);
     sfx('kill');
+    checkWeaponUnlock();      // before syncHud, so the strip paints the new gun
     syncHud();
   } else {
     addDmgPop(best, dmg, false);
@@ -4121,6 +4304,145 @@ function drawWalls(zbuf, horizon, animT) {
 ;
 'use strict';
 
+// The auto-map: a scrolling window on the floor, filled in only where you have
+// actually been or looked.
+//
+// Its own file because render.js is at its 400-line budget and rule 4 says
+// that is a signal to split rather than a target to fill. It draws through
+// drawChar like everything else, so it lives inside the CRT overlay for free
+// and shares the glyph atlas — every colour here comes from COLOR, which is
+// what keeps that atlas bounded.
+//
+// It is deliberately NOT a compass. It shows where you have been and what you
+// have seen; it never points at the objective, which is the objective line's
+// job (hud.js) and stops well short of walking you down the corridor.
+
+// ─── THE WINDOW ─────────────────────────────────────────────
+// 25x25 tiles at one tile per character cell, top-right. Windowed rather than
+// whole-floor for two reasons: a 40x40 floor at 1:1 would eat a quarter of the
+// screen, and a map that scrolls with you answers "which way out of THIS room"
+// — which is the question the big open halls were failing to answer.
+const MINI_TILES = 25;
+const MINI_PAD = 1;
+const MINI_COL0 = COLS - MINI_TILES - MINI_PAD;
+const MINI_ROW0 = MINI_PAD + 1;
+// how close an enemy has to be before the map admits it is coming for you
+const MINI_THREAT = 8.0;
+// rays per sweep. Far fewer than the 160 the wall pass casts: this marks whole
+// tiles, so angular resolution past ~one ray per two screen columns buys
+// nothing, and the sweep is the only cost the map adds to a frame.
+const MINI_RAYS = 48;
+const MINI_STEP = 0.7;        // sample spacing along a ray, in tiles
+
+let miniOn = true;
+
+function toggleMinimap() { miniOn = !miniOn; return miniOn; }
+
+function markSeen(gx, gy) {
+  if (!seen || gx < 0 || gy < 0 || gx >= MAP_W || gy >= MAP_H) return;
+  seen[gy * MAP_W + gx] = 1;
+}
+
+/**
+ * Reveal what the player can currently see.
+ *
+ * Samples along each ray rather than marking only the cell it struck, or the
+ * map would fill in walls across a room while the floor between stayed blank.
+ * Called on a stride from frame() — a player crosses a tile in well over three
+ * frames at any speed the game can produce, so nothing is missed.
+ */
+function markVisible() {
+  if (!seen) return;
+  // the tile you are standing in and its neighbours, so hugging a wall still
+  // maps the corner you are in
+  const px = player.x | 0, py = player.y | 0;
+  for (let dy = -1; dy <= 1; dy++)
+    for (let dx = -1; dx <= 1; dx++) markSeen(px + dx, py + dy);
+
+  for (let i = 0; i < MINI_RAYS; i++) {
+    const t = i / (MINI_RAYS - 1);
+    const rayA = player.a + Math.atan((t - 0.5) * 2 * Math.tan(FOV / 2));
+    const hit = castRay(player.x, player.y, rayA);
+    const cosA = Math.cos(rayA), sinA = Math.sin(rayA);
+    // walk the open span, then mark the wall itself one step past the face
+    for (let d = MINI_STEP; d < hit.dist; d += MINI_STEP)
+      markSeen((player.x + cosA * d) | 0, (player.y + sinA * d) | 0);
+    if (hit.cell)
+      markSeen((player.x + cosA * (hit.dist + 0.02)) | 0,
+               (player.y + sinA * (hit.dist + 0.02)) | 0);
+  }
+}
+
+// ─── DRAWING ────────────────────────────────────────────────
+// The glyph and colour for one seen tile. Doors and the elevator are called
+// out because they are the things a lost player is looking for; everything
+// else is structure.
+function miniCell(c) {
+  if (!c) return ['·', COLOR.slate];
+  if (c.tag === 'door') {
+    return ['+', c.lock === 'red'  ? COLOR.keyRed
+              : c.lock === 'blue' ? COLOR.keyBlue
+              : COLOR.steel];
+  }
+  if (c.tag === 'exit')   return ['X', COLOR.crt];
+  if (c.tag === 'window') return ['▒', COLOR.window];
+  return ['▒', COLOR.slateHi];
+}
+
+const MINI_FACES = ['▶', '▼', '◀', '▲'];   // E S W N
+
+function drawMinimap() {
+  if (!miniOn || !seen || !grid) return;
+  const cx = player.x | 0, cy = player.y | 0;
+  const half = MINI_TILES >> 1;
+  const x0 = cx - half, y0 = cy - half;
+
+  for (let ty = 0; ty < MINI_TILES; ty++) {
+    const gy = y0 + ty;
+    if (gy < 0 || gy >= MAP_H) continue;
+    for (let tx = 0; tx < MINI_TILES; tx++) {
+      const gx = x0 + tx;
+      if (gx < 0 || gx >= MAP_W) continue;
+      if (!seen[gy * MAP_W + gx]) continue;         // fog: draw nothing at all
+      const [ch, color] = miniCell(grid[gy][gx]);
+      drawChar(MINI_COL0 + tx, MINI_ROW0 + ty, ch, color);
+    }
+  }
+
+  // keycards, once you have laid eyes on the tile they sit on. A key you have
+  // seen and walked past is exactly what the big halls kept losing.
+  for (const it of items) {
+    if (it.taken) continue;
+    if (it.kind !== 'keyRed' && it.kind !== 'keyBlue') continue;
+    const gx = it.x | 0, gy = it.y | 0;
+    if (!seen[gy * MAP_W + gx]) continue;
+    drawChar(MINI_COL0 + (gx - x0), MINI_ROW0 + (gy - y0),
+             it.kind === 'keyRed' ? 'r' : 'b',
+             it.kind === 'keyRed' ? COLOR.keyRed : COLOR.keyBlue);
+  }
+
+  // Only what is HUNTING you, and only close by. Plotting every body on the
+  // floor would turn the map into a wallhack and take the surprise out of
+  // every room; an alerted guard two rooms away is information you have
+  // already earned by making noise.
+  for (const e of enemies) {
+    if (!e.alive) continue;
+    if (e.state === 'idle') continue;
+    if (Math.hypot(e.x - player.x, e.y - player.y) > MINI_THREAT) continue;
+    const gx = e.x | 0, gy = e.y | 0;
+    if (gx < x0 || gy < y0 || gx >= x0 + MINI_TILES || gy >= y0 + MINI_TILES) continue;
+    drawChar(MINI_COL0 + (gx - x0), MINI_ROW0 + (gy - y0), '!', COLOR.pink);
+  }
+
+  // you, facing. The quadrant is enough — a 25x25 tile grid cannot express
+  // more heading than that anyway.
+  const q = (Math.round(player.a / (Math.PI / 2)) % 4 + 4) % 4;
+  drawChar(MINI_COL0 + half, MINI_ROW0 + half, MINI_FACES[q], COLOR.sodium);
+}
+
+;
+'use strict';
+
 // The DOM half of the interface: toasts, banners, the status bar, the health
 // bar with its lagging chip layer, and the end-of-floor tally screen.
 //
@@ -4214,7 +4536,8 @@ function syncHud() {
                                ' \u00b7 ' + DIFFICULTY[difficulty].name.toLowerCase();
   el('sHp').textContent   = player.hp;
   const w = curWeapon();
-  el('sWeapon').textContent = w.name;
+  paintWeaponStrip();
+  paintObjective();
   // a weapon that costs no ammo has no magazine to report, and must not read
   // as permanently empty
   el('sAmmo').textContent = w.cost <= 0 ? '--'
@@ -4228,6 +4551,67 @@ function syncHud() {
   ks[0].classList.toggle('on', player.keyRed);
   ks[1].classList.toggle('on', player.keyBlue);
   paintBossBar();
+}
+
+/**
+ * The four weapon slots under the status bar.
+ *
+ * The game shipped showing one name, which is exactly why a whole playthrough
+ * could end on the pistol: nothing ever said the other three existed. A locked
+ * slot shows what it costs instead of what it is, so the strip doubles as the
+ * progress bar toward the next gun — and the number on it is the number the
+ * key press quotes back at you.
+ */
+function paintWeaponStrip() {
+  const slots = el('sWeapons');
+  if (!slots) return;
+  for (let i = 0; i < slots.children.length; i++) {
+    const s = slots.children[i];
+    const w = WEAPONS[i];
+    if (!w) { s.textContent = ''; continue; }
+    const owned = !!player.weapons[i];
+    s.textContent = owned ? (i + 1) + ' ' + w.name
+                          : player.runKills + '/' + WEAPON_UNLOCK[i];
+    s.classList.toggle('on', owned && i === player.weapon);
+    s.classList.toggle('owned', owned && i !== player.weapon);
+    s.classList.toggle('locked', !owned);
+    // the touch row is the same three states, painted from the same place —
+    // four identical buttons, three of which silently do nothing, is the touch
+    // half of the bug the strip exists to fix
+    const tw = el('tW' + i);
+    if (tw) {
+      tw.classList.toggle('on', owned && i === player.weapon);
+      tw.classList.toggle('owned', owned && i !== player.weapon);
+      tw.classList.toggle('locked', !owned);
+    }
+  }
+}
+
+/**
+ * What you are for on this floor.
+ *
+ * Derived from the parsed level rather than from per-floor data: doorList
+ * knows which locks this map actually has, so a floor with no blue door never
+ * asks for a blue keycard and a rewritten map needs no new table. It names the
+ * goal and never the route — the brief was to hold the player\u2019s hand, not to
+ * walk them down the corridor.
+ */
+function objectiveText() {
+  const needs = lock => doorList.some(d => d.lock === lock);
+  if (needs('red')  && !player.keyRed)  return 'FIND THE RED KEYCARD';
+  if (needs('blue') && !player.keyBlue) return 'FIND THE BLUE KEYCARD';
+  if (boss && boss.alive)               return 'THE BOARD IS IN SESSION \u2014 KILL THE CEO';
+  return 'RIDE THE ELEVATOR OUT';
+}
+
+function paintObjective() {
+  const o = el('objective');
+  if (!o) return;
+  // only while a floor is actually in play: a tally or a death banner is not
+  // the moment to be told what to do next
+  const show = gameState === 'playing';
+  if (show) o.textContent = objectiveText();
+  o.classList.toggle('show', show);
 }
 
 // The bar stays hidden until the CEO has actually noticed you, so walking in
@@ -4574,6 +4958,13 @@ function frame(now) {
   drawCrosshair(horizon);
   drawHitDirs(horizon);
   if (gameState === 'playing') drawGun();
+
+  // ── AUTO-MAP (over the view model, so the gun cannot hide it)
+  //    The reveal sweep runs on a stride: it casts its own rays, and a player
+  //    crosses a tile in far more than three frames at any speed the game can
+  //    produce, so nothing goes unmapped.
+  if (gameState === 'playing' && (hudTick % 3) === 0) markVisible();
+  drawMinimap();
 
   // ── SCREEN FLASHES
   if (player.flashT > 0) {

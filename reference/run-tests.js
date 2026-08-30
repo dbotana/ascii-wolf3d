@@ -58,6 +58,33 @@ function place(e, dist) {
 const firstGuard = () => P.enemies().find(e => e.type === 'guard' && e.alive);
 
 /**
+ * Park the player on a walkable tile no live enemy can see.
+ *
+ * This was the literal `20.5 / 38.5` in four places — floor 1's spawn corner
+ * at the time — and every one of them broke the first time the maps were
+ * redrawn, one of them by dropping the player inside the south window wall so
+ * the flow field silently refused to build. Derived from the floor instead, so
+ * a map is free to change shape.
+ */
+function hide() {
+  const grid = P.grid();
+  const live = P.enemies().filter(e => e.alive);
+  let best = null, bestD = -1;
+  for (let y = 1; y < grid.length - 1; y++) {
+    for (let x = 1; x < grid[y].length - 1; x++) {
+      if (grid[y][x]) continue;
+      const cx = x + 0.5, cy = y + 0.5;
+      if (P.blockAt(cx, cy)) continue;
+      if (live.some(e => P.hasLOS(cx, cy, e.x, e.y))) continue;
+      const d = live.length ? Math.min(...live.map(e => Math.hypot(e.x - cx, e.y - cy))) : 99;
+      if (d > bestD) { bestD = d; best = [cx, cy]; }
+    }
+  }
+  if (best) { P.player.x = best[0]; P.player.y = best[1]; }
+  return !!best;
+}
+
+/**
  * Park every enemy where it stands, in a state the FSM will not move it out of.
  *
  * Since Phase 2 enemies patrol while idle and route around corners once woken,
@@ -148,8 +175,11 @@ if (spot) {
 // regression reads as a regression rather than as a mystery.
 group('enemy movement');
 P.startLevel();
-P.player.x = 20.5; P.player.y = 38.5;
+// Wherever the floor's own '@' put us — this used to hardcode 20.5/38.5, which
+// was floor 1's spawn tile at the time and became solid the first time the map
+// was redrawn. parseLevel is the authority on where the player stands.
 run(4);
+ok(!P.blockAt(P.player.x, P.player.y), 'test setup: the spawn tile is walkable');
 ok(P.navAt(P.player.x | 0, P.player.y | 0) === 0,
    'the flow field is seeded at zero on the player tile');
 {
@@ -215,7 +245,7 @@ P.startLevel();
 {
   const roster = P.enemies().filter(e => e.type !== 'ceo');
   const home = roster.map(e => ({ e, x: e.x, y: e.y }));
-  P.player.x = 20.5; P.player.y = 38.5;              // spawn corner, out of everyone's sight
+  ok(hide(), 'test setup: parked somewhere no enemy can see');
   run(500);                                          // 8s
   const moved = home.filter(h => Math.hypot(h.e.x - h.x, h.e.y - h.y) > 0.25).length;
   ok(moved > 0, `idle enemies patrol rather than standing still (${moved}/${roster.length} moved)`);
@@ -237,7 +267,7 @@ P.startLevel();
 P.startLevel();
 {
   const grid = P.grid();
-  P.player.x = 20.5; P.player.y = 38.5;
+  hide();
   run(4);
   let seal = null;
   for (let y = 1; y < grid.length - 1 && !seal; y++)
@@ -258,20 +288,21 @@ P.startLevel();
 // period, the timer clause cannot be what moved the seed.
 P.startLevel();
 {
-  P.player.x = 20.5; P.player.y = 38.5;
+  hide();
+  const hx = P.player.x | 0, hy = P.player.y | 0;
   run(1);                                            // seeds, and arms a full period
   const home = P.navSeed();
-  ok(home.x === 20 && home.y === 38,
+  ok(home.x === hx && home.y === hy,
      `the field is seeded on the player's own tile (${home.x},${home.y})`);
 
-  const dir = [[1, 0], [-1, 0], [0, 1], [0, -1]].find(d => P.navPassable(20 + d[0], 38 + d[1]));
-  ok(dir !== undefined, 'test setup: the spawn tile has a passable neighbour to step onto');
-  P.player.x = 20.5 + dir[0]; P.player.y = 38.5 + dir[1];
+  const dir = [[1, 0], [-1, 0], [0, 1], [0, -1]].find(d => P.navPassable(hx + d[0], hy + d[1]));
+  ok(dir !== undefined, 'test setup: the tile has a passable neighbour to step onto');
+  P.player.x = hx + 0.5 + dir[0]; P.player.y = hy + 0.5 + dir[1];
   run(1);
   const moved = P.navSeed();
-  ok(moved.x === 20 + dir[0] && moved.y === 38 + dir[1],
+  ok(moved.x === hx + dir[0] && moved.y === hy + dir[1],
      `a tile crossing re-seeds within ONE frame, not after 0.35s ` +
-     `(${moved.x},${moved.y} after stepping to ${20 + dir[0]},${38 + dir[1]})`);
+     `(${moved.x},${moved.y} after stepping to ${hx + dir[0]},${hy + dir[1]})`);
   ok(P.navAt(moved.x, moved.y) === 0, 'and the new tile is the zero of the rebuilt field');
 }
 
@@ -446,14 +477,28 @@ ok(P.player.ammo === 0 && P.player.clip === 0 && P.player.score === scoreBefore,
    'firing with an empty clip and an empty reserve is a no-op');
 
 P.startLevel();
-P.player.x = 20.5; P.player.y = 38.5; P.player.a = Math.PI / 2;   // face a wall
+hide();
+// face whichever side of this tile is solid, rather than a compass direction
+// that happened to be a wall on the map this test was written against
+{
+  const wd = [[0, 1], [0, -1], [1, 0], [-1, 0]]
+    .find(d => P.cellAt((P.player.x | 0) + d[0], (P.player.y | 0) + d[1]));
+  ok(wd !== undefined, 'test setup: the tile has a wall to shoot at');
+  P.player.a = Math.atan2(wd[1], wd[0]);
+}
 P.player.ammo = 20;
 P.fire(); run(20);
 ok(P.player.kills === 0, 'shooting a wall hits nothing');
 
 // ── the weapon roster ────────────────────────────────────────────────────────
 group('weapons');
+// The roster is EARNED in play — five kills buys the SMG, ten the chaingun,
+// and the "earning the roster" group below is what proves that. Everything
+// here is about what a weapon DOES once it is in your hands, so hand them all
+// over after every startLevel, which cold-starts back to knife + pistol.
+const armAll = () => { P.player.weapons = [1, 1, 1, 1]; };
 P.startLevel();
+armAll();
 const KNIFE = 0, PISTOL_I = 1, SMG_I = 2, CHAIN = 3;
 const W = P.weapons();
 ok(W.length === 4, `the roster has four weapons (${W.map(w => w.name).join(', ')})`);
@@ -504,6 +549,7 @@ ok(P.player.ammo === 40 && P.player.clip === 8, 'and swinging it spends no ammo'
 //    works at contact range"; the screen-space test needs no help, because
 //    depth cancels out of it and it is really |lateral| > wW/2.
 P.startLevel();
+armAll();
 freezeEnemies();
 const kv = firstGuard();
 P.player.x = kv.x - 0.18; P.player.y = kv.y;
@@ -518,6 +564,7 @@ ok(kv.hp < kvHp, `the knife connects at contact range (${kvHp} -> ${kv.hp})`);
 
 // ...and not across a room, which is what `reach` is for
 P.startLevel();
+armAll();
 freezeEnemies();
 const kf = firstGuard();
 ok(place(kf, 3), 'test setup: player placed 3u from a guard with LOS');
@@ -533,6 +580,7 @@ ok(kf.hp < kfHp, 'but the pistol does, from the same spot');
 
 // ── per-weapon cooldown really gates the rate of fire
 P.startLevel();
+armAll();
 freezeEnemies();
 const cdTarget = firstGuard();
 place(cdTarget, 3);
@@ -550,6 +598,7 @@ for (const [idx, name] of [[PISTOL_I, 'pistol'], [CHAIN, 'chaingun']]) {
 
 // ── the chaingun will not fire until its barrels are up to speed
 P.startLevel();
+armAll();
 freezeEnemies();
 P.selectWeapon(CHAIN);
 P.player.ammo = 100; P.player.clip = 50; P.player.fireCd = 0; P.player.windT = 0;
@@ -563,6 +612,7 @@ ok(P.player.ammo < spinAmmo, `holding it spins up and then fires (${spinAmmo} ->
 //    This is the semi-auto item, exercised through frame()'s real input path
 //    rather than by calling fire() directly, which bypasses the gate.
 P.startLevel();
+armAll();
 freezeEnemies();
 for (const [idx, name] of [[PISTOL_I, 'pistol'], [SMG_I, 'SMG']]) {
   P.player.weapon = idx;
@@ -577,6 +627,7 @@ for (const [idx, name] of [[PISTOL_I, 'pistol'], [SMG_I, 'SMG']]) {
 
 // ── reload cycle length is the weapon's own, not always the pistol's
 P.startLevel();
+armAll();
 P.selectWeapon(SMG_I);
 P.player.ammo = 60; P.player.clip = 1; P.player.reloadT = 0;
 ok(P.startReload() && Math.abs(P.player.reloadT - W[SMG_I].reload) < 1e-9,
@@ -589,6 +640,214 @@ ok(P.player.clip === W[SMG_I].clip, `it seats a full SMG magazine (${P.player.cl
 P.selectWeapon(PISTOL_I);
 
 // ── doors ────────────────────────────────────────────────────────────────────
+// ── earning the roster ───────────────────────────────────────────────────────
+//
+// The guns are a reward now, not a menu. Two things have to hold: the kill
+// site really drives it (a killed body, through fire(), not a hand-set
+// counter), and the threshold is the exact number rather than "about five".
+group('earning the roster');
+P.startLevel();
+const UNLOCK = P.weaponUnlock();
+ok(UNLOCK.length === P.weapons().length,
+   `every weapon has an unlock threshold (${UNLOCK.join(',')})`);
+ok(UNLOCK[KNIFE] === 0 && UNLOCK[PISTOL_I] === 0 && UNLOCK[SMG_I] === 5 && UNLOCK[CHAIN] === 10,
+   'knife and pistol are free; the SMG costs 5 kills and the chaingun 10');
+ok(P.player.weapons[KNIFE] === 1 && P.player.weapons[PISTOL_I] === 1 &&
+   !P.player.weapons[SMG_I] && !P.player.weapons[CHAIN],
+   'a cold start hands you the knife and the pistol, and nothing else');
+ok(P.player.runKills === 0, 'and a run-long kill counter at zero');
+
+// ── the refusal a player can act on says why. selectWeapon stays silent (the
+//    suite and the catalog both pin that); pickWeapon is the one that talks.
+ok(!P.pickWeapon(CHAIN) && P.player.weapon === PISTOL_I,
+   'pressing 4 before you have earned it changes nothing');
+
+// ── ONE real kill, at the threshold, through the whole path: fire() -> the
+//    death branch -> runKills++ -> checkWeaponUnlock -> granted AND put up.
+function killOneGuard() {
+  freezeEnemies();
+  const e = firstGuard();
+  if (!e || !place(e, 2)) return null;
+  P.player.weapon = PISTOL_I;
+  P.player.ammo = 200; P.player.clip = 8;
+  for (let i = 0; i < 40 && e.alive; i++) {
+    P.player.fireCd = 0; P.player.reloadT = 0; P.player.clip = 8;
+    P.fire(); run(1);
+  }
+  return e;
+}
+
+// the control: one short of the threshold, the same kill buys nothing
+P.startLevel();
+P.player.runKills = 3;
+const ctrlKills = P.player.kills;
+let victim = killOneGuard();
+ok(victim && !victim.alive, 'test setup: a guard was actually killed');
+ok(P.player.kills === ctrlKills + 1 && P.player.runKills === 4,
+   `both counters moved (kills ${P.player.kills}, run ${P.player.runKills})`);
+ok(!P.player.weapons[SMG_I] && P.player.weapon === PISTOL_I,
+   'four kills is not five — the SMG stays locked');
+
+// and now the kill that does
+P.startLevel();
+P.player.runKills = 4;
+P.player.ammo = 24;
+victim = killOneGuard();
+ok(victim && !victim.alive && P.player.runKills === 5, 'test setup: the fifth kill landed');
+ok(P.player.weapons[SMG_I] === 1, 'the fifth kill unlocks the SMG');
+ok(P.player.weapon === SMG_I, 'and puts it straight up, rather than leaving it in a menu');
+ok(!P.player.weapons[CHAIN], 'one gun per kill — the chaingun is still ten kills away');
+
+// the reserve is sized for the pistol, so a new gun arrives fed
+P.startLevel();
+// a run that has reached nine kills already collected the SMG at five, so the
+// setup says so — otherwise the one-gun-per-kill rule hands out the SMG here
+// and the chaingun waits for the eleventh, which is not what a player sees.
+P.player.runKills = 9; P.player.weapons[SMG_I] = 1;
+killOneGuard();
+ok(P.player.weapons[CHAIN] === 1 && P.player.weapon === CHAIN,
+   'the tenth kill unlocks the chaingun and equips it');
+
+// ...and the reserve it arrives on. NOT measured across killOneGuard, which
+// sets player.ammo itself to have something to shoot with — an assertion
+// straddling that could not fail, and a mutation deleting the ammo grant
+// survived a green suite until this was split out. Grant it directly instead,
+// so the only thing between the two readings is the thing under test.
+P.startLevel();
+P.player.weapons[SMG_I] = 1;
+P.player.runKills = 10; P.player.ammo = 30;
+ok(P.checkWeaponUnlock(), 'test setup: the chaingun was granted');
+ok(P.player.weapon === CHAIN, 'test setup: and it is the gun that was granted');
+ok(P.player.ammo > 30, `a new gun arrives fed (30 -> ${P.player.ammo})`);
+// and it cannot mint reserve past the cap the pickups respect
+P.startLevel();
+P.player.weapons[SMG_I] = 1;
+P.player.runKills = 10; P.player.ammo = 95;
+P.checkWeaponUnlock();
+ok(P.player.ammo === 99, `the grant is capped like any other ammo (${P.player.ammo})`);
+
+// ── the thresholds are on the RUN, not the floor. player.kills is zeroed on
+//    every descent because the tally reports a per-floor ratio; spending that
+//    counter here would reset your progress toward the next gun each floor.
+P.startLevel(0);
+P.player.runKills = 7; P.player.kills = 7; P.player.weapons[SMG_I] = 1;
+ok(P.nextLevel(), 'test setup: descended a floor');
+ok(P.player.kills === 0, 'the per-floor kill count resets on a descent');
+ok(P.player.runKills === 7, 'the run-long one does not');
+ok(P.player.weapons[SMG_I] === 1, 'and the guns you earned come with you');
+
+// ...but a cold start takes it all back
+P.startLevel(0);
+ok(P.player.runKills === 0 && !P.player.weapons[SMG_I] && !P.player.weapons[CHAIN],
+   'restarting cold puts you back to knife and pistol');
+ok(P.player.weapon === PISTOL_I, 'with the pistol in hand');
+
+// ── checkWeaponUnlock is idempotent: it is called once per kill and must not
+//    hand out a gun a second time or re-equip one you have switched away from.
+P.startLevel();
+P.player.runKills = 12;
+ok(P.checkWeaponUnlock(), 'a run that has out-earned its roster grants the next gun');
+ok(P.checkWeaponUnlock(), 'and the one after it');
+ok(!P.checkWeaponUnlock(), 'then stops, rather than re-equipping every kill');
+P.startLevel();
+
+// ── the auto-map and the objective line ──────────────────────────────────────
+//
+// The floors are legible now, but the map is what makes a floor you have half
+// explored legible. Two properties matter: it starts blind, and it reveals
+// what you can SEE rather than a radius — a disc reveal through walls would
+// read as a wallhack and would make the rewritten rooms pointless.
+group('the auto-map');
+P.startLevel();
+const seenArr = P.seen();
+ok(seenArr && seenArr.length === P.grid()[0].length * P.grid().length,
+   `the auto-map is sized with the floor (${seenArr && seenArr.length})`);
+const countSeen = () => { let n = 0; const a = P.seen(); for (let i = 0; i < a.length; i++) n += a[i]; return n; };
+ok(countSeen() === 0, 'and every floor starts blind');
+
+// sweep a full circle, so the FOV is not what leaves anything dark — whatever
+// is still unmapped after this is unmapped because a wall is in the way
+const MW = P.grid()[0].length;
+for (let i = 0; i < 8; i++) { P.player.a = i * Math.PI / 4; P.markVisible(); }
+const litAll = countSeen();
+ok(litAll > 12, `looking around reveals the room you are in (${litAll} tiles)`);
+ok(litAll < seenArr.length * 0.5,
+   `and not the whole floor (${litAll} of ${seenArr.length})`);
+ok(P.seen()[(P.player.y | 0) * MW + (P.player.x | 0)] === 1,
+   'the tile you are standing on is mapped');
+
+// the occlusion control: something CLOSE is still dark, and it is dark because
+// a wall is between you and it. Without this the assertion above passes just
+// as well for a radius reveal that ignores geometry.
+let nearDark = 0, nearLit = 0;
+for (let gy = 0; gy < P.grid().length; gy++) {
+  for (let gx = 0; gx < MW; gx++) {
+    const d = Math.hypot(gx + 0.5 - P.player.x, gy + 0.5 - P.player.y);
+    if (d > 6) continue;
+    if (P.seen()[gy * MW + gx]) nearLit++;
+    else if (!P.hasLOS(P.player.x, P.player.y, gx + 0.5, gy + 0.5)) nearDark++;
+  }
+}
+ok(nearLit > 0, `test setup: tiles within 6u were mapped (${nearLit})`);
+ok(nearDark > 0, `tiles within 6u with no line of sight stay dark (${nearDark})`);
+
+// a fresh floor forgets what you mapped on the last one
+P.startLevel();
+ok(countSeen() === 0, 'starting a floor wipes the map');
+
+ok(P.toggleMinimap() === false && P.toggleMinimap() === true, 'Tab toggles the map');
+
+// ── the weapon strip is the whole reason the roster is discoverable at all,
+//    so it gets an assertion rather than being trusted to paint.
+P.startLevel();
+const slot = i => g.el('sWeapons').children[i];
+ok(/PISTOL/.test(slot(1).textContent) && slot(1).classList.contains('on'),
+   `the strip shows the gun in your hands (${slot(1).textContent})`);
+ok(slot(0).classList.contains('owned') && !slot(0).classList.contains('on'),
+   'an owned but holstered weapon reads as owned');
+ok(slot(2).classList.contains('locked') && slot(2).textContent === '0/5',
+   `a locked slot shows its price instead of its name (${slot(2).textContent})`);
+P.player.runKills = 3;
+P.syncHud();
+ok(slot(2).textContent === '3/5', `and counts down as you earn it (${slot(2).textContent})`);
+ok(slot(3).textContent === '3/10', `all the way to the last slot (${slot(3).textContent})`);
+// the touch row carries the same three states, or a phone gets four identical
+// buttons three of which silently do nothing
+ok(g.el('tW1').classList.contains('on'), 'the touch row marks the weapon in hand');
+ok(g.el('tW0').classList.contains('owned'), 'and the ones you merely own');
+ok(g.el('tW3').classList.contains('locked'), 'and dims the ones you have not earned');
+
+// ── the objective line ───────────────────────────────────────────────────────
+//
+// Derived from doorList rather than a per-floor table, so these expectations
+// are read off the floor the same way the code reads them — a rewritten map
+// cannot silently invalidate the test.
+group('the objective line');
+P.startLevel(0);
+const floorNeeds = lock => P.doors().some(d => d.lock === lock);
+P.player.keyRed = false; P.player.keyBlue = false;
+if (floorNeeds('red')) {
+  ok(P.objectiveText() === 'FIND THE RED KEYCARD',
+     `floor 1 sends you after the red keycard (${P.objectiveText()})`);
+  P.player.keyRed = true;
+}
+if (floorNeeds('blue')) {
+  ok(P.objectiveText() === 'FIND THE BLUE KEYCARD',
+     `then the blue one (${P.objectiveText()})`);
+  P.player.keyBlue = true;
+}
+ok(P.objectiveText() === 'RIDE THE ELEVATOR OUT',
+   `and with every keycard in hand, the elevator (${P.objectiveText()})`);
+
+// a live boss outranks the elevator, which is the gate use() actually enforces
+P.startLevel(P.levels().length - 1);
+P.player.keyRed = true; P.player.keyBlue = true;
+ok(P.boss() && P.boss().alive, 'test setup: the last floor has a live CEO');
+ok(/CEO/.test(P.objectiveText()), `it says so (${P.objectiveText()})`);
+P.boss().alive = false;
+ok(P.objectiveText() === 'RIDE THE ELEVATOR OUT', 'and stands down once it is dead');
+P.startLevel(0);
+
 group('doors & keycards');
 P.startLevel();
 freezeEnemies();                     // this group is about doors, not about who walks into one
@@ -893,8 +1152,23 @@ ok(P.state() === 'cleared', 'the exit releases once the CEO is down');
 // ── standoff: a phase-1 CEO holds 5.2u, well outside the 2.2u a drone keeps
 P.startLevel(P.levels().length - 1);
 const ceo2 = P.boss();
-P.player.x = 8.5; P.player.y = ceo2.y;            // same row, clear sightline
-P.player.a = 0;
+// The far end of the CEO's own row with a clear sightline — derived rather
+// than the literal 8.5 this used to carry, which was inside the boardroom on
+// the map it was written against and inside a wall on the next one.
+{
+  const gy = ceo2.y | 0, row = P.grid()[gy];
+  let far = null, farD = -1;
+  for (let x = 1; x < row.length - 1; x++) {
+    const cx = x + 0.5;
+    if (P.blockAt(cx, ceo2.y)) continue;
+    if (!P.hasLOS(cx, ceo2.y, ceo2.x, ceo2.y)) continue;
+    const d = Math.abs(ceo2.x - cx);
+    if (d > farD) { farD = d; far = cx; }
+  }
+  ok(far !== null, 'test setup: found a sightline down the CEO\u2019s row');
+  P.player.x = far; P.player.y = ceo2.y;
+  P.player.a = far < ceo2.x ? 0 : Math.PI;
+}
 ok(P.hasLOS(P.player.x, P.player.y, ceo2.x, ceo2.y), 'test setup: the CEO is in view down the arena');
 ok(Math.hypot(ceo2.x - P.player.x, ceo2.y - P.player.y) > ceo2.want,
    'test setup: it starts further out than its standoff, so it has to close');
@@ -2881,13 +3155,27 @@ group('the CEO does not patrol (fixture)');
   ok(Math.hypot(ceo.x - guard.x, ceo.y - guard.y) > 1.5,
      'test setup: the two are far enough apart that separation never touches them');
 
-  const c0 = { x: ceo.x, y: ceo.y }, g0 = { x: guard.x, y: guard.y };
-  f.run(500);                                        // 8s
+  // PATH LENGTH, not net displacement. A patrol is a random walk that reverses
+  // out of dead ends, so where it ENDS UP is not a measure of whether it moved:
+  // over twelve seeded trials the net came out anywhere from 0.14u to 4.09u
+  // against this control's old bound of 0.25, so it failed about one run in
+  // twelve — and a flake in a control turns an `unkillable` mutation into a
+  // false kill, which is how this was found. Accumulated path is 2.71-4.09
+  // over the same trials: tight, and it is the thing the control actually
+  // claims.
+  const c0 = { x: ceo.x, y: ceo.y };
+  let ceoPath = 0, gPath = 0;
+  let cx = ceo.x, cy = ceo.y, gx = guard.x, gy = guard.y;
+  for (let i = 0; i < 500; i++) {                    // 8s
+    f.run(1);
+    ceoPath += Math.hypot(ceo.x - cx, ceo.y - cy);   cx = ceo.x; cy = ceo.y;
+    gPath   += Math.hypot(guard.x - gx, guard.y - gy); gx = guard.x; gy = guard.y;
+  }
   ok(ceo.state === 'idle', `the CEO stayed idle (state=${ceo.state})`);
-  ok(ceo.x === c0.x && ceo.y === c0.y,
+  ok(ceo.x === c0.x && ceo.y === c0.y && ceoPath === 0,
      `and has not moved a millimetre (${ceo.x.toFixed(3)},${ceo.y.toFixed(3)})`);
-  ok(Math.hypot(guard.x - g0.x, guard.y - g0.y) > 0.25,
-     `while the guard beneath it paced ${Math.hypot(guard.x - g0.x, guard.y - g0.y).toFixed(2)}u`);
+  ok(gPath > 1.5,
+     `while the guard beneath it paced ${gPath.toFixed(2)}u`);
 }
 
 // ── a corridor reads as a route, not a shuffle (fixture) ─────────────────────
@@ -3028,25 +3316,39 @@ group('quantised fades (atlas fixtures)');
     try { return fn(); } finally { Math.random = real; }
   };
 
-  const idleArm = () => seeded(() => {
+  // Every arm — idle or driven — runs the SAME shape: same load, same frame
+  // cadence, same frozen roster, same topped-up health. The only difference is
+  // the `drive` callback, which is the effect under test.
+  //
+  // Freezing the roster and topping the health are not tidiness. The idle arm
+  // used to be one flat `run(FRAMES)` on a floor whose spawn was a quiet
+  // corner. The Phase 7 rewrite made the spawn an atrium with four guards in
+  // it, so the "idle" arm took fire, drew arcs of its own, and then DIED —
+  // measured at 310 entries against the driven arm's 265, a NEGATIVE cost, and
+  // `arc-alpha-unquantised` survived a fully green suite on exactly that.
+  //
+  // An idle arm is only idle if the level lets it be, and no level should have
+  // to. Same family as the Phase 6 finding one line down: when you A/B a cache,
+  // the arms have to differ in one thing and nothing else.
+  const armed = (drive) => seeded(() => {
     const a = load({ htmlPath: HTML });
-    a.P.startLevel(); a.run(FRAMES);
-    return a.P.atlasSize();
+    const A = a.P;
+    A.startLevel();
+    for (const e of A.enemies()) { e.state = 'hurt'; e.stateT = 1e9; }
+    for (let i = 0; i < BURST; i++) {
+      A.player.hp = 100;                     // topped up, so no sample can kill
+      if (drive) drive(A, a, i);
+      a.run(PER);
+    }
+    return A.atlasSize();
   });
+  const idleArm = () => armed(null);
 
   // ── the damage arc: a 4-step fade over two glyphs
   {
     const quiet = idleArm();
-    const cost = seeded(() => {
-      const b = load({ htmlPath: HTML });
-      const B = b.P;
-      B.startLevel();
-      for (let i = 0; i < BURST; i++) {
-        B.player.hp = 100;                   // topped up, so no sample can kill
-        B.hurtPlayer(1, B.player.x + Math.cos(i) * 3, B.player.y + Math.sin(i) * 3);
-        b.run(PER);
-      }
-      return B.atlasSize();
+    const cost = armed((A, a, i) => {
+      A.hurtPlayer(1, A.player.x + Math.cos(i) * 3, A.player.y + Math.sin(i) * 3);
     }) - quiet;
     // Measured, and repeatable to the entry: 6 quantised, 150 unquantised, over
     // the same 600 frames from the same cold atlas. 24 is four times the honest
@@ -3060,18 +3362,12 @@ group('quantised fades (atlas fixtures)');
   //    the jitter positions, the hit/kill colour and the shadow row
   {
     const quiet = idleArm();
-    const cost = seeded(() => {
-      const b = load({ htmlPath: HTML });
-      const B = b.P;
-      B.startLevel();
+    const cost = armed((B) => {
       const foe = B.enemies().find(e => e.type === 'guard');
-      for (let i = 0; i < BURST; i++) {
-        foe.hp = 1e9;                        // never dies, so every shot pops
-        foe.x = B.player.x + 2; foe.y = B.player.y; B.player.a = 0;
-        B.player.fireCd = 0; B.player.ammo = 500; B.player.clip = 8;
-        B.fire(); b.run(PER);
-      }
-      return B.atlasSize();
+      foe.hp = 1e9;                          // never dies, so every shot pops
+      foe.x = B.player.x + 2; foe.y = B.player.y; B.player.a = 0;
+      B.player.fireCd = 0; B.player.ammo = 500; B.player.clip = 8;
+      B.fire();
     }) - quiet;
     // Measured: 177 quantised against 337 unquantised, both exact and both flat
     // from 120 shots through 480. The honest cost is large because of what the

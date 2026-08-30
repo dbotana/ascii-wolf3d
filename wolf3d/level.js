@@ -137,6 +137,7 @@ function parseLevel(src) {
   // sized with the map, so a floor of a different shape cannot read a stale field
   navDist = new Int32Array(MAP_W * MAP_H).fill(-1);
   navQueue = new Int32Array(MAP_W * MAP_H);   // hoisted: the field rebuilds ~3x a second
+  seen = new Uint8Array(MAP_W * MAP_H);       // the auto-map starts every floor blind
   navSeedX = navSeedY = -1;
   navRebuildT = 0;
 }
@@ -153,7 +154,7 @@ function startLevel(n, carry) {
                                     n === undefined ? levelIndex : n));
   parseLevel(LEVELS[levelIndex]);
   player.a = -Math.PI / 2;
-  if (!carry) { player.hp = 100; player.ammo = 24; player.score = 0; player.weapon = PISTOL; }
+  if (!carry) { player.hp = 100; player.ammo = 24; player.score = 0; player.weapon = PISTOL; resetWeapons(); }
   // kills and keycards are per-floor even on a descent: the ratio on the
   // tally screen is this floor's, and last floor's keys open nothing here
   player.kills = 0;

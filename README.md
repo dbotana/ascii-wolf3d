@@ -46,6 +46,8 @@ keycards, and an elevator out.
 | `Space` / click | fire                              |
 | `E`             | open door / use switch / search walls |
 | `R`             | reload                            |
+| `1` … `4`       | knife / pistol / SMG / chaingun    |
+| `Tab`           | show or hide the auto-map         |
 | `P`             | restart floor                     |
 | `Esc`           | pause (also releases the mouse)   |
 | `M`             | mute audio and music              |
@@ -71,9 +73,19 @@ from `ascii_city.html`. The city itself is untouched.
   guards.
 - **Multi-cell sprites** — the city drew one char per NPC; this scales ASCII art
   into a projected screen rect with per-column z-testing.
-- **Hitscan pistol** with an ASCII view-model, muzzle flash, and weapon bob.
-- **Status bar** — score, kills, health, ammo, keycards, and a face portrait
-  that degrades as you take damage.
+- **Four weapons, earned** — knife, pistol, SMG and chaingun, each an ASCII
+  view-model with muzzle flash and weapon bob. You start with the knife and the
+  pistol; five kills buys the SMG and ten the chaingun, and each arrives loaded
+  and already in your hands. The count is for the whole run, so it carries down
+  the floors with your health and ammo, and a restart puts it back.
+- **Auto-map** — a scrolling 25x25-tile window in the corner that fills in only
+  where you have walked or looked, marking doors, keycards and the elevator once
+  you have seen them, plus anything alerted and hunting you within 8 tiles. It
+  never points at the objective. `Tab` hides it.
+- **Status bar** — score, kills, health, ammo, keycards, a four-slot weapon
+  strip that doubles as the progress bar toward the next gun, an objective line
+  naming what this floor wants from you, and a face portrait that degrades as
+  you take damage.
 
 ### The floors
 
@@ -85,13 +97,21 @@ Three hand-authored 40x40 maps, each an array of strings in its own
 
 | | floor | route |
 |---|---|---|
-| 1 | ATRIUM · SUBLEVEL | red keycard → red door → blue keycard → blue door → elevator |
-| 2 | R&D · SERVER FARM | clean-room keycards in both lab wings → red door → atrium → blue door |
-| 3 | EXECUTIVE SUITE | red keycard in the cubicle farm → boardroom → kill the CEO → elevator |
+| 1 | ATRIUM · SUBLEVEL | plain door → red keycard (west office) → red door → blue keycard (neon office) → blue door → elevator |
+| 2 | R&D · SERVER FARM | both keycards in mirrored lab wings behind plain doors → red door → clean room → blue door |
+| 3 | EXECUTIVE SUITE | red keycard in a corner office off the aisle → red door → boardroom → kill the CEO → elevator |
 
-Floor 1 is 12 enemies, 39 pickups, 4 doors, 3 secret push-walls; floors 2 and 3
-run 15 enemies apiece. `node reference/validate-level.js` prints the current
-counts, and proves every floor's exit is reachable through its keycard gates.
+Every floor is built the same way: one 3-wide spine runs north from the spawn to
+the elevator, every room hangs off it as a bay of about 7x6, and the locked
+doors sit *on* the spine — so you meet the lock before you go looking for its
+key, and the floor states its own puzzle up front. A ring corridor loops each
+floor so backtracking is never retracing. The first draft was four or five very
+large open halls per floor and was close to unnavigable; the layout language is
+written up in `reference/CLAUDE.md`.
+
+Floors run 15, 15 and 17 enemies and 50-55 pickups.
+`node reference/validate-level.js` prints the current counts, and proves every
+floor's exit is reachable through its keycard gates.
 
 Secret walls look exactly like the panelling they hide in — press `E` facing a
 wall and it grinds back two tiles into an alcove. The status bar tracks how many

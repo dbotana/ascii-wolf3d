@@ -14,7 +14,7 @@ let mouseHeld = false;
 addEventListener('keydown', e => {
   const k = e.key.toLowerCase();
   if (['arrowleft','arrowright','arrowup','arrowdown','w','a','s','d','e','r',' ',
-       '1','2','3','4'].includes(k)) e.preventDefault();
+       '1','2','3','4','tab'].includes(k)) e.preventDefault();
   if (keys.has(k)) return;
   keys.add(k);
   if (k === ' ')     firePressed = true;
@@ -28,7 +28,8 @@ addEventListener('keydown', e => {
   if (k === 'escape') togglePause();
   if (k === 'r')     { if (gameState === 'playing') startReload(); }
   if (k === 'p')     startLevel(gameState === 'won' ? 0 : levelIndex);
-  if (k >= '1' && k <= '4') selectWeapon(+k - 1);
+  if (k >= '1' && k <= '4') pickWeapon(+k - 1);
+  if (k === 'tab')   toggleMinimap();
 });
 addEventListener('keyup', e => keys.delete(e.key.toLowerCase()));
 

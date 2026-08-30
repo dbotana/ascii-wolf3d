@@ -7,7 +7,7 @@
 // Firing sets the same `firePressed` edge and `mouseHeld` flag the mouse does,
 // so the semi-auto / hold-to-repeat split in frame() is reused rather than
 // reimplemented, and the buttons call use(), startReload(), togglePause() and
-// selectWeapon() — the same calls the key handlers make.
+// pickWeapon() — the same calls the key handlers make.
 //
 // The one thing that could not be reused is movement. The keyboard is binary
 // and a stick is analog, so `touchMove` is added to updatePlayer's vector and
@@ -198,7 +198,7 @@ tapButton('tUse',    () => use());
 tapButton('tReload', () => { if (gameState === 'playing') startReload(); });
 tapButton('tPause',  () => togglePause());
 for (let i = 0; i < 4; i++) {
-  (function (n) { tapButton('tW' + n, () => selectWeapon(n)); })(i);
+  (function (n) { tapButton('tW' + n, () => pickWeapon(n)); })(i);
 }
 
 // Show the overlay on a device that has no mouse, without waiting for the

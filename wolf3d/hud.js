@@ -93,7 +93,8 @@ function syncHud() {
                                ' \u00b7 ' + DIFFICULTY[difficulty].name.toLowerCase();
   el('sHp').textContent   = player.hp;
   const w = curWeapon();
-  el('sWeapon').textContent = w.name;
+  paintWeaponStrip();
+  paintObjective();
   // a weapon that costs no ammo has no magazine to report, and must not read
   // as permanently empty
   el('sAmmo').textContent = w.cost <= 0 ? '--'
@@ -107,6 +108,67 @@ function syncHud() {
   ks[0].classList.toggle('on', player.keyRed);
   ks[1].classList.toggle('on', player.keyBlue);
   paintBossBar();
+}
+
+/**
+ * The four weapon slots under the status bar.
+ *
+ * The game shipped showing one name, which is exactly why a whole playthrough
+ * could end on the pistol: nothing ever said the other three existed. A locked
+ * slot shows what it costs instead of what it is, so the strip doubles as the
+ * progress bar toward the next gun — and the number on it is the number the
+ * key press quotes back at you.
+ */
+function paintWeaponStrip() {
+  const slots = el('sWeapons');
+  if (!slots) return;
+  for (let i = 0; i < slots.children.length; i++) {
+    const s = slots.children[i];
+    const w = WEAPONS[i];
+    if (!w) { s.textContent = ''; continue; }
+    const owned = !!player.weapons[i];
+    s.textContent = owned ? (i + 1) + ' ' + w.name
+                          : player.runKills + '/' + WEAPON_UNLOCK[i];
+    s.classList.toggle('on', owned && i === player.weapon);
+    s.classList.toggle('owned', owned && i !== player.weapon);
+    s.classList.toggle('locked', !owned);
+    // the touch row is the same three states, painted from the same place —
+    // four identical buttons, three of which silently do nothing, is the touch
+    // half of the bug the strip exists to fix
+    const tw = el('tW' + i);
+    if (tw) {
+      tw.classList.toggle('on', owned && i === player.weapon);
+      tw.classList.toggle('owned', owned && i !== player.weapon);
+      tw.classList.toggle('locked', !owned);
+    }
+  }
+}
+
+/**
+ * What you are for on this floor.
+ *
+ * Derived from the parsed level rather than from per-floor data: doorList
+ * knows which locks this map actually has, so a floor with no blue door never
+ * asks for a blue keycard and a rewritten map needs no new table. It names the
+ * goal and never the route — the brief was to hold the player\u2019s hand, not to
+ * walk them down the corridor.
+ */
+function objectiveText() {
+  const needs = lock => doorList.some(d => d.lock === lock);
+  if (needs('red')  && !player.keyRed)  return 'FIND THE RED KEYCARD';
+  if (needs('blue') && !player.keyBlue) return 'FIND THE BLUE KEYCARD';
+  if (boss && boss.alive)               return 'THE BOARD IS IN SESSION \u2014 KILL THE CEO';
+  return 'RIDE THE ELEVATOR OUT';
+}
+
+function paintObjective() {
+  const o = el('objective');
+  if (!o) return;
+  // only while a floor is actually in play: a tally or a death banner is not
+  // the moment to be told what to do next
+  const show = gameState === 'playing';
+  if (show) o.textContent = objectiveText();
+  o.classList.toggle('show', show);
 }
 
 // The bar stays hidden until the CEO has actually noticed you, so walking in

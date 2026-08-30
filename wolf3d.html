@@ -21,6 +21,7 @@
   </div>
 
   <div id="prompt"></div>
+  <div id="objective"></div>
   <div id="toast"></div>
 
   <div id="statusbar">
@@ -33,7 +34,11 @@
     <div class="slot" id="sHpWrap"><span class="lbl">health</span><span class="val" id="sHp">100</span>
       <div id="hpBar"><div id="hpChip"></div><div id="hpFill"></div></div>
     </div>
-    <div class="slot"><span class="lbl">weapon</span><span class="val" id="sWeapon">PISTOL</span></div>
+    <div class="slot"><span class="lbl">weapon</span>
+      <div id="sWeapons">
+        <i id="sW0"></i><i id="sW1"></i><i id="sW2"></i><i id="sW3"></i>
+      </div>
+    </div>
     <div class="slot"><span class="lbl">ammo</span><span class="val" id="sAmmo">8/24</span></div>
     <div class="slot"><span class="lbl">keycards</span>
       <div id="sKeys"><i class="red"></i><i class="blue"></i></div>
@@ -105,7 +110,9 @@
       <kbd>&uArr;</kbd> run<br>
       <kbd>Space</kbd> / click fire &nbsp;
       <kbd>E</kbd> use door &middot; switch &middot; search walls &nbsp;
-      <kbd>R</kbd> reload<br>
+      <kbd>R</kbd> reload &nbsp;
+      <kbd>1</kbd>&hellip;<kbd>4</kbd> swap weapon &nbsp;
+      <kbd>Tab</kbd> map<br>
       <kbd>P</kbd> restart floor &nbsp; <kbd>M</kbd> mute &nbsp; <kbd>Esc</kbd> pause &middot; release mouse
     </div>
     <small>click to enter</small>
@@ -129,5 +136,6 @@
 <script src="wolf3d/enemies.js"></script>
 <script src="wolf3d/combat.js"></script>
 <script src="wolf3d/render.js"></script>
+<script src="wolf3d/minimap.js"></script>
 <script src="wolf3d/hud.js"></script>
 <script src="wolf3d/main.js"></script>

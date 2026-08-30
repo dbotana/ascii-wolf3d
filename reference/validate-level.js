@@ -116,6 +116,21 @@ function validate(name, rows) {
       } else if (!ns && !ew) {
         note(`door at ${x},${y} is free-standing (needs solid cells on one axis ` +
              `to slide into) — rays will slip past its slab at oblique angles`);
+      } else {
+        // The other axis is the one you WALK through, and both sides of it have
+        // to be somewhere you can stand. A door with rock on one side is legal
+        // by every rule above — one flanked axis, exit still reachable, nothing
+        // stranded — and it is a door you open onto a wall. Two shipped on
+        // floor 1's bay walls, found by reading the map rather than by running
+        // this file, which is why the check is here now.
+        const thru = ns ? [[-1, 0], [1, 0]] : [[0, -1], [0, 1]];
+        for (const [dx, dy] of thru) {
+          const c = at(x + dx, y + dy);
+          if (!WALK.includes(c) && !DOORCH.includes(c)) {
+            note(`door at ${x},${y} opens onto '${c}' at ${x + dx},${y + dy} — ` +
+                 `you can open it but not walk through it`);
+          }
+        }
       }
     }
   }

@@ -183,6 +183,60 @@
   #sKeys i.red.on  { background: #FF3B4E; border-color: #FF8A96; box-shadow: 0 0 8px #FF3B4E; }
   #sKeys i.blue.on { background: #4FA8FF; border-color: #A6D4FF; box-shadow: 0 0 8px #4FA8FF; }
 
+  /* ── the weapon strip ─────────────────────────────────────
+     Four slots rather than one name, because the single name was the whole
+     reason a playthrough could end without the player learning the other
+     three exist. A locked slot shows its price in kills, so the strip is
+     also the progress bar toward the next gun. */
+  #sWeapons { display: flex; gap: 4px; justify-content: center; margin-top: 3px; }
+  #sWeapons i {
+    display: block;
+    font-family: 'IBM Plex Mono', monospace;
+    font-style: normal;
+    font-size: 9px; letter-spacing: 0.08em;
+    padding: 3px 5px;
+    min-width: 40px; text-align: center;
+    border: 1px solid rgba(255,255,255,0.12);
+    background: rgba(255,255,255,0.03);
+    color: rgba(255,255,255,0.28);
+    white-space: nowrap;
+  }
+  /* owned but holstered: readable, not shouting */
+  #sWeapons i.owned {
+    border-color: rgba(255,149,0,0.35);
+    background: rgba(255,149,0,0.07);
+    color: rgba(255,208,122,0.75);
+  }
+  /* in your hands */
+  #sWeapons i.on {
+    border-color: rgba(255,149,0,0.9);
+    background: rgba(255,149,0,0.20);
+    color: #FFD07A;
+    text-shadow: 0 0 8px rgba(255,149,0,0.7);
+  }
+  /* the kill the strip is counting down to */
+  #sWeapons i.locked { color: rgba(127,255,107,0.40); }
+
+  /* ── the objective line ───────────────────────────────────
+     What you are for on this floor, in three words. It names the goal and
+     never the corridor — updatePrompt already handles the at-the-door case. */
+  #objective {
+    position: absolute;
+    left: 50%; bottom: 74px;
+    transform: translateX(-50%);
+    z-index: 3;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 10px; letter-spacing: 0.24em;
+    text-transform: uppercase;
+    color: rgba(127,255,107,0.62);
+    text-shadow: 0 0 8px rgba(127,255,107,0.30);
+    pointer-events: none;
+    white-space: nowrap;
+    opacity: 0;
+    transition: opacity 0.3s ease;
+  }
+  #objective.show { opacity: 1; }
+
   /* ── boss bar: only up while the CEO is awake and alive ──── */
   #bossBar {
     position: absolute;
@@ -545,6 +599,16 @@
     color: rgba(127,255,107,0.7);
   }
   #touch .tw:active { background: rgba(127,255,107,0.18); color: var(--crt); }
+  /* Owned, holstered, locked — the same three states the desktop strip shows.
+     Without these the row is four identical buttons, three of which silently
+     do nothing, which is the touch half of the bug this whole pass is about. */
+  #touch .tw.owned { border-color: rgba(255,149,0,0.45); color: rgba(255,208,122,0.85); }
+  #touch .tw.on {
+    border-color: var(--sodium);
+    background: rgba(255,149,0,0.22);
+    color: #FFD07A;
+  }
+  #touch .tw.locked { opacity: 0.42; }
 
   #tPause {
     pointer-events: auto;

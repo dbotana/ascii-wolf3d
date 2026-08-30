@@ -223,8 +223,8 @@ module.exports = [
     note: 'collecting a wallet pays 500 but never counts toward the treasure ratio' },
 
   { id: 'carry-loses-score', group: 'Phase 1', file: 'wolf3d/level.js',
-    find: 'if (!carry) { player.hp = 100; player.ammo = 24; player.score = 0; player.weapon = PISTOL; }',
-    replace: '{ player.hp = 100; player.ammo = 24; player.score = 0; player.weapon = PISTOL; }',
+    find: 'if (!carry) { player.hp = 100; player.ammo = 24; player.score = 0; player.weapon = PISTOL; resetWeapons(); }',
+    replace: '{ player.hp = 100; player.ammo = 24; player.score = 0; player.weapon = PISTOL; resetWeapons(); }',
     note: 'descending a floor resets health, ammo and score — carry stops meaning anything' },
 
   { id: 'carry-keeps-kills', group: 'Phase 1', file: 'wolf3d/level.js',
@@ -820,5 +820,75 @@ module.exports = [
     find: "const running = keys.has('shift') || touchRun;",
     replace: "const running = keys.has('shift');",
     note: 'the stick at the rim walks rather than runs, and a phone has no shift key to fall back on' },
+
+  // ── Phase 7: earning the weapon roster, the auto-map, the objective line ───
+  // The roster shipped fully owned and invisible, which is how a whole
+  // playthrough happened on the pistol. These are the bugs that would put it
+  // back without anything looking wrong on screen.
+
+  { id: 'unlock-threshold-off-by-one', group: 'Phase 7', file: 'wolf3d/combat.js',
+    find: 'if (player.weapons[i] || player.runKills < WEAPON_UNLOCK[i]) continue;',
+    replace: 'if (player.weapons[i] || player.runKills <= WEAPON_UNLOCK[i]) continue;',
+    note: 'every weapon costs one kill more than the HUD says it does' },
+
+  { id: 'unlock-counts-floor-kills', group: 'Phase 7', file: 'wolf3d/combat.js',
+    find: 'if (player.weapons[i] || player.runKills < WEAPON_UNLOCK[i]) continue;',
+    replace: 'if (player.weapons[i] || player.kills < WEAPON_UNLOCK[i]) continue;',
+    note: 'the thresholds read the per-floor kill count, which startLevel zeroes on every descent — so progress toward the next gun resets each floor and the chaingun needs ten kills on ONE floor' },
+
+  { id: 'unlock-never-equips', group: 'Phase 7', file: 'wolf3d/combat.js',
+    find: "    toast(WEAPONS[i].name + ' UNLOCKED  \\u00b7  PRESS [' + (i + 1) + ']');\n    selectWeapon(i);",
+    replace: "    toast(WEAPONS[i].name + ' UNLOCKED  \\u00b7  PRESS [' + (i + 1) + ']');",
+    note: 'a new gun is granted but left holstered — which is the exact failure the whole feature exists to fix, since a weapon you have to go and select is one a player never learns they own' },
+
+  { id: 'unlock-brings-no-ammo', group: 'Phase 7', file: 'wolf3d/combat.js',
+    find: 'player.ammo = Math.min(99, player.ammo + 20);',
+    replace: 'player.ammo = Math.min(99, player.ammo);',
+    note: 'the chaingun arrives over a pistol-sized reserve, so the reward is under two seconds of trigger' },
+
+  { id: 'unlock-fires-every-kill', group: 'Phase 7', file: 'wolf3d/combat.js',
+    find: '    selectWeapon(i);\n    return true;',
+    replace: '    selectWeapon(i);\n    player.weapons[i] = 0;\n    return true;',
+    note: 'ownership is handed out and immediately taken back, so every kill past the threshold re-announces and re-equips the same gun' },
+
+  { id: 'cold-start-keeps-guns', group: 'Phase 7', file: 'wolf3d/level.js',
+    find: 'player.weapon = PISTOL; resetWeapons(); }',
+    replace: 'player.weapon = PISTOL; }',
+    note: 'a restart or a death keeps the roster you earned last run, so the progression only ever happens once' },
+
+  { id: 'map-sees-through-walls', group: 'Phase 7', file: 'wolf3d/minimap.js',
+    find: 'for (let d = MINI_STEP; d < hit.dist; d += MINI_STEP)',
+    replace: 'for (let d = MINI_STEP; d < MAX_DEPTH; d += MINI_STEP)',
+    note: 'the auto-map reveals straight through walls, so it maps rooms you have never entered and stops being a record of where you have been' },
+
+  { id: 'map-not-wiped-per-floor', group: 'Phase 7', file: 'wolf3d/level.js',
+    find: 'seen = new Uint8Array(MAP_W * MAP_H);',
+    replace: 'seen = seen || new Uint8Array(MAP_W * MAP_H);',
+    note: 'the last floor’s exploration carries into the next one, so floor 2 opens already half mapped — and a floor of a different shape reads a stale array' },
+
+  { id: 'strip-hides-the-price', group: 'Phase 7', file: 'wolf3d/hud.js',
+    find: "    s.textContent = owned ? (i + 1) + ' ' + w.name\n                          : player.runKills + '/' + WEAPON_UNLOCK[i];",
+    replace: "    s.textContent = (i + 1) + ' ' + w.name;",
+    note: 'a locked slot shows the weapon’s name like any other, so the strip stops being the progress bar and nothing on screen says what the gun costs' },
+
+  { id: 'strip-marks-all-owned', group: 'Phase 7', file: 'wolf3d/hud.js',
+    find: '    const owned = !!player.weapons[i];',
+    replace: '    const owned = true;',
+    note: 'every slot reads as owned, so the strip claims you hold guns the number keys will refuse' },
+
+  { id: 'touch-row-unpainted', group: 'Phase 7', file: 'wolf3d/hud.js',
+    find: "    const tw = el('tW' + i);",
+    replace: "    const tw = null;",
+    note: 'the touch weapon row is four identical buttons, three of which silently do nothing — the phone half of the bug the strip exists to fix' },
+
+  { id: 'objective-ignores-keycards', group: 'Phase 7', file: 'wolf3d/hud.js',
+    find: "  if (needs('red')  && !player.keyRed)  return 'FIND THE RED KEYCARD';",
+    replace: "  if (false) return 'FIND THE RED KEYCARD';",
+    note: 'the objective line sends you to the elevator before you hold the keycard that opens the way to it' },
+
+  { id: 'objective-ignores-boss', group: 'Phase 7', file: 'wolf3d/hud.js',
+    find: "  if (boss && boss.alive)               return 'THE BOARD IS IN SESSION \\u2014 KILL THE CEO';",
+    replace: "  if (false) return 'THE BOARD IS IN SESSION \\u2014 KILL THE CEO';",
+    note: 'floor 3 tells you to ride an elevator that use() refuses while the CEO lives' },
 
 ];

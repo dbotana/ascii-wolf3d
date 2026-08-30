@@ -116,6 +116,13 @@ function frame(now) {
   drawHitDirs(horizon);
   if (gameState === 'playing') drawGun();
 
+  // ── AUTO-MAP (over the view model, so the gun cannot hide it)
+  //    The reveal sweep runs on a stride: it casts its own rays, and a player
+  //    crosses a tile in far more than three frames at any speed the game can
+  //    produce, so nothing goes unmapped.
+  if (gameState === 'playing' && (hudTick % 3) === 0) markVisible();
+  drawMinimap();
+
   // ── SCREEN FLASHES
   if (player.flashT > 0) {
     ctx.fillStyle = 'rgba(255,225,160,' + (player.flashT / 0.09 * 0.13).toFixed(3) + ')';

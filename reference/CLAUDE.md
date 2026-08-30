@@ -61,26 +61,27 @@ the bundler and the harness both read it rather than keeping their own list.
 
 | file | lines | what |
 |---|---|---|
-| `wolf3d/style.css` | 569 | all CSS |
+| `wolf3d/style.css` | 628 | all CSS |
 | `wolf3d/config.js` | 111 | screen/projection constants, `DIFFICULTY`, `DEATH_TIME`, palette + fog cache, distance ramps, faces |
 | `wolf3d/scores.js` | 148 | the persistent high score table and its three storage guards |
-| `wolf3d/levels.js` | 149 | the three floors, `FLOOR_NAMES`, `PAR_TIME` |
+| `wolf3d/levels.js` | 185 | the three floors, `FLOOR_NAMES`, `PAR_TIME` |
 | `wolf3d/art.js` | 307 | `SPR` sprite table, the pistol's `GUN_*` view-model frames |
 | `wolf3d/gore.js` | 107 | `DEATH_SEQ` death-frame sequences, `DECAL_SPR` blood splats |
-| `wolf3d/weapons.js` | 202 | knife / SMG / chaingun art, and the `WEAPONS` table |
+| `wolf3d/weapons.js` | 208 | knife / SMG / chaingun art, the `WEAPONS` table, `WEAPON_UNLOCK` |
 | `wolf3d/gfx.js` | 94 | glyph atlas, `drawChar`, wall shading |
 | `wolf3d/audio.js` | 289 | the Web Audio graph, and the `MUSIC` table + its scheduler |
-| `wolf3d/input.js` | 63 | keyboard, mouse-look, pointer lock, the pause hooks |
+| `wolf3d/input.js` | 64 | keyboard, mouse-look, pointer lock, the pause hooks |
 | `wolf3d/touch.js` | 215 | the twin-stick overlay: stick math, look pad, buttons |
-| `wolf3d/world.js` | 305 | grid + entities, difficulty, pause, grid queries, doors, push-walls |
-| `wolf3d/level.js` | 182 | `populateEnemies`, `parseLevel` (incl. the door-axis pass), `startLevel`, `nextLevel` |
+| `wolf3d/world.js` | 314 | grid + entities, difficulty, pause, grid queries, doors, push-walls |
+| `wolf3d/level.js` | 183 | `populateEnemies`, `parseLevel` (incl. the door-axis pass), `startLevel`, `nextLevel` |
 | `wolf3d/raycast.js` | 92 | DDA raycast incl. thin-wall doors, `hasLOS`, `spriteSpan` |
 | `wolf3d/nav.js` | 103 | the BFS flow field |
 | `wolf3d/enemies.js` | 379 | FSM, steering, patrols, separation, loot, blood, the CEO |
-| `wolf3d/combat.js` | 250 | the roster lookup, firing, the magazine cycle, damage numbers, pickups |
+| `wolf3d/combat.js` | 309 | the roster lookup, earning it, firing, the magazine cycle, damage numbers, pickups |
 | `wolf3d/render.js` | 399 | `drawWalls`, sprites, decals, the weapon view-model, crosshair, the damage arc |
-| `wolf3d/hud.js` | 336 | toasts, banners, status bar, health bar, the tally screen |
-| `wolf3d/main.js` | 190 | `updatePlayer`, `frame`, boot |
+| `wolf3d/minimap.js` | 137 | the auto-map: `seen`, the reveal sweep, `drawMinimap` |
+| `wolf3d/hud.js` | 389 | toasts, banners, status bar, health bar, the weapon strip, the objective line, the tally screen |
+| `wolf3d/main.js` | 197 | `updatePlayer`, `frame`, boot |
 
 **Order matters only for top-level execution.** Function declarations hoist
 across the whole shared scope, so a function body may call anything in any file
@@ -97,6 +98,10 @@ loaded four tags later, and it is fine. What genuinely needs ordering is small:
   `SPR[type + 'Die']`. Holding objects rather than names is what lets
   `enemySprite` index a table instead of building a string, and it is why the
   death-frame assertion that predates the sequences still passes untouched;
+- `minimap.js` must follow **`gfx.js`** (for `drawChar`) and **`config.js`**
+  (for `COLOR` and `FOV`), and it is placed after `render.js` so a reader meets
+  the two canvas passes together. It runs nothing at load, so nothing else
+  about its position is load-bearing;
 - the handful of statements that touch the DOM at load — `gfx.js` grabs the
   canvas, `input.js` binds listeners to it (so it must follow `gfx.js`),
   `touch.js` binds the overlay's (so it must follow both), `hud.js` caches
@@ -485,9 +490,41 @@ display names in `FLOOR_NAMES` and target times in `PAR_TIME`:
 
 | | name | route |
 |---|---|---|
-| 1 | ATRIUM · SUBLEVEL | red keycard → red door → blue keycard → blue door → elevator |
-| 2 | R&D · SERVER FARM | clean-room keycards in both lab wings → red door → atrium → blue door |
-| 3 | EXECUTIVE SUITE | red keycard in the cubicle farm → boardroom → kill the CEO → elevator |
+| 1 | ATRIUM · SUBLEVEL | plain door → red keycard (west office) → red door → blue keycard (neon office) → blue door → elevator |
+| 2 | R&D · SERVER FARM | both keycards in mirrored lab wings behind plain doors → red door → clean room → blue door |
+| 3 | EXECUTIVE SUITE | red keycard in a corner office off the aisle → red door → boardroom → kill the CEO → elevator |
+
+### How a floor is shaped, and why
+
+The first draft was four or five very large open halls per floor. It validated,
+it played, and it was **unnavigable**: a whole playthrough could end without the
+player finding a second weapon, because keys, doors and enemies all dissolved
+into 34-wide rooms. The rewrite is a layout language rather than three maps, and
+a new floor should follow it:
+
+- **One 3-wide spine** runs north from the spawn to the elevator, and every room
+  hangs off it. `startLevel` sets the heading to north unconditionally
+  (`player.a = -Math.PI / 2`), regardless of where `@` sits — so the spine has
+  to run north from the spawn or the player opens the floor facing a wall.
+- **Rooms are bays of about 7x6**, never halls. The one deliberate exception is
+  floor 3's boardroom: the CEO opens at a 5.2u standoff and needs a clear lane
+  to hold it in, which is why its tables sit high and in two halves rather than
+  across the middle.
+- **Locked doors sit ON the spine**, so the floor states its puzzle before it
+  asks you to solve it. Each door narrows the spine to one tile — which is not
+  cosmetic: a door in a 3-wide corridor is flanked by nothing, and
+  `validate-level.js` refuses it for the reason in **The door trick**.
+- **A ring corridor** loops the floor so backtracking is never retracing.
+- **Enemies come in room-sized clusters.** This is also the pacing of the
+  weapon unlocks: floor 1's atrium and its two bays hold enough bodies to buy
+  the SMG before the red door.
+- **Push-wall pockets are 3x3 with the loot off the slab's own row**, and never
+  flush against the spine — a three-wide pocket beside a three-wide corridor is
+  a room you can walk into without ever finding the secret. Both of the north
+  pockets shipped that way in the first draft of the rewrite.
+
+Two of these were caught by the validator on the first run and two by reading
+the printed grid; none of them would have failed a test.
 
 **Keep each floor as its own top-level `const LEVEL_*` array**, in
 `wolf3d/levels.js`. Both tools find levels by that token: `validate-level.js`
@@ -743,6 +780,67 @@ Every tool here exits non-zero on failure, so they drop straight into CI.
 
 ---
 
+## Earning the roster
+
+The roster shipped with `weapons: [1, 1, 1, 1]` and keys `1`-`4` already bound.
+Every gun was owned from the first frame and **nothing on screen said so** — no
+HUD slot but the current weapon's name, no line on the splash key list, no
+styling on the touch buttons. A full playthrough was completed on the pistol.
+That is the failure this system exists to fix, and it was a presentation
+failure, not a missing feature.
+
+`WEAPON_UNLOCK` in `weapons.js` is a column of the `WEAPONS` table — `[0, 0, 5,
+10]`, cumulative kills for the run — so a fifth weapon is a row in each and no
+code anywhere. `checkWeaponUnlock()` is called once per kill from `fire()`'s
+death branch, grants the first row the run has paid for, and **puts it straight
+up**: a weapon you have to go and select is a weapon a player never learns they
+own. One gun per kill; the thresholds are far enough apart that two can never
+come due together.
+
+Three things about it are load-bearing:
+
+- **`player.runKills` is not `player.kills`.** `startLevel` zeroes the latter on
+  every floor because the tally reports a per-floor ratio. Spending that counter
+  on the thresholds would reset progress toward the next gun on every descent —
+  and the chaingun would need ten kills on a single floor.
+- **The grant carries 20 rounds with it.** The reserve is sized for the pistol,
+  and a 50-round chaingun handed over a 24-round reserve is under two seconds of
+  trigger: a reward that reads as broken.
+- **`pickWeapon()`, not `selectWeapon()`, is what the keys call.**
+  `selectWeapon` returns a silent `false` for four different refusals and both
+  the suite and the mutation catalog pin that contract, so the one refusal a
+  player can act on — "you have not earned it yet" — is answered in the wrapper,
+  which toasts the count. A key that does nothing teaches a player the key does
+  not exist.
+
+The status bar carries all four slots now (`#sWeapons`), and a locked slot shows
+`runKills/threshold` rather than a name, so the strip is also the progress bar.
+
+## The auto-map and the objective line
+
+Two aids, deliberately different in kind. Neither points at anything.
+
+**`minimap.js`** keeps `seen`, a `Uint8Array` sized with the map in `parseLevel`
+beside `navDist`, and draws a 25x25-tile window centred on the player through
+`drawChar` — on canvas rather than in the DOM, so it lives inside the CRT
+overlay for free and shares the glyph atlas. `markVisible()` casts its own 48
+rays across the FOV and **samples along each one**, rather than marking only the
+cell the ray struck: marking hits alone would fill in walls across a room while
+the floor between them stayed blank. It runs on a 3-frame stride from `frame()`,
+which is well inside the time it takes to cross a tile at any speed the game can
+produce.
+
+The map plots keycards you have laid eyes on, and enemies **only** when they are
+alerted and within 8u — what is hunting you, not where every body on the floor
+is standing. Plotting the roster would be a wallhack and would take the surprise
+out of every room.
+
+**`objectiveText()`** (`hud.js`) is derived from `doorList` rather than from
+per-floor data, so it works for any map shape and a rewritten floor cannot
+invalidate it: if the floor has a red door and you have no red keycard, it says
+so. A live boss outranks the elevator, which is the gate `use()` actually
+enforces. It names the goal and never the route.
+
 ## Bugs already made here, so they aren't made twice
 
 - Enemy movement applied its y-step twice when the x-step was blocked, giving
@@ -854,6 +952,50 @@ Every tool here exits non-zero on failure, so they drop straight into CI.
   first — the older one. It works in play and fails in any test fast enough to
   matter. Fixed by putting the new entry at the FRONT of the array before
   sorting, which decides it without consulting a clock at all.
+
+- **An assertion that straddled a helper which overwrote the value it measured.**
+  The weapon-unlock grant adds 20 reserve rounds; the test set `player.ammo = 30`,
+  killed a guard through `killOneGuard()`, and asserted `ammo > 30`. But
+  `killOneGuard` sets `player.ammo = 200` itself, because it needs something to
+  shoot with — so the assertion passed at ~200 either way and the mutation
+  deleting the grant **survived a green suite**. Split into a direct
+  `checkWeaponUnlock()` call with nothing between the two readings but the thing
+  under test. Same family as the atlas A/B: *ask what else moves the number you
+  are measuring.*
+
+- **A control that measured where a random walk ENDED UP.** The CEO fixture
+  proves the boss does not patrol, and its control proves a guard beside it
+  does — by net displacement from spawn, bounded at `> 0.25u` over 8s. But a
+  patrol reverses out of dead ends, so displacement is not a measure of having
+  moved: over twelve seeded trials it came out anywhere from **0.14u to 4.09u**,
+  failing about one run in twelve. Accumulated **path length** over the same
+  trials is 2.71-4.09 — tight, and the thing the control actually claims.
+  Found the way the repo's note says these are found, from the wrong direction:
+  a flake in a control turns an `unkillable` mutation into a false kill, so
+  `ray-axis-vs-side` was reported as MARKED, BUT DIED. The battery's own
+  asymmetry caught a flake nothing else would have.
+
+- **And the level rewrite silently disarmed the arc A/B, three phases after
+  Phase 6 rebuilt it to be armable.** The idle arm was one flat `run(FRAMES)`
+  on a floor whose spawn was a quiet corner. The new floor 1 spawns you in an
+  atrium with four guards in it, so the "idle" arm took fire, drew arcs of its
+  own, and then **died** — and a dead arm stops rendering. Measured: 310 entries
+  on the idle arm against 265 on the driven one, a cost of **-45** against a
+  bound of `< 24`, and `arc-alpha-unquantised` survived a fully green suite.
+  Both arms now freeze the roster and top up health, and differ only by the
+  `drive` callback. The Phase 6 lesson was "the arms have to start from equally
+  cold state"; this is its sibling — **the arms have to STAY equal too, and an
+  idle arm is only idle if the level lets it be.** Nothing about the level
+  rewrite looked like it was touching the atlas.
+
+- **Four tests hardcoded `20.5 / 38.5`** — floor 1's spawn corner on the map they
+  were written against — as "somewhere walkable, out of everyone's sight". The
+  floor rewrite made that tile the south window wall, so the player was inside
+  a wall, `buildNavField` bailed on an impassable seed, and the whole flow-field
+  group failed in a way that read as a pathfinding regression. The CEO standoff
+  test carried the same kind of literal (`x = 8.5`, inside the old boardroom).
+  All five now derive their spot from the floor. **A coordinate literal in a
+  test is a dependency on a map, and maps change.**
 
 - That fix immediately failed three of the shipped level's own push-walls, whose
   treasure pockets were one-wide dead ends — geometry in which a two-tile slide

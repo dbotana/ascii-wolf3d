@@ -200,3 +200,9 @@ const WEAPONS = [
 ];
 
 const PISTOL = 1;   // the weapon a cold start hands you
+
+// Cumulative kills THIS RUN that earn each weapon; 0 means you start with it.
+// Indexed like WEAPONS, so earning a gun is a column of that table rather than
+// a branch anywhere — checkWeaponUnlock() walks it and grants the first row it
+// has paid for. A fifth weapon is a row here and a row there, still no code.
+const WEAPON_UNLOCK = [0, 0, 5, 10];

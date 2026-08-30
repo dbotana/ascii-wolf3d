@@ -78,6 +78,18 @@ const PROBE_SRC = `global.__PROBE = {
   selectWeapon:  (typeof selectWeapon !== "undefined" ? selectWeapon : null),
   startReload:   (typeof startReload  !== "undefined" ? startReload : null),
   weapons:       () => (typeof WEAPONS !== "undefined" ? WEAPONS : []),
+  // Phase 7: earning the roster, the auto-map and the objective line.
+  weaponUnlock:  () => (typeof WEAPON_UNLOCK !== "undefined" ? WEAPON_UNLOCK : []),
+  checkWeaponUnlock: (typeof checkWeaponUnlock !== "undefined" ? checkWeaponUnlock : null),
+  pickWeapon:    (typeof pickWeapon   !== "undefined" ? pickWeapon : null),
+  resetWeapons:  (typeof resetWeapons !== "undefined" ? resetWeapons : null),
+  objectiveText: (typeof objectiveText !== "undefined" ? objectiveText : null),
+  paintWeaponStrip: (typeof paintWeaponStrip !== "undefined" ? paintWeaponStrip : null),
+  syncHud:       (typeof syncHud      !== "undefined" ? syncHud : null),
+  markVisible:   (typeof markVisible  !== "undefined" ? markVisible : null),
+  drawMinimap:   (typeof drawMinimap  !== "undefined" ? drawMinimap : null),
+  toggleMinimap: (typeof toggleMinimap !== "undefined" ? toggleMinimap : null),
+  seen:          () => (typeof seen !== "undefined" ? seen : null),
   setDifficulty: (typeof setDifficulty !== "undefined" ? setDifficulty : null),
   difficulty:    () => (typeof difficulty !== "undefined" ? difficulty : 2),
   difficulties:  () => (typeof DIFFICULTY !== "undefined" ? DIFFICULTY : []),
@@ -157,6 +169,8 @@ const REQUIRED_FNS = [
   'loadScores', 'saveScores', 'recordScore', 'paintScores', 'winGame', 'killPlayer',
   'stickVector', 'setTouchMove', 'addTouchLook',
   'patrolOpen', 'spriteList',
+  'checkWeaponUnlock', 'pickWeapon', 'resetWeapons', 'objectiveText', 'paintWeaponStrip',
+  'markVisible', 'drawMinimap', 'toggleMinimap', 'syncHud',
 ];
 
 function assertProbe(P, htmlPath) {
@@ -173,6 +187,7 @@ function assertProbe(P, htmlPath) {
   // inside fire(), which is exactly the silent-false-pass failure these
   // emptiness checks exist to prevent.
   if (!P.weapons || P.weapons().length === 0) missing.push('WEAPONS (weapon table)');
+  if (!P.weaponUnlock || P.weaponUnlock().length === 0) missing.push('WEAPON_UNLOCK');
   if (!P.difficulties || P.difficulties().length === 0) missing.push('DIFFICULTY');
   if (!P.deathSeq || Object.keys(P.deathSeq()).length === 0) missing.push('DEATH_SEQ (gore.js)');
   if (!P.decalSpr || P.decalSpr().length === 0) missing.push('DECAL_SPR (gore.js)');
@@ -345,13 +360,16 @@ function load(opts) {
     },
     addEventListener(type, fn) { this._handlers[type] = fn; },
     style: {},
-    // #sKeys needs two children (red + blue keycard lamps)
-    children: [
-      { classList: { _s: new Set(), toggle(c, v) { v ? this._s.add(c) : this._s.delete(c); },
-                     contains(c) { return this._s.has(c); } } },
-      { classList: { _s: new Set(), toggle(c, v) { v ? this._s.add(c) : this._s.delete(c); },
-                     contains(c) { return this._s.has(c); } } },
-    ],
+    // #sKeys needs two children (red + blue keycard lamps) and #sWeapons four
+    // (one slot per weapon). Four for everything: the keycard code only ever
+    // reads [0] and [1], and a stub with too FEW children makes a painter that
+    // walks its slots silently do half its work — which is exactly what the
+    // weapon strip did until this was widened.
+    children: Array.from({ length: 4 }, () => ({
+      textContent: '',
+      classList: { _s: new Set(), toggle(c, v) { v ? this._s.add(c) : this._s.delete(c); },
+                   contains(c) { return this._s.has(c); } },
+    })),
     parentElement: {},
     textContent: '',
     remove() { this.parentElement = null; },
