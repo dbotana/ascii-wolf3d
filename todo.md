@@ -26,17 +26,6 @@ number — line numbers drift with every edit, and the file map in
 
 ## Also open
 
-- [ ] **`hud.js` is at 398 lines against the 400-line budget, and that is a
-  signal rather than headroom.** Phase 7 added the weapon strip and the
-  objective line to it, both of which belong there — it is the file that owns
-  the DOM half of the interface. What does not have to be there is the
-  end-of-floor tally: `openTally` / `stepTally` / `finishTally` / the payout
-  table are ~120 lines of a self-contained screen that runs at one moment in
-  the game and shares nothing with the status bar but `el()`. Splitting it to
-  `wolf3d/tally.js` puts hud.js back near 280 and costs one `<script>` tag in
-  document order. Rule 4 says a file past 400 is a signal to split, not a
-  target to fill; 398 is filling it.
-
 - [ ] **`PAR_TIME` has not been re-timed since the floors were rewritten.** It
   is still `[150, 180, 210]`, measured against maps that were four or five very
   large open halls. The new floors have a spine and a ring and traverse faster,
@@ -104,6 +93,45 @@ number — line numbers drift with every edit, and the file map in
 
 Newest first. Kept for the design notes — several record why an approach that
 looks obvious was not the one taken.
+
+- [x] **`hud.js` split: the tally moved out to `wolf3d/tally.js`.** 398 lines
+  against a 400-line budget, which reads as two lines of headroom and is
+  actually the rule firing. Rule 4 says a file past 400 is a signal to split,
+  not a target to fill — and a file at 398 has already spent the signal.
+  `hud.js` is now 247 and `tally.js` is 168.
+
+  - **The seam was what the two halves share, not where the biggest block
+    was.** The status bar, the health chip, the weapon strip and the objective
+    line are repainted every frame of play out of `player` and the floor
+    counters. The tally runs at exactly one moment, after the last of those
+    frames, and shares nothing with them but `el()`. Everything the screen
+    owns went: the four payout constants, `mmss`/`ratio`, the `tally` state,
+    `openTally`/`hideTally`/`settleRow`/`paintScoreRow`/`finishTally`/`stepTally`.
+  - **`clearLevel()` and `advanceFromTally()` went with it**, which the item as
+    written did not ask for. They are the screen's two doors — `world.js` and
+    `main.js` call them and nothing else does — and leaving them behind would
+    have meant `hud.js` reading `tally && !tally.done` across a file boundary
+    to decide what the action key does. That is rule 5's problem bought with
+    rule 4's money, so hud.js ended nearer 250 than the 280 predicted.
+  - **`winGame()` and `killPlayer()` stayed.** They are banner writers that
+    file a high score; the tally calls `winGame()` on the last floor, and a
+    call across files is free here. Splitting on "who calls whom" rather than
+    on "who shares state" would have dragged the banners and `scores.js`'s
+    paint path along behind them.
+  - **The seven `tally-*` mutations had to be repointed at the new file.**
+    `mutations.js` addresses a patch by path, and `mutate.js` checks every
+    anchor's occurrence count before it runs — so a stale path fails loudly
+    rather than silently no-opping into a false SURVIVED. Re-run after the
+    move: 7 killed, 0 survivors. The coverage moved with the code, which is
+    the only thing that makes a split like this checkable at all.
+  - **Cost: one `<script>` tag.** That is the whole bill because of the classic
+    scripts / one shared scope constraint — the split is a cut, not a
+    translation, and `tally.js` runs nothing at load so its tag position is
+    free. It sits after `hud.js` for readers rather than for the loader.
+
+  Both suites green at 580, both level and structure checks clean, `dist/`
+  rebuilt. The general note is in `reference/CLAUDE.md` under rule 4: **a
+  budget is a line you notice, not a line you spend up to.**
 
 - [x] **The third atlas A/B, and the boot bound that should have caught it.**
   Three assertions stood over `mix()`'s `Math.round(t * 7)` — the choke point

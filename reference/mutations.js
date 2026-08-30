@@ -172,22 +172,22 @@ module.exports = [
   // Twenty ran; the CEO's standoff and its burst fire both survived, with no
   // assertion behind either.
 
-  { id: 'tally-pays-below-100', group: 'Phase 1', file: 'wolf3d/hud.js',
+  { id: 'tally-pays-below-100', group: 'Phase 1', file: 'wolf3d/tally.js',
     find: 'if (r.pct >= 100 && !r.paid) {',
     replace: 'if (r.pct >= 90 && !r.paid) {',
     note: 'the perfect bonus pays at 90% — Wolf3D paid nothing for 99% and neither should this' },
 
-  { id: 'tally-perfect-bonus', group: 'Phase 1', file: 'wolf3d/hud.js',
+  { id: 'tally-perfect-bonus', group: 'Phase 1', file: 'wolf3d/tally.js',
     find: 'player.score += PERFECT_BONUS;',
     replace: 'player.score += 0;',
     note: 'a clean 100% category pays nothing' },
 
-  { id: 'tally-double-pays', group: 'Phase 1', file: 'wolf3d/hud.js',
+  { id: 'tally-double-pays', group: 'Phase 1', file: 'wolf3d/tally.js',
     find: 'r.paid = true;',
     replace: 'r.paid = false;',
     note: 'settleRow stops being idempotent, so the roll-up landing and finishTally settling both pay — 5000 a category' },
 
-  { id: 'tally-skip-pays-nothing', group: 'Phase 1', file: 'wolf3d/hud.js',
+  { id: 'tally-skip-pays-nothing', group: 'Phase 1', file: 'wolf3d/tally.js',
     find: `  if (!tally.timePaid) {
     tally.timePaid = true;
     player.score += tally.timeBonus;
@@ -197,17 +197,17 @@ module.exports = [
   }`,
     note: 'skipping the roll-up forfeits the time bonus that watching it awards — the exact bug an early version shipped' },
 
-  { id: 'tally-time-bonus-negative', group: 'Phase 1', file: 'wolf3d/hud.js',
+  { id: 'tally-time-bonus-negative', group: 'Phase 1', file: 'wolf3d/tally.js',
     find: 'timeBonus: Math.max(0, Math.round(par - levelTime) * TIME_BONUS_PER_SEC),',
     replace: 'timeBonus: Math.round(par - levelTime) * TIME_BONUS_PER_SEC,',
     note: 'finishing over par SUBTRACTS score instead of paying zero' },
 
-  { id: 'tally-kill-ratio', group: 'Phase 1', file: 'wolf3d/hud.js',
+  { id: 'tally-kill-ratio', group: 'Phase 1', file: 'wolf3d/tally.js',
     find: "{ id: 'Kill',     pct: ratio(player.kills,  totalEnemies)  },",
     replace: "{ id: 'Kill',     pct: ratio(player.kills,  player.kills)  },",
     note: 'the kill ratio measures kills against itself and always reads 100%, paying its bonus every floor' },
 
-  { id: 'tally-secret-ratio', group: 'Phase 1', file: 'wolf3d/hud.js',
+  { id: 'tally-secret-ratio', group: 'Phase 1', file: 'wolf3d/tally.js',
     find: "{ id: 'Secret',   pct: ratio(secretsFound,  totalSecrets)  },",
     replace: "{ id: 'Secret',   pct: ratio(secretsFound,  secretsFound)  },",
     note: 'the secret ratio always reads 100% and pays for secrets you never found' },

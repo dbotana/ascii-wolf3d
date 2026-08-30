@@ -80,7 +80,8 @@ the bundler and the harness both read it rather than keeping their own list.
 | `wolf3d/combat.js` | 309 | the roster lookup, earning it, firing, the magazine cycle, damage numbers, pickups |
 | `wolf3d/render.js` | 399 | `drawWalls`, sprites, decals, the weapon view-model, crosshair, the damage arc |
 | `wolf3d/minimap.js` | 137 | the auto-map: `seen`, the reveal sweep, `drawMinimap` |
-| `wolf3d/hud.js` | 389 | toasts, banners, status bar, health bar, the weapon strip, the objective line, the tally screen |
+| `wolf3d/hud.js` | 247 | toasts, banners, status bar, health bar, the weapon strip, the objective line |
+| `wolf3d/tally.js` | 168 | the end-of-floor percentage screen, its payout, `clearLevel`, `advanceFromTally` |
 | `wolf3d/main.js` | 197 | `updatePlayer`, `frame`, boot |
 
 **Order matters only for top-level execution.** Function declarations hoist
@@ -105,7 +106,10 @@ loaded four tags later, and it is fine. What genuinely needs ordering is small:
 - the handful of statements that touch the DOM at load — `gfx.js` grabs the
   canvas, `input.js` binds listeners to it (so it must follow `gfx.js`),
   `touch.js` binds the overlay's (so it must follow both), `hud.js` caches
-  elements, and `main.js` registers the splash handlers.
+  elements, and `main.js` registers the splash handlers. `tally.js` is not
+  in that list — it looks every element up through `el()` at call time, runs
+  nothing at load, and so its tag position is free. It sits after `hud.js`
+  for readers, next to the `el()` and `showBanner()` it calls.
 
 `touch.js` has one more constraint that is easy to miss: `input.js`'s canvas
 `mousedown` handler reads `touchActive`, which `touch.js` declares with `let`
@@ -150,6 +154,22 @@ same problem in fifteen pieces.
    dependency graph nobody can hold in their head.
 4. **A file past 400 lines is a signal to split, not a target to fill.**
    `check-structure.js` warns at that line.
+
+   Phase 7 left `hud.js` at 398 — under the budget and therefore silent, which
+   is exactly the reading this rule exists to reject. The end-of-floor tally
+   went to `wolf3d/tally.js` (398 → 247 + 168). The seam was not "the biggest
+   block"; it was **what the two halves share**. The status bar is repainted
+   every frame of play from `player` and the floor counters; the tally runs at
+   one moment after the last of those frames and shares nothing with it but
+   `el()`. `clearLevel()` and `advanceFromTally()` went with it rather than
+   staying with the banners, because they are the screen's two doors and
+   leaving them would have meant `hud.js` reading `tally` across a file
+   boundary to decide what the action key does — rule 5's problem, bought with
+   rule 4's money.
+
+   The cost is one `<script>` tag, and it is one tag because of the hard
+   constraint at the top of this file: classic scripts, one shared scope, so a
+   split is a cut and never a translation.
 5. **Cross-file writes get a named setter.** `combat.js` used to assign
    `gunFrame`/`gunT` — renderer state — directly, and `enemies.js` used to
    assign `hpShown`. They now call `triggerGunFire()` and `chipHpFromNow()`.
@@ -563,8 +583,10 @@ descending from restarting:
 Either way kills and keycards are per-floor — the tally screen reports *this*
 floor's ratios, and last floor's keys open nothing here.
 
-`clearLevel()` no longer writes a one-line banner. It opens `#tally`, the Wolf3D
-percentage screen, and `stepTally` rolls the rows up one at a time. Payout:
+The whole screen is `wolf3d/tally.js`, split out of `hud.js` under rule 4 —
+see **Growth rules**. `clearLevel()` no longer writes a one-line banner. It
+opens `#tally`, the Wolf3D percentage screen, and `stepTally` rolls the rows
+up one at a time. Payout:
 
 ```
 time bonus  = max(0, round(PAR_TIME[floor] - levelTime)) * 10
