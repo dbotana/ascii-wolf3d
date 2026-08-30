@@ -26,31 +26,6 @@ number — line numbers drift with every edit, and the file map in
 
 ## Also open
 
-- [ ] **The third atlas A/B is still on the shape that could not fail, and it is
-  the only thing standing between the game and an unbounded palette.** The
-  decal measurement in the `gore` group is the one Phase 6 did not rebuild: it
-  still reads a running total mid-suite rather than an arm per `load()`, and it
-  is still unseeded. It measures 18 entries against an idle 1, bound at 60,
-  taken 576 entries deep — so it works today only because no earlier group
-  happens to draw a splat. That is precisely the dependency that made the arc
-  and damage-pop versions unfalsifiable from Phase 3 to Phase 6, and it will
-  collapse silently the first time a decal is drawn earlier in the run.
-
-  What makes it urgent rather than tidy: **`mix()`'s `Math.round(t * 7)` is the
-  choke point for every colour in the game** — walls, sprites, decals and the
-  HUD all arrive through `fade()` → `mix()` — and unquantising it was measured
-  against the suite: `522 passed, 1 failed`, and the one failure is this
-  assertion (125 entries against its bound of 60). Not the boot `< 500` bound,
-  not the late distance-to-cap check, not either of the two new fade A/Bs, which
-  inflate both of their arms equally and so cancel it out. The single guard on
-  the atlas staying bounded is the single guard still built the wrong way.
-
-  Three things, in order: rebuild it as a seeded load-per-arm A/B like the other
-  two; add `mix-unquantised` to `reference/mutations.js` so this is a ratchet
-  fact rather than something re-derived by hand every few phases; then check
-  whether the boot bound *should* have caught it, because a `< 500` check that
-  sails through an unbounded palette is measuring the wrong thing.
-
 - [ ] **`hud.js` is at 398 lines against the 400-line budget, and that is a
   signal rather than headroom.** Phase 7 added the weapon strip and the
   objective line to it, both of which belong there — it is the file that owns
@@ -129,6 +104,55 @@ number — line numbers drift with every edit, and the file map in
 
 Newest first. Kept for the design notes — several record why an approach that
 looks obvious was not the one taken.
+
+- [x] **The third atlas A/B, and the boot bound that should have caught it.**
+  Three assertions stood over `mix()`'s `Math.round(t * 7)` — the choke point
+  every colour in the game passes through, and the single line the atlas design
+  rests on — and not one of them could see it removed. Re-measured on the
+  current suite before touching anything: unquantising `mix()` left it at
+  **579 passed, 1 failed**, and the one failure was the decal assertion, exactly
+  as this item predicted.
+
+  - **Why each of the three missed it, because they missed it for three
+    different reasons.** The boot `< 500` bound was taken **standing still**,
+    and a still viewpoint looks at a fixed set of wall distances, so the fog
+    blend has a fixed set of values quantised or not — 138 entries against 67,
+    both comfortably under the bound. The two fade A/Bs inflate *both* of their
+    arms equally, so the difference cancels it out. And the decal measurement,
+    the only one that failed, was the last A/B still built the Phase 3 way.
+  - **The decal A/B is now a seeded load-per-arm arm like the other two**, and
+    shares their `armed()` helper rather than a fourth way of measuring:
+    `12 entries against an idle load's 68`, against `78` with the round removed.
+    Both figures repeat to the entry. The splats are placed along the player's
+    **own facing** so the arms differ in the splats and in nothing else — no
+    camera rotation billing wall and floor pairs to the decals.
+  - **It has a floor as well as a ceiling, and the floor is the half that
+    matters.** `cost > 4` before `cost < 40`. A ceiling alone passes when the
+    splats are never drawn at all — verified by placing them behind the player,
+    where the cost is **0** and `decals().length` is still 64, so the obvious
+    setup check would not have caught it either. That is the same shape as the
+    bug being fixed, one level up.
+  - **The boot bound should have caught it, and now does.** The answer to the
+    question this item ended on is that `< 500` was never the wrong number —
+    the standing still was. The same 60 frames **walking** read 87 against
+    1124, because a moving viewpoint sweeps depth continuously and an
+    unquantised blend mints an entry per distinct distance. It is asserted with
+    a setup check that the walk covered ground (3.21 tiles), because a floor
+    whose spawn faces a wall would silently turn it back into the still
+    measurement.
+  - **`mix-unquantised` is in the catalog**, in its own `the palette` group
+    since it is not any phase's feature work. Killed by both new guards
+    independently, which is the point of fixing it from two sides.
+
+  Two things worth keeping. **A bound is a claim about a measurement, not about
+  a number.** And **three guards over one line looked like depth**: the coverage
+  was one assertion the whole time, and it was the one built the way its two
+  siblings had already been rebuilt for being unfalsifiable. Both are in
+  `reference/CLAUDE.md` under *Bugs already made here*. One piece of drift found
+  on the way: the damage-pop comment still carried Phase 6's `177 against 337`
+  while the assertion printed 195 — the floor rewrite moved both arms and
+  neither bound. Now `195 against 355`, with the old figures kept as the reason
+  the bound has a margin instead of a pin.
 
 - [x] **Phase 7 — the navigation pass, and earning the roster.** Prompted by a
   full playthrough that finished **on the starting pistol**, on floors the

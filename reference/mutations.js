@@ -891,4 +891,20 @@ module.exports = [
     replace: "  if (false) return 'THE BOARD IS IN SESSION \\u2014 KILL THE CEO';",
     note: 'floor 3 tells you to ride an elevator that use() refuses while the CEO lives' },
 
+  // ── the palette ───────────────────────────────────────────────────────────
+  // Not a phase's feature work. This is the invariant the whole renderer rests
+  // on, and it went unpinned through seven of them: the atlas is only bounded
+  // because mix() rounds its blend factor to 8 steps, and every colour in the
+  // game — walls, sprites, decals, the HUD — arrives through fade() -> mix().
+  //
+  // It went unpinned because it LOOKED covered. Three atlas assertions stood
+  // over it and only one of them could see this, and that one was the last
+  // A/B still built the wrong way. Re-derived by hand every few phases; here
+  // as a ratchet fact instead.
+
+  { id: 'mix-unquantised', group: 'the palette', file: 'wolf3d/config.js',
+    find: 'const q = Math.max(0, Math.min(7, Math.round(t * 7)));',
+    replace: 'const q = Math.max(0, Math.min(7, t * 7));',
+    note: 'the fog blend stops quantising, so EVERY colour in the game — walls, sprites, decals, the HUD — mints a fresh atlas entry per distinct depth. Unbounded growth toward the silent fillText degradation the atlas exists to avoid. Standing still it is invisible (138 entries against 67, both under the boot bound of 500); walking the same 60 frames it is 1124 against 87' },
+
 ];

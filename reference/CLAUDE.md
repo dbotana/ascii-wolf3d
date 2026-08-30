@@ -235,9 +235,24 @@ loop blits cached sprites with `drawImage`. See `initAtlas` / `atlasGet`.
 **This only works because the colour space is quantised.** `mix()` rounds its
 blend factor to 8 steps before caching, so distance fog produces a bounded set
 of colours instead of a new one per pixel. In practice the atlas holds about
-**74 entries against a 32768 cap**. If you add colours, keep them coming from
-`mix`/`fade` rather than computing arbitrary rgb per frame — an unbounded atlas
-silently degrades to the `fillText` path once full.
+**67 entries after boot against a 32768 cap**. If you add colours, keep them
+coming from `mix`/`fade` rather than computing arbitrary rgb per frame — an
+unbounded atlas silently degrades to the `fillText` path once full.
+
+`mix()`'s `Math.round(t * 7)` is the **choke point for every colour in the
+game** — walls, sprites, decals and the HUD all arrive through `fade()` →
+`mix()` — so it is the single line the whole atlas design rests on. Two
+assertions guard it, and they guard it from opposite sides:
+
+- the boot bound, **taken while walking**. A still viewpoint sees a fixed set
+  of wall distances, so the blend lands on a fixed set of values quantised or
+  not; motion is what sweeps depth continuously. 60 still frames read 138
+  unquantised against 67 — both under `< 500`. The same 60 frames walking read
+  **1124 against 87**.
+- the decal A/B in `run-tests.js`'s last group, which is a load-per-arm
+  measurement from a cold atlas: **12 against 78**.
+
+`mix-unquantised` in the mutation catalog is the ratchet on both.
 
 ## The door trick
 
@@ -572,7 +587,7 @@ last floor sets `gameState = 'won'` and shows the OUT banner instead.
 Run all of these before shipping any change. None of them needs a browser.
 
 ```sh
-node reference/run-tests.js                              # 523 assertions against the real game loop
+node reference/run-tests.js                              # 580 assertions against the real game loop
 WOLF3D_HTML=dist/wolf3d.html node reference/run-tests.js # ...and against the shipped bundle
 node reference/validate-level.js                         # map geometry + key-gated reachability, all 3 floors
 node reference/bundle.js                                 # rebuild dist/wolf3d.html
@@ -632,6 +647,13 @@ battery's last fifteen triaged survivors: the flow field against a slab in
 transit and against a tile crossing, corpses as scenery, the three patrol rules,
 both quantised fades, the jamb clause, the pause clock and pointer lock, the
 death window, and the decal depth bias.
+
+The three atlas A/Bs are the last group in the file and share one `armed()`
+helper: one `load()` per arm, seeded, arms differing only by a `drive`
+callback. They are last because a `load()` replaces process globals. Adding a
+fourth means adding a `drive`, not a fourth way of measuring — the three ways
+that came before it are in **Bugs already made here** and none of them could
+fail.
 
 Three ordering rules bite here. `startLevel()` with no argument restarts the
 **current** floor, so any test that has moved off floor 1 must reset explicitly
@@ -987,6 +1009,33 @@ enforces. It names the goal and never the route.
   cold state"; this is its sibling — **the arms have to STAY equal too, and an
   idle arm is only idle if the level lets it be.** Nothing about the level
   rewrite looked like it was touching the atlas.
+
+- **Three atlas assertions stood over `mix()` and not one of them could see it.**
+  `mix()`'s `Math.round(t * 7)` is the choke point every colour in the game
+  passes through, and deleting it — an unbounded palette, the one failure the
+  atlas design rests on not happening — left the suite at **579 of 580**. Each
+  of the three failed for its own reason. The boot `< 500` bound was taken
+  **standing still**, and a still viewpoint looks at a fixed set of wall
+  distances, so the fog blend has a fixed set of values quantised or not: 138
+  against 67, both comfortably under the bound. The two fade A/Bs inflate *both*
+  of their arms equally, so the difference cancels it out exactly. And the one
+  assertion that did fail — the decal cost — was the last A/B still built the
+  Phase 3 way: a running total read mid-suite, unseeded, which worked only for
+  as long as no earlier group happened to draw a splat.
+
+  Fixed from both sides. The boot bound is now taken over 60 frames of
+  **walking**, which is what sweeps depth continuously (87 against 1124, and
+  `< 500` was the honest bound all along — it was being asked from the one place
+  in the game where nothing moves). The decal measurement is a seeded
+  load-per-arm A/B like the other two (12 against 78). `mix-unquantised` in the
+  catalog pins both.
+
+  Two lessons, and the second is the general one. **A bound is a claim about a
+  measurement, not about a number** — `< 500` was never wrong, the standing
+  still was. And **the arm that measures a thing has to be the one that could
+  miss it**: three guards over one line looked like depth, and the coverage was
+  one assertion the whole time, built the way its two siblings had already been
+  rebuilt for being unfalsifiable.
 
 - **Four tests hardcoded `20.5 / 38.5`** — floor 1's spawn corner on the map they
   were written against — as "somewhere walkable, out of everyone's sight". The

@@ -123,6 +123,36 @@ const perFrame = g.drawCalls / 60;
 ok(perFrame > 10000, `renders a full screen each frame (~${Math.round(perFrame)} draws)`);
 ok(P.atlasSize() < 500, `glyph atlas stays bounded (${P.atlasSize()} of ${P.atlasCap()})`);
 
+// ── ...and the same bound again, WALKING, because standing still is what made
+//    the line above blind.
+//
+// Every colour in the game arrives through fade() -> mix(), and mix() is only
+// bounded because it rounds its blend factor to 8 steps. Delete that round and
+// the palette is unbounded — which is the one failure the whole atlas design
+// rests on not happening.
+//
+// The still bound cannot see it. A stationary viewpoint looks at a FIXED set of
+// wall distances, so the fog blend lands on a fixed set of values whether or not
+// it is quantised: those 60 frames read 138 entries unquantised against 67
+// quantised, and 500 is nowhere near either. Motion is what separates them,
+// because a moving viewpoint sweeps depth continuously and an unquantised blend
+// mints an entry per distinct distance. Over the same 60 frames walking: 87
+// against 1124. The 500 bound was honest all along — it was being asked from
+// the one place in the game where nothing moves.
+//
+// The setup assertion under it is the point of the pair: a floor whose spawn
+// faces a wall would turn this back into the still measurement, silently, which
+// is exactly how the decal A/B below spent three phases unable to fail.
+const walkFrom = { x: P.player.x, y: P.player.y };
+run(60, ['w']);
+const walked = Math.hypot(P.player.x - walkFrom.x, P.player.y - walkFrom.y);
+ok(walked > 1,
+   `test setup: the walk actually covered ground (${walked.toFixed(2)} tiles)`);
+ok(P.atlasSize() < 500,
+   `and stays bounded through 60 frames of WALKING, which is what sweeps the ` +
+   `fog blend continuously (${P.atlasSize()} of ${P.atlasCap()})`);
+P.startLevel();
+
 // Booting twice is not a hypothetical: the splash is not removed for 600ms, so
 // a second click — or a difficulty row's click bubbling up to it — used to sail
 // past the old `parentElement` guard, restart the level and register a SECOND
@@ -1518,35 +1548,30 @@ P.startLevel();
   }
   P.startLevel();
 
-  // ── atlas cost, as an A/B over the SAME number of frames — the neon flicker
-  //    and the rain mint entries as the clock advances, and a naive
-  //    before/after would bill those to the decals. Same shape as the arc and
-  //    damage-pop measurements above, same reason.
-  run(600);
-  const gSettled = P.atlasSize();
-  run(400);
-  const gQuiet = P.atlasSize() - gSettled;
-  const beforeGore = P.atlasSize();
+  // ── splats through the real render path. What this used to bill — the atlas
+  //    cost of the decal palette — is measured in 'the decal palette (atlas
+  //    fixture)' at the end of the file instead, and could not be measured
+  //    here. Two reasons, and the second is why the version that stood here
+  //    from Phase 4 to Phase 7 could not fail:
+  //
+  //      1. The idle arm was `run(400)` on the SAME instance, so it read the
+  //         running total mid-suite rather than an arm from a cold atlas.
+  //      2. An unquantised palette saturates too. By this point the suite has
+  //         driven arcs, damage pops and eight hundred shots through it, and
+  //         marginal growth after saturation is zero under either variant —
+  //         so it worked only for as long as no earlier group happened to draw
+  //         a splat. `mix-unquantised` in the catalog is the fact this pins.
+  //
+  //    What IS honest on a running total is its distance to the cap, past
+  //    which drawChar silently degrades to fillText. Re-asserting the boot
+  //    group's `< 500` here would only measure which groups ran first.
   P.player.a = 0;
   for (let i = 0; i < 80; i++) {
     P.spillBlood({ type: 'guard', x: P.player.x + 1.5 + (i % 5) * 0.3, y: P.player.y + (i % 3) * 0.2 });
     run(5);
   }
-  const goreCost = P.atlasSize() - beforeGore;
-  // Every decal colour comes from fade(COLOR.blood, depth), so the whole family
-  // is 8 fog steps x the handful of block glyphs the three splats use — bounded
-  // however many bodies fall.
-  ok(goreCost - gQuiet < 60,
-     `80 splats cost a bounded set of (glyph, colour) pairs ` +
-     `(${goreCost} entries over 400 frames vs ${gQuiet} for the same frames idle)`);
-  // The `atlasSize() < 500` bound belongs at BOOT, where the boot group already
-  // asserts it. By this point the suite has deliberately driven arcs, damage
-  // pops and eight hundred shots through the palette, so the running total is
-  // legitimately larger and re-asserting 500 here would only measure how many
-  // groups happen to run first. What matters is the distance to the cap, past
-  // which drawChar silently degrades to fillText.
   ok(P.atlasSize() < P.atlasCap() / 8,
-     `and the atlas is nowhere near the cap it degrades at ` +
+     `the atlas is nowhere near the cap it degrades at, after 80 splats ` +
      `(${P.atlasSize()} of ${P.atlasCap()})`);
   P.startLevel();
 }
@@ -3272,11 +3297,13 @@ group('secrets beside doors keep their panelling (fixture)');
      `(jamb=${north.jamb})`);
 }
 
-// ── the two quantised fades, as a real A/B (fixtures) ───────────────────────
+// ── the quantised palette, as real A/Bs (fixtures) ──────────────────────────
 // Every distinct (glyph, colour) pair is an atlas entry, and a fade stringified
 // per frame mints a fresh one each time — unbounded growth toward the silent
-// fillText degradation. Both fades are quantised on purpose: the arc to 4
-// steps, the damage pop to 8.
+// fillText degradation. Three things are quantised on purpose and measured
+// here off the same arm helper: the damage arc to 4 steps, the damage pop to 8,
+// and — under both of those, and under every other colour in the game — mix()'s
+// own blend factor to 8.
 //
 // The obvious test — measure the atlas before and after a burst — does not
 // work, and the version that shipped from Phase 3 to Phase 6 could not fail.
@@ -3295,55 +3322,55 @@ group('secrets beside doors keep their panelling (fixture)');
 // So each arm is its own load: same build, same frame count, one idle and one
 // driving the effect, compared at the end. Fixtures, because a load replaces
 // process globals.
+const HTML = process.env.WOLF3D_HTML;
+const BURST = 120, PER = 5, FRAMES = BURST * PER;
+
+// Both arms run under a SEEDED stream, because Math.random is load-bearing
+// here in a way that is easy to miss: mkEnemy seeds every body's `bob` and
+// `patrolT` from it, so two loads put their enemies in different places and
+// draw different sprite-and-fog pairs. Measured unseeded, the arc cost swung
+// between -1 and 13 over fifteen trials — noise of the same order as the
+// honest figure. A constant is the wrong pin here: it would collapse the
+// damage-number jitter to one position and take most of the bug with it
+// (33 against 65, where a seeded stream reads 177 against 337). Seeded, both
+// arms are exact and repeat to the entry.
+const lcg = () => { let s = 987654321; return () => (s = (s * 1103515245 + 12345) & 0x7fffffff) / 0x80000000; };
+const seeded = (fn) => {
+  const real = Math.random;
+  Math.random = lcg();
+  try { return fn(); } finally { Math.random = real; }
+};
+
+// Every arm — idle or driven — runs the SAME shape: same load, same frame
+// cadence, same frozen roster, same topped-up health. The only difference is
+// the `drive` callback, which is the effect under test.
+//
+// Freezing the roster and topping the health are not tidiness. The idle arm
+// used to be one flat `run(FRAMES)` on a floor whose spawn was a quiet
+// corner. The Phase 7 rewrite made the spawn an atrium with four guards in
+// it, so the "idle" arm took fire, drew arcs of its own, and then DIED —
+// measured at 310 entries against the driven arm's 265, a NEGATIVE cost, and
+// `arc-alpha-unquantised` survived a fully green suite on exactly that.
+//
+// An idle arm is only idle if the level lets it be, and no level should have
+// to. Same family as the Phase 6 finding one line down: when you A/B a cache,
+// the arms have to differ in one thing and nothing else.
+const armed = (drive) => seeded(() => {
+  const a = load({ htmlPath: HTML });
+  const A = a.P;
+  A.startLevel();
+  for (const e of A.enemies()) { e.state = 'hurt'; e.stateT = 1e9; }
+  for (let i = 0; i < BURST; i++) {
+    A.player.hp = 100;                     // topped up, so no sample can kill
+    if (drive) drive(A, a, i);
+    a.run(PER);
+  }
+  return A.atlasSize();
+});
+const idleArm = () => armed(null);
+
 group('quantised fades (atlas fixtures)');
 {
-  const HTML = process.env.WOLF3D_HTML;
-  const BURST = 120, PER = 5, FRAMES = BURST * PER;
-
-  // Both arms run under a SEEDED stream, because Math.random is load-bearing
-  // here in a way that is easy to miss: mkEnemy seeds every body's `bob` and
-  // `patrolT` from it, so two loads put their enemies in different places and
-  // draw different sprite-and-fog pairs. Measured unseeded, the arc cost swung
-  // between -1 and 13 over fifteen trials — noise of the same order as the
-  // honest figure. A constant is the wrong pin here: it would collapse the
-  // damage-number jitter to one position and take most of the bug with it
-  // (33 against 65, where a seeded stream reads 177 against 337). Seeded, both
-  // arms are exact and repeat to the entry.
-  const lcg = () => { let s = 987654321; return () => (s = (s * 1103515245 + 12345) & 0x7fffffff) / 0x80000000; };
-  const seeded = (fn) => {
-    const real = Math.random;
-    Math.random = lcg();
-    try { return fn(); } finally { Math.random = real; }
-  };
-
-  // Every arm — idle or driven — runs the SAME shape: same load, same frame
-  // cadence, same frozen roster, same topped-up health. The only difference is
-  // the `drive` callback, which is the effect under test.
-  //
-  // Freezing the roster and topping the health are not tidiness. The idle arm
-  // used to be one flat `run(FRAMES)` on a floor whose spawn was a quiet
-  // corner. The Phase 7 rewrite made the spawn an atrium with four guards in
-  // it, so the "idle" arm took fire, drew arcs of its own, and then DIED —
-  // measured at 310 entries against the driven arm's 265, a NEGATIVE cost, and
-  // `arc-alpha-unquantised` survived a fully green suite on exactly that.
-  //
-  // An idle arm is only idle if the level lets it be, and no level should have
-  // to. Same family as the Phase 6 finding one line down: when you A/B a cache,
-  // the arms have to differ in one thing and nothing else.
-  const armed = (drive) => seeded(() => {
-    const a = load({ htmlPath: HTML });
-    const A = a.P;
-    A.startLevel();
-    for (const e of A.enemies()) { e.state = 'hurt'; e.stateT = 1e9; }
-    for (let i = 0; i < BURST; i++) {
-      A.player.hp = 100;                     // topped up, so no sample can kill
-      if (drive) drive(A, a, i);
-      a.run(PER);
-    }
-    return A.atlasSize();
-  });
-  const idleArm = () => armed(null);
-
   // ── the damage arc: a 4-step fade over two glyphs
   {
     const quiet = idleArm();
@@ -3369,15 +3396,64 @@ group('quantised fades (atlas fixtures)');
       B.player.fireCd = 0; B.player.ammo = 500; B.player.clip = 8;
       B.fire();
     }) - quiet;
-    // Measured: 177 quantised against 337 unquantised, both exact and both flat
-    // from 120 shots through 480. The honest cost is large because of what the
-    // 8 steps multiply against — the digit glyphs, the jitter positions, the
-    // hit/kill colour and the shadow row — which is exactly why the bound has
-    // to be measured rather than guessed. 260 sits between the two.
+    // Measured: 195 quantised against 355 unquantised, both exact and both flat
+    // from 120 shots through 480. (Phase 6 measured 177 against 337 on the old
+    // floor 1 — the rewrite moved both arms and neither bound, which is the
+    // point of leaving a margin rather than pinning the figure.) The honest
+    // cost is large because of what the 8 steps multiply against — the digit
+    // glyphs, the jitter positions, the hit/kill colour and the shadow row —
+    // which is exactly why the bound has to be measured rather than guessed.
+    // 260 sits between the two.
     ok(cost < 260,
        `${BURST} damage pops cost a bounded set of pairs, not half again as many ` +
        `(${cost} entries over ${FRAMES} frames against an idle load's ${quiet})`);
   }
+}
+
+// ── the decal palette, and through it mix() itself (fixture) ────────────────
+// Every decal colour comes from fade(COLOR.blood, depth) -> mix(), so the whole
+// family is 8 fog steps x the handful of block glyphs the three splats use —
+// bounded however many bodies fall. That makes this arm the suite's guard on
+// mix()'s own `Math.round(t * 7)`, which is the choke point EVERY colour in the
+// game passes through: walls, sprites, decals and the HUD all arrive via
+// fade().
+//
+// It has to be an arm rather than a mid-suite before/after, and for three
+// phases it was not. The version in the `gore` group read a running total on
+// the shared instance, unseeded, and worked only because no earlier group
+// happened to draw a splat — the same dependency that made the two fades above
+// unfalsifiable from Phase 3 to Phase 6.
+//
+// The two bounds are a pair and neither is optional. Unquantise mix() and the
+// cost goes 12 -> 78 against the ceiling; stop drawing the splats at all — a
+// spawn facing a wall, a depth cull, a sort that drops them — and the cost goes
+// to zero, which the ceiling alone would read as a pass. Both arms are exact
+// and repeat to the entry.
+group('the decal palette (atlas fixture)');
+{
+  let kept = 0;
+  const quiet = idleArm();
+  const cost = armed((A, a, i) => {
+    // Placed along the player's OWN facing, so the arms differ in the splats
+    // and in nothing else — no camera rotation to bill wall and floor pairs to
+    // the decals. The five radii spread them across the fog ramp, which is what
+    // an unquantised blend needs in order to show.
+    const r = 1.5 + (i % 5) * 0.3;
+    A.spillBlood({ type: 'guard',
+                   x: A.player.x + Math.cos(A.player.a) * r,
+                   y: A.player.y + Math.sin(A.player.a) * r });
+    kept = A.decals().length;
+  }) - quiet;
+  ok(kept > 0, `test setup: the splats survived spillBlood's wall check (${kept} held)`);
+  ok(cost > 4,
+     `${BURST} splats DO reach the palette — no draw, no pairs, no measurement ` +
+     `(${cost} entries over ${FRAMES} frames against an idle load's ${quiet})`);
+  // Measured, and repeatable to the entry: 12 quantised against 78 with mix()'s
+  // round removed, over the same 600 frames from the same cold atlas. 40 is
+  // three times the honest cost and half the bug.
+  ok(cost < 40,
+     `and they cost the bounded set of pairs an 8-step fog blend can make ` +
+     `(${cost} entries over ${FRAMES} frames against an idle load's ${quiet})`);
 }
 
 // ── report ───────────────────────────────────────────────────────────────────
