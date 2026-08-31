@@ -782,6 +782,7 @@ const CLIP_SIZE = 8;          // rounds per magazine before a reload cycle
 const KILL_SCORE = { guard: 200, drone: 150, ceo: 5000 };
 const RELOAD_TIME = 1.05;     // seconds for the full reload animation
 const DEATH_TIME = 0.45;      // the 'dying' window, subdivided across DEATH_SEQ
+const SPAWN_GRACE = 0.75;     // seconds an idle enemy ignores the player after spawn
 
 // ─── DIFFICULTY ─────────────────────────────────────────────
 // Wolf3D's four, and its philosophy: the enemies do not get tougher, they get
@@ -2627,6 +2628,11 @@ function mkEnemy(type, x, y) {
     hp: spec.hp, maxHp: spec.hp, spec,
     state: 'idle', stateT: 0, atkCd: 0, bob: Math.random() * 6.28,
     alive: true,
+    // A freshly spawned body gives the player a beat to reach cover before it
+    // starts looking for them — see the idle sight check in enemies.js. It
+    // exists separately from stateT because that field is reused for the alert
+    // window, and a spawn grace is a different thing from a reaction delay.
+    graceT: SPAWN_GRACE,
     // which way the body is facing, in world radians. Set wherever the enemy
     // moves; seeded rather than left undefined so enemySprite can rotate a
     // guard that has never taken a step.
@@ -2888,6 +2894,70 @@ function populateEnemies(spawns) {
     const s = survivors[i % survivors.length];
     enemies.push(mkEnemy(s[0], s[1], s[2]));
   }
+  relocateSpawnLOS();
+}
+
+// ─── SPAWN SAFETY ──────────────────────────────────────────
+// A body that spawns already looking at the player opens fire before the floor
+// has finished fading in. Relocation walks any such enemy — reinforcements
+// included, since they land on a survivor's authored tile — to the nearest open
+// tile with no line of sight back to the spawn, staying inside its own room
+// (doors are walls here: a body parked behind a closed door can neither patrol
+// nor be reached). The CEO is exempt — it is the floor's win condition, tuned
+// to a fixed boardroom, and never spawns in view anyway.
+const RELOCATE_DIRS = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+
+function relocateSpawnLOS() {
+  const px = player.x, py = player.y;
+  const occupied = new Set();
+  occupied.add((px | 0) + ',' + (py | 0));
+  for (const e of enemies) occupied.add((e.x | 0) + ',' + (e.y | 0));
+
+  for (const e of enemies) {
+    if (e.type === 'ceo') continue;
+    const d = Math.hypot(e.x - px, e.y - py);
+    if (d >= e.spec.sight || !hasLOS(e.x, e.y, px, py)) continue;
+    const spot = findCoverTile(e, px, py, occupied);
+    if (!spot) continue;
+    occupied.delete((e.x | 0) + ',' + (e.y | 0));
+    e.x = spot.x; e.y = spot.y;
+    e.spawnX = spot.x; e.spawnY = spot.y;      // the patrol leash moves with it
+    occupied.add((e.x | 0) + ',' + (e.y | 0));
+  }
+}
+
+// BFS from the enemy's own tile over open floor, returning the nearest tile it
+// cannot see the player from. A flat-array queue, like buildNavField: shift()
+// would be quadratic, and this runs once per enemy per floor. Exhausting the
+// room without finding cover (a bare hall with no pillars) leaves the body in
+// place rather than dropping it somewhere unreachable.
+function findCoverTile(e, px, py, occupied) {
+  const gx0 = e.x | 0, gy0 = e.y | 0;
+  const seen = new Uint8Array(MAP_W * MAP_H);
+  const queue = new Int32Array(MAP_W * MAP_H);
+  let head = 0, tail = 0;
+  const start = gy0 * MAP_W + gx0;
+  seen[start] = 1;
+  queue[tail++] = start;
+  while (head < tail) {
+    const at = queue[head++];
+    const x = at % MAP_W, y = (at / MAP_W) | 0;
+    if (at !== start) {
+      const cx = x + 0.5, cy = y + 0.5;
+      if (!hasLOS(cx, cy, px, py)) return { x: cx, y: cy };
+    }
+    for (const [dx, dy] of RELOCATE_DIRS) {
+      const nx = x + dx, ny = y + dy;
+      if (!inMap(nx, ny)) continue;
+      if (cellAt(nx, ny)) continue;            // wall or door — stay in-room
+      if (occupied.has(nx + ',' + ny)) continue;
+      const ni = ny * MAP_W + nx;
+      if (seen[ni]) continue;
+      seen[ni] = 1;
+      queue[tail++] = ni;
+    }
+  }
+  return null;
 }
 
 function parseLevel(src) {
@@ -3411,17 +3481,23 @@ function separateEnemies() {
       const b = enemies[j];
       if (!b.alive) continue;
       const R = ra + bodyRadius(b);
-      let dx = b.x - a.x, dy = b.y - a.y;
+      const dx = b.x - a.x, dy = b.y - a.y;
       if (dx > R || dx < -R || dy > R || dy < -R) continue;   // cheap reject
       let d = Math.hypot(dx, dy);
       if (d >= R) continue;
+      let nx, ny;
       if (d < 1e-4) {
         // exactly coincident — summoned drones can land like this. Pick a
         // deterministic axis from the pair's index so the two never argue.
-        dx = ((i + j) & 1) ? 0 : 1; dy = ((i + j) & 1) ? 1 : 0; d = 1;
+        // The axis is already unit length, and `d` stays the real (zero)
+        // distance so the shove below is the full R * 0.5 each way — feeding
+        // a fake d = 1 in here would shove a sub-tile pair backwards.
+        nx = ((i + j) & 1) ? 0 : 1; ny = ((i + j) & 1) ? 1 : 0; d = 0;
+      } else {
+        nx = dx / d; ny = dy / d;
       }
       const shove = (R - d) * 0.5;
-      const ux = dx / d * shove, uy = dy / d * shove;
+      const ux = nx * shove, uy = ny * shove;
       // heading belongs to where a body is *going*, not to being jostled
       const ha = a.heading, hb = b.heading;
       moveEnemy(a, -ux, -uy);
@@ -3523,6 +3599,11 @@ function stepEnemies(dt) {
     switch (e.state) {
       case 'idle': {
         stepPatrol(e, dt);
+        // The spawn grace is a beat of blindness, not a pause: a body keeps
+        // patrolling while it lasts, it just is not looking for the player yet.
+        // Without it, an enemy that spawns already facing you fires the moment
+        // the floor starts, before you have found any cover.
+        if (e.graceT > 0) { e.graceT -= dt; break; }
         e.stateT -= dt;
         if (e.stateT <= 0) {
           e.stateT = 0.25;

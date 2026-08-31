@@ -193,17 +193,23 @@ function separateEnemies() {
       const b = enemies[j];
       if (!b.alive) continue;
       const R = ra + bodyRadius(b);
-      let dx = b.x - a.x, dy = b.y - a.y;
+      const dx = b.x - a.x, dy = b.y - a.y;
       if (dx > R || dx < -R || dy > R || dy < -R) continue;   // cheap reject
       let d = Math.hypot(dx, dy);
       if (d >= R) continue;
+      let nx, ny;
       if (d < 1e-4) {
         // exactly coincident — summoned drones can land like this. Pick a
         // deterministic axis from the pair's index so the two never argue.
-        dx = ((i + j) & 1) ? 0 : 1; dy = ((i + j) & 1) ? 1 : 0; d = 1;
+        // The axis is already unit length, and `d` stays the real (zero)
+        // distance so the shove below is the full R * 0.5 each way — feeding
+        // a fake d = 1 in here would shove a sub-tile pair backwards.
+        nx = ((i + j) & 1) ? 0 : 1; ny = ((i + j) & 1) ? 1 : 0; d = 0;
+      } else {
+        nx = dx / d; ny = dy / d;
       }
       const shove = (R - d) * 0.5;
-      const ux = dx / d * shove, uy = dy / d * shove;
+      const ux = nx * shove, uy = ny * shove;
       // heading belongs to where a body is *going*, not to being jostled
       const ha = a.heading, hb = b.heading;
       moveEnemy(a, -ux, -uy);
@@ -305,6 +311,11 @@ function stepEnemies(dt) {
     switch (e.state) {
       case 'idle': {
         stepPatrol(e, dt);
+        // The spawn grace is a beat of blindness, not a pause: a body keeps
+        // patrolling while it lasts, it just is not looking for the player yet.
+        // Without it, an enemy that spawns already facing you fires the moment
+        // the floor starts, before you have found any cover.
+        if (e.graceT > 0) { e.graceT -= dt; break; }
         e.stateT -= dt;
         if (e.stateT <= 0) {
           e.stateT = 0.25;

@@ -33,18 +33,6 @@ number — line numbers drift with every edit, and the file map in
   reads. It wants a stopwatch on a real playthrough at BRING 'EM ON, not a
   guess — which is why it was left alone rather than adjusted blind.
 
-- [ ] **`separateEnemies` shoves exactly-coincident bodies the wrong way, once.**
-  The coincident branch substitutes `d = 1` as a direction magnitude, and that
-  same `1` lands in `shove = (R - d) * 0.5` — negative for any radius under a
-  tile, which every pair has. The bodies do come apart, by twice that and in
-  the reversed direction, and the following passes push properly once `d` is
-  real, so it self-corrects within a few frames and nothing visible is wrong.
-  But one call moves a coincident pair 0.10u where the radii say 0.90u, which
-  is why the CEO radius test has to iterate to convergence rather than measure
-  one pass. Found while writing that test. `shove` wants to be `R * 0.5` in the
-  coincident branch; left alone because changing separation is not a
-  test-writing change.
-
 ---
 
 ## Known minor issues
@@ -90,6 +78,24 @@ number — line numbers drift with every edit, and the file map in
 
 Newest first. Kept for the design notes — several record why an approach that
 looks obvious was not the one taken.
+
+- [x] **`separateEnemies` shoved exactly-coincident bodies the wrong way,
+  once.** The coincident branch picked a deterministic axis from the pair's
+  indices — correct, and unit length — but substituted `d = 1` as the magnitude
+  as well, and that same `1` landed in `shove = (R - d) * 0.5`. Negative for
+  any pair whose radii sum under a tile, which is every pair: two guards claim
+  0.70, a CEO and a drone 0.90. A stacked pair came apart backwards and by
+  0.10u, then self-corrected over the following frames once `d` was real, so
+  nothing was visibly wrong — it just took a handful of frames to do what one
+  pass should do.
+
+  The axis and the distance are now separate: `nx`/`ny` carry the unit
+  direction, `d` stays the real zero, and `(R - d) * 0.5` is the full `R * 0.5`
+  each way. Two assertions pin it — a coincident guard pair reaches exactly
+  0.70u in **one** `separate()` call, and the CEO radius test that turned this
+  up now measures a single pass at exactly 0.90u instead of iterating 40 times
+  to convergence. `separate-coincident-backwards` in the battery restores the
+  fake `d = 1` and both fail.
 
 - [x] **A cleanup pass over the rest of `wolf3d/`.** Same brief as the tally
   split that preceded it — reuse, simplification, dead weight — applied to

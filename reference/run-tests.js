@@ -168,6 +168,7 @@ group('enemy AI');
 P.startLevel();
 const g1 = firstGuard();
 ok(place(g1, 3), 'test setup: player placed in front of a guard with LOS');
+g1.graceT = 0;                 // this test is about the sight check, not the grace
 run(25);
 ok(g1.state !== 'idle', `guard leaves idle on sight (state=${g1.state})`);
 // the shot is probabilistic (p ~= 0.59 at 3u) on a jittered ~1.15s cooldown, so
@@ -178,6 +179,7 @@ ok(P.player.hp < 100, `guard damages the player (hp=${P.player.hp})`);
 // propagation: enemies with no LOS still wake via their neighbours
 P.startLevel();
 const es = P.enemies();
+for (const e of es) e.graceT = 0;   // clear the spawn grace: this test is about propagation
 let spot = null;
 for (const e of es) {
   for (const [dx, dy] of [[0, 2.5], [0, -2.5], [2.5, 0], [-2.5, 0]]) {
@@ -268,6 +270,24 @@ P.startLevel();
       closest = Math.min(closest, Math.hypot(stack[i].x - stack[j].x, stack[i].y - stack[j].y));
   ok(closest > 0.6, `four enemies stacked on one point push apart (${closest.toFixed(3)}u)`);
   ok(stack.every(e => !P.blockAt(e.x, e.y)), 'separation never shoves a body into a wall');
+}
+
+// ...and it takes ONE pass to do it, not a few frames of converging. The
+// coincident branch picks a unit axis and leaves `d` at the real zero, so the
+// shove is the full R * 0.5 each way. Substituting d = 1 as the magnitude too
+// — which reads harmless — makes `(R - d) * 0.5` negative for any pair whose
+// radii sum under a tile, so a stacked pair came apart by 0.10u in the
+// reversed direction and only self-corrected once d was real again.
+P.startLevel();
+freezeEnemies();
+{
+  const pair = P.enemies().filter(e => e.alive && e.type !== 'ceo').slice(0, 2);
+  for (const e of pair) { e.x = 20.5; e.y = 36.5; }
+  P.separate();
+  const gap = Math.hypot(pair[0].x - pair[1].x, pair[0].y - pair[1].y);
+  ok(Math.abs(gap - 0.70) < 1e-9,
+     `one pass takes a coincident pair to the full sum of their radii ` +
+     `(${gap.toFixed(3)}u, not the 0.10u a fake d = 1 gives)`);
 }
 
 // patrols: the floor should be in motion before the first shot, but on a leash
@@ -1821,6 +1841,45 @@ P.setDifficulty(2);
 P.startLevel(0);
 ok(P.difficulty() === 2, 'the default is restored before the fixtures run');
 
+// ── spawn safety: no enemy opens a floor already looking at the player, and
+//    a freshly placed body gives the player a beat to reach cover before it
+//    starts looking. relocateSpawnLOS() is the runtime guarantee behind the
+//    first; the grace timer is behind the second.
+group('spawn safety');
+{
+  P.setDifficulty(2);
+  for (let floor = 0; floor < 3; floor++) {
+    P.startLevel(floor);
+    const px = P.player.x, py = P.player.y;
+    const seen = P.enemies().filter(e =>
+      Math.hypot(e.x - px, e.y - py) < e.spec.sight && P.hasLOS(e.x, e.y, px, py));
+    ok(seen.length === 0,
+       `floor ${floor + 1} spawns no enemy with line of sight to the player ` +
+       `(${seen.length} would open fire)`);
+  }
+
+  // Relocation removes the shipped spawn sightlines, so the grace gate itself
+  // is exercised by hand: a guard with clear line of sight, freshly placed,
+  // must not wake before its grace window runs out. Everything else on the
+  // floor is frozen so a neighbour's bark cannot wake the guard under test.
+  P.startLevel();
+  ok(firstGuard().graceT === P.spawnGrace(),
+     `a fresh enemy is seeded with the spawn grace (${P.spawnGrace().toFixed(2)}s)`);
+  freezeEnemies();
+  const e = firstGuard();
+  ok(place(e, 2), 'test setup: player placed 2u in front of a guard with LOS');
+  e.state = 'idle';
+  e.stateT = 0;                 // the first post-grace frame checks at once
+  e.graceT = P.spawnGrace();
+  e.patrolDir = null; e.patrolT = 1e9;   // park the beat so distance cannot drift
+  run(31);                      // ~0.5s, still inside the grace
+  ok(e.state === 'idle',
+     'an enemy does not wake inside its grace window, even with line of sight');
+  run(31);                      // ~1.0s total — past the grace
+  ok(e.state !== 'idle', 'and wakes once the grace expires');
+  P.startLevel(0);
+}
+
 // ── thinning can never empty a floor. ratio() reports an empty category as
 //    100%, so a floor filtered down to nothing would silently hand out a
 //    perfect kill ratio and its 2500 bonus.
@@ -2824,9 +2883,9 @@ group('the CEO re-tunes itself');
   const drone = B.enemies().find(e => e.type === 'drone' && e.alive);
   ok(!!drone, 'test setup: the last phase summoned drones to crowd it with');
   drone.x = ceo.x; drone.y = ceo.y;
-  for (let i = 0; i < 40; i++) B.separate();
+  B.separate();                                  // one pass is the whole shove
   const gap = Math.hypot(drone.x - ceo.x, drone.y - ceo.y);
-  ok(gap > 0.8,
+  ok(Math.abs(gap - 0.90) < 1e-9,
      `the CEO holds more room than a pair of guards would (${gap.toFixed(2)}u, two guards claim 0.70)`);
 }
 

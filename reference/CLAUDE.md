@@ -443,7 +443,11 @@ CEO claims 0.55 against everyone else's 0.35, or the drones it summons stand
 inside its jacket. The shove goes through `moveEnemy`, so separation can never
 push a body through a wall; that is the way this kind of fix usually goes wrong.
 Exactly-coincident bodies (which summoned drones really do spawn as) get a
-deterministic axis from the pair's indices rather than a division by zero.
+deterministic axis from the pair's indices rather than a division by zero — a
+**unit** axis, with `d` left at the real zero, so the shove is the full
+`R * 0.5` each way and one pass finishes the job. Faking `d = 1` as the
+magnitude too makes `(R - d) * 0.5` negative for every pair (no two radii sum
+to a tile) and the pair comes apart backwards, by 0.10u.
 
 Before this, 6.6s of a group chase left the two closest guards **0.009u apart**.
 It is 0.70u now, and there is an assertion carrying that number.

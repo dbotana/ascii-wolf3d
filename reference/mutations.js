@@ -398,6 +398,11 @@ module.exports = [
     replace: 'if (false) {',
     note: 'exactly-coincident bodies divide by zero and both positions become NaN — which is exactly how summoned drones spawn' },
 
+  { id: 'separate-coincident-backwards', group: 'Phase 2', file: 'wolf3d/enemies.js',
+    find: "nx = ((i + j) & 1) ? 0 : 1; ny = ((i + j) & 1) ? 1 : 0; d = 0;",
+    replace: "nx = ((i + j) & 1) ? 0 : 1; ny = ((i + j) & 1) ? 1 : 0; d = 1;",
+    note: 'the coincident axis is unit length but d is faked to 1 as well, so (R - d) * 0.5 goes negative for any pair inside a tile: a stacked pair comes apart backwards and by 0.10u instead of 0.90u' },
+
   { id: 'separate-not-run', group: 'Phase 2', file: 'wolf3d/enemies.js',
     find: "if (gameState === 'playing') separateEnemies();",
     replace: 'if (false) separateEnemies();',
@@ -906,5 +911,19 @@ module.exports = [
     find: 'const q = Math.max(0, Math.min(7, Math.round(t * 7)));',
     replace: 'const q = Math.max(0, Math.min(7, t * 7));',
     note: 'the fog blend stops quantising, so EVERY colour in the game — walls, sprites, decals, the HUD — mints a fresh atlas entry per distinct depth. Unbounded growth toward the silent fillText degradation the atlas exists to avoid. Standing still it is invisible (138 entries against 67, both under the boot bound of 500); walking the same 60 frames it is 1124 against 87' },
+
+  // ── spawn safety ─────────────────────────────────────────────────────────
+  // Relocation and the reaction grace, mutated in the same pass that added
+  // the tests pinning them.
+
+  { id: 'spawn-relocation-off', group: 'spawn safety', file: 'wolf3d/level.js',
+    find: 'relocateSpawnLOS();',
+    replace: 'void 0;',
+    note: 'enemies spawn wherever the level placed them, so a guard left on the spawn\u2019s sightline opens fire before the floor has finished fading in' },
+
+  { id: 'spawn-grace-off', group: 'spawn safety', file: 'wolf3d/enemies.js',
+    find: 'if (e.graceT > 0) { e.graceT -= dt; break; }',
+    replace: 'if (false) { e.graceT -= dt; break; }',
+    note: 'an enemy that spawns already looking at the player fires on the first frame — no beat to reach cover' },
 
 ];

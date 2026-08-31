@@ -54,6 +54,70 @@ function populateEnemies(spawns) {
     const s = survivors[i % survivors.length];
     enemies.push(mkEnemy(s[0], s[1], s[2]));
   }
+  relocateSpawnLOS();
+}
+
+// ─── SPAWN SAFETY ──────────────────────────────────────────
+// A body that spawns already looking at the player opens fire before the floor
+// has finished fading in. Relocation walks any such enemy — reinforcements
+// included, since they land on a survivor's authored tile — to the nearest open
+// tile with no line of sight back to the spawn, staying inside its own room
+// (doors are walls here: a body parked behind a closed door can neither patrol
+// nor be reached). The CEO is exempt — it is the floor's win condition, tuned
+// to a fixed boardroom, and never spawns in view anyway.
+const RELOCATE_DIRS = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+
+function relocateSpawnLOS() {
+  const px = player.x, py = player.y;
+  const occupied = new Set();
+  occupied.add((px | 0) + ',' + (py | 0));
+  for (const e of enemies) occupied.add((e.x | 0) + ',' + (e.y | 0));
+
+  for (const e of enemies) {
+    if (e.type === 'ceo') continue;
+    const d = Math.hypot(e.x - px, e.y - py);
+    if (d >= e.spec.sight || !hasLOS(e.x, e.y, px, py)) continue;
+    const spot = findCoverTile(e, px, py, occupied);
+    if (!spot) continue;
+    occupied.delete((e.x | 0) + ',' + (e.y | 0));
+    e.x = spot.x; e.y = spot.y;
+    e.spawnX = spot.x; e.spawnY = spot.y;      // the patrol leash moves with it
+    occupied.add((e.x | 0) + ',' + (e.y | 0));
+  }
+}
+
+// BFS from the enemy's own tile over open floor, returning the nearest tile it
+// cannot see the player from. A flat-array queue, like buildNavField: shift()
+// would be quadratic, and this runs once per enemy per floor. Exhausting the
+// room without finding cover (a bare hall with no pillars) leaves the body in
+// place rather than dropping it somewhere unreachable.
+function findCoverTile(e, px, py, occupied) {
+  const gx0 = e.x | 0, gy0 = e.y | 0;
+  const visited = new Uint8Array(MAP_W * MAP_H);
+  const queue = new Int32Array(MAP_W * MAP_H);
+  let head = 0, tail = 0;
+  const start = gy0 * MAP_W + gx0;
+  visited[start] = 1;
+  queue[tail++] = start;
+  while (head < tail) {
+    const at = queue[head++];
+    const x = at % MAP_W, y = (at / MAP_W) | 0;
+    if (at !== start) {
+      const cx = x + 0.5, cy = y + 0.5;
+      if (!hasLOS(cx, cy, px, py)) return { x: cx, y: cy };
+    }
+    for (const [dx, dy] of RELOCATE_DIRS) {
+      const nx = x + dx, ny = y + dy;
+      if (!inMap(nx, ny)) continue;
+      if (cellAt(nx, ny)) continue;            // wall or door — stay in-room
+      if (occupied.has(nx + ',' + ny)) continue;
+      const ni = ny * MAP_W + nx;
+      if (visited[ni]) continue;
+      visited[ni] = 1;
+      queue[tail++] = ni;
+    }
+  }
+  return null;
 }
 
 function parseLevel(src) {

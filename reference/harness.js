@@ -109,6 +109,7 @@ const PROBE_SRC = `global.__PROBE = {
   deathSeq:      () => (typeof DEATH_SEQ !== "undefined" ? DEATH_SEQ : {}),
   decalSpr:      () => (typeof DECAL_SPR !== "undefined" ? DECAL_SPR : []),
   deathTime:     () => (typeof DEATH_TIME !== "undefined" ? DEATH_TIME : 0.45),
+  spawnGrace:    () => (typeof SPAWN_GRACE !== "undefined" ? SPAWN_GRACE : 0.75),
   decalCap:      () => (typeof DECAL_CAP !== "undefined" ? DECAL_CAP : 0),
   music:         () => (typeof MUSIC !== "undefined" ? MUSIC : []),
   musicTrackFor: (typeof musicTrackFor !== "undefined" ? musicTrackFor : null),

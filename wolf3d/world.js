@@ -121,6 +121,11 @@ function mkEnemy(type, x, y) {
     hp: spec.hp, maxHp: spec.hp, spec,
     state: 'idle', stateT: 0, atkCd: 0, bob: Math.random() * 6.28,
     alive: true,
+    // A freshly spawned body gives the player a beat to reach cover before it
+    // starts looking for them — see the idle sight check in enemies.js. It
+    // exists separately from stateT because that field is reused for the alert
+    // window, and a spawn grace is a different thing from a reaction delay.
+    graceT: SPAWN_GRACE,
     // which way the body is facing, in world radians. Set wherever the enemy
     // moves; seeded rather than left undefined so enemySprite can rotate a
     // guard that has never taken a step.

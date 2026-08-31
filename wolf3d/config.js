@@ -19,6 +19,7 @@ const CLIP_SIZE = 8;          // rounds per magazine before a reload cycle
 const KILL_SCORE = { guard: 200, drone: 150, ceo: 5000 };
 const RELOAD_TIME = 1.05;     // seconds for the full reload animation
 const DEATH_TIME = 0.45;      // the 'dying' window, subdivided across DEATH_SEQ
+const SPAWN_GRACE = 0.75;     // seconds an idle enemy ignores the player after spawn
 
 // ─── DIFFICULTY ─────────────────────────────────────────────
 // Wolf3D's four, and its philosophy: the enemies do not get tougher, they get
