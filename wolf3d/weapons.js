@@ -8,8 +8,8 @@
 //
 // Every art table is the same 13-column x 10-row grid as GUN_IDLE, because
 // blitArt() scales whatever it is handed into one fixed 39x22 cell span. The
-// pistol's own frames stay in art.js next to the reload keyframes, which all
-// four weapons share.
+// pistol's own frames stay in art.js next to the reload keyframes, which every
+// weapon that reloads shares.
 
 // ─── KNIFE ──────────────────────────────────────────────────
 // Held low and to the left, edge up. The fire frame is a thrust into the
@@ -131,6 +131,89 @@ const CHAIN_RECOIL = [
   '  ▜███████▛  ',
 ];
 
+// ─── SHOTGUN ────────────────────────────────────────────────
+// Twin barrels over a fat pump slide. The recoil frame drops the whole model
+// two rows rather than one — at a 0.8s cycle there is time to see the kick,
+// and the barrels leaving the top of the cell is what sells it.
+const SHOT_IDLE = [
+  '    ██ ██    ',
+  '    ██ ██    ',
+  '   ▟█████▙   ',
+  '  ▟███████▙  ',
+  '  █████████  ',
+  ' ▗█████████▖ ',
+  ' ▐█████████▌ ',
+  '  ▜███████▛  ',
+  '  ███▛▀▜███  ',
+  '  ██▌   ▐██  ',
+];
+const SHOT_FIRE = [
+  '   ╲▲╱╲▲╱    ',
+  '   ▄██▄██▄   ',
+  '   ▟█████▙   ',
+  '  ▟███████▙  ',
+  '  █████████  ',
+  ' ▗█████████▖ ',
+  ' ▐█████████▌ ',
+  '  ▜███████▛  ',
+  '  ███▛▀▜███  ',
+  '  ██▌   ▐██  ',
+];
+const SHOT_RECOIL = [
+  '             ',
+  '             ',
+  '    ██ ██    ',
+  '   ▟█████▙   ',
+  '  ▟███████▙  ',
+  '  █████████  ',
+  ' ▗█████████▖ ',
+  ' ▐█████████▌ ',
+  '  ▜███████▛  ',
+  '  ███▛▀▜███  ',
+];
+
+// ─── SNIPER ─────────────────────────────────────────────────
+// Thin barrel, a scope tube across the receiver, a bolt handle out to the
+// right. The lens is the one accent char the idle frame carries, so the
+// weapon reads as the scoped one even when nothing is firing; the recoil
+// frame cycles the bolt rather than flashing anything.
+const SNIPE_IDLE = [
+  '   ██        ',
+  '   ██        ',
+  '   ██        ',
+  '  ▟██▙▄▄▄▖   ',
+  '  █████████  ',
+  '  ▜██●██▛▘   ',
+  '  ▟██████▙   ',
+  ' ▐████████▙  ',
+  ' ▐█████████▙ ',
+  '  ▜████████▛ ',
+];
+const SNIPE_FIRE = [
+  '  ╲▲▲╱       ',
+  '  ▟██▙       ',
+  '   ██        ',
+  '  ▟██▙▄▄▄▖   ',
+  '  █████████  ',
+  '  ▜██●██▛▘   ',
+  '  ▟██████▙   ',
+  ' ▐████████▙  ',
+  ' ▐█████████▙ ',
+  '  ▜████████▛ ',
+];
+const SNIPE_RECOIL = [
+  '             ',
+  '   ██        ',
+  '   ██        ',
+  '  ▟██▙▄▄▄▖   ',
+  '  █████████  ',
+  '  ▜██●██▛▘   ',
+  '  ▟██████▙   ',
+  ' ▐███████▛▀  ',
+  ' ▐█████████▙ ',
+  '  ▜████████▛ ',
+];
+
 // ─── THE ROSTER ─────────────────────────────────────────────
 //
 // Index is the number key minus one. Row 1 (the pistol) reproduces the
@@ -139,7 +222,8 @@ const CHAIN_RECOIL = [
 // existing test suite still describes the default weapon exactly.
 //
 //   cd       seconds between shots
-//   auto     does holding the trigger repeat? (the pistol is one shot per press)
+//   auto     does holding the trigger repeat? False is a manual action — the
+//            pistol, the pump shotgun and the sniper's bolt are one per press
 //   dmgMin   damage is dmgMin + floor(random() * dmgSpan)
 //   cost     rounds spent per shot; 0 means the weapon needs no ammo at all
 //   clip     magazine capacity; 0 alongside cost 0 means "never reloads"
@@ -157,6 +241,14 @@ const CHAIN_RECOIL = [
 //            identically at 0.2u and 20u.)
 //   reach    melee radius in tiles — a true distance, not the forward depth
 //            above, so a body beside you is not stabbable. 0 means no cap.
+//   pellets  projectiles per pull, each with its OWN spread roll. Absent means
+//            one, and the shotgun is the only row that sets it. Damage is
+//            rolled per pellet, so a shotgun's damage at range is not a
+//            falloff curve anyone had to write: the pellets that miss are
+//            simply the ones whose jitter exceeded the target's half-width.
+//   pierce   how many bodies ONE projectile passes through, nearest first.
+//            Absent means one, which is the nearest-target-only rule every
+//            other weapon has always had.
 //   spinUp   seconds of held trigger before the first round leaves the barrel
 //   flash    seconds of muzzle wash; 0 for anything with no muzzle
 //   alert    radius in tiles that the noise wakes idle enemies in
@@ -197,6 +289,35 @@ const WEAPONS = [
     spread: 9.0, minDepth: 0.35, reach: 0,
     spinUp: 0.42, flash: 0.09, alert: 12,
     fireT: 0.035, recoilT: 0.035, sfx: 'chain' },
+
+  // Eight pellets on eight separate rolls, each worth a fraction of a shot.
+  // Inside ~4.5u a guard's half-width (58.9/depth columns) is wider than the
+  // 13 columns of jitter, so the whole 64-120 lands at once; by 9u the body is
+  // 6.5 columns and half the volley goes past it, and by 13u two thirds does.
+  // That falloff IS the shotgun, and the spread column is the whole of it —
+  // there is no range term anywhere in fire().
+  { name: 'SHOTGUN',
+    idle: SHOT_IDLE, fire: SHOT_FIRE, recoil: SHOT_RECOIL,
+    accent: '╲╱▲▄', base: 'gun', hi: 'gunHi', accentColor: 'muzzle',
+    cd: 0.80, auto: false, dmgMin: 8, dmgSpan: 8,
+    cost: 1, clip: 6, reload: 1.55,
+    pellets: 8, spread: 13.0, minDepth: 0.35, reach: 0,
+    spinUp: 0, flash: 0.16, alert: 14,
+    fireT: 0.10, recoilT: 0.17, sfx: 'boom' },
+
+  // The opposite weapon in every column: one projectile, no jitter at all, and
+  // a cycle long enough that a missed shot is a real cost. `pierce: 2` is the
+  // only reason to hold it in a corridor rather than the chaingun — a round
+  // that keeps going is worth more the more bodies are queued up in front of
+  // you, which is exactly the geometry the chaingun's spread is worst in.
+  { name: 'SNIPER',
+    idle: SNIPE_IDLE, fire: SNIPE_FIRE, recoil: SNIPE_RECOIL,
+    accent: '╲╱▲●', base: 'gun', hi: 'gunHi', accentColor: 'muzzle',
+    cd: 1.30, auto: false, dmgMin: 90, dmgSpan: 45,
+    cost: 1, clip: 5, reload: 2.10,
+    pierce: 2, spread: 0, minDepth: 0.35, reach: 0,
+    spinUp: 0, flash: 0.18, alert: 16,
+    fireT: 0.11, recoilT: 0.24, sfx: 'bolt' },
 ];
 
 const PISTOL = 1;   // the weapon a cold start hands you
@@ -204,5 +325,12 @@ const PISTOL = 1;   // the weapon a cold start hands you
 // Cumulative kills THIS RUN that earn each weapon; 0 means you start with it.
 // Indexed like WEAPONS, so earning a gun is a column of that table rather than
 // a branch anywhere — checkWeaponUnlock() walks it and grants the first row it
-// has paid for. A fifth weapon is a row here and a row there, still no code.
-const WEAPON_UNLOCK = [0, 0, 5, 10];
+// has paid for. A seventh weapon is a row here and a row there, still no code.
+//
+// The gaps widen deliberately. Floor 1 holds fifteen bodies and floor 2
+// fifteen more, so 5 and 10 both come due on the first floor, 18 early on the
+// second and 28 around the third — one reward per floor after the opening,
+// rather than the whole roster inside the atrium. They also stay far enough
+// apart that two can never come due on the same kill, which is what lets
+// checkWeaponUnlock() return after granting one.
+const WEAPON_UNLOCK = [0, 0, 5, 10, 18, 28];

@@ -87,6 +87,9 @@ const PROBE_SRC = `global.__PROBE = {
   selectWeapon:  (typeof selectWeapon !== "undefined" ? selectWeapon : null),
   startReload:   (typeof startReload  !== "undefined" ? startReload : null),
   weapons:       () => (typeof WEAPONS !== "undefined" ? WEAPONS : []),
+  // A multi-pellet weapon has to leave ONE damage number per body per pull,
+  // not one per pellet, and that is only checkable from the pop list itself.
+  dmgPops:       () => (typeof dmgPops !== "undefined" ? dmgPops : []),
   // Phase 7: earning the roster, the auto-map and the objective line.
   weaponUnlock:  () => (typeof WEAPON_UNLOCK !== "undefined" ? WEAPON_UNLOCK : []),
   checkWeaponUnlock: (typeof checkWeaponUnlock !== "undefined" ? checkWeaponUnlock : null),
@@ -373,12 +376,12 @@ function load(opts) {
     },
     addEventListener(type, fn) { this._handlers[type] = fn; },
     style: {},
-    // #sKeys needs two children (red + blue keycard lamps) and #sWeapons four
-    // (one slot per weapon). Four for everything: the keycard code only ever
-    // reads [0] and [1], and a stub with too FEW children makes a painter that
-    // walks its slots silently do half its work — which is exactly what the
-    // weapon strip did until this was widened.
-    children: Array.from({ length: 4 }, () => ({
+    // #sKeys needs two children (red + blue keycard lamps) and #sWeapons one
+    // per weapon. Six for everything: the keycard code only ever reads [0] and
+    // [1], and a stub with too FEW children makes a painter that walks its
+    // slots silently do half its work — which is exactly what the weapon strip
+    // did until this was widened, and again when the roster grew past four.
+    children: Array.from({ length: 6 }, () => ({
       textContent: '',
       classList: { _s: new Set(), toggle(c, v) { v ? this._s.add(c) : this._s.delete(c); },
                    contains(c) { return this._s.has(c); } },

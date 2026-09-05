@@ -107,6 +107,11 @@ function sfx(name) {
     case 'knife':     noiseBurst(0.07, 3200, 0.16, 3.0); blip(1500, 0.05, 'sine', 0.06, 2600); break;
     case 'smg':       noiseBurst(0.07, 1800, 0.34, 1.1); blip(230, 0.05, 'square', 0.11, 90); break;
     case 'chain':     noiseBurst(0.05, 1200, 0.30, 0.7); blip(150, 0.04, 'square', 0.10, 70); break;
+    // the shotgun is the widest, lowest noise in the game and the sniper the
+    // sharpest — they are 0.80s and 1.30s apart, so both get room to ring out
+    case 'boom':      noiseBurst(0.30, 620, 0.60, 0.45); blip(96, 0.20, 'square', 0.22, 34); break;
+    case 'bolt':      noiseBurst(0.22, 2800, 0.52, 2.4); noiseBurst(0.34, 420, 0.26, 0.6);
+                      blip(300, 0.14, 'square', 0.19, 58); break;
     case 'spin':      blip(90, 0.42, 'sawtooth', 0.13, 320); break;
     case 'swap':      blip(520, 0.05, 'square', 0.10, 780); noiseBurst(0.04, 2400, 0.07, 1.6); break;
     case 'enemyShot': noiseBurst(0.11, 1100, 0.22, 0.9); break;

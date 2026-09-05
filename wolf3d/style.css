@@ -98,7 +98,11 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    gap: 26px;
+    /* wraps rather than squeezes: the weapon strip grew from four slots to six
+       and a narrow window would otherwise crush the ammo and keycard slots
+       off the end of the bar */
+    flex-wrap: wrap;
+    gap: 4px 26px;
     padding: 6px 18px;
     background: linear-gradient(to bottom, rgba(2,3,10,0.0), rgba(2,3,10,0.82) 35%);
     font-family: 'IBM Plex Mono', monospace;
@@ -184,18 +188,24 @@
   #sKeys i.blue.on { background: #4FA8FF; border-color: #A6D4FF; box-shadow: 0 0 8px #4FA8FF; }
 
   /* ── the weapon strip ─────────────────────────────────────
-     Four slots rather than one name, because the single name was the whole
-     reason a playthrough could end without the player learning the other
-     three exist. A locked slot shows its price in kills, so the strip is
-     also the progress bar toward the next gun. */
-  #sWeapons { display: flex; gap: 4px; justify-content: center; margin-top: 3px; }
+     One slot per weapon rather than one name, because the single name was the
+     whole reason a playthrough could end without the player learning the rest
+     of the roster exists. A locked slot shows its price in kills, so the strip
+     is also the progress bar toward the next gun.
+
+     It wraps: six slots do not always fit one line, and a strip that scrolls
+     off the bar is the same bug in a new shape. */
+  #sWeapons {
+    display: flex; flex-wrap: wrap;
+    gap: 3px; justify-content: center; margin-top: 3px;
+  }
   #sWeapons i {
     display: block;
     font-family: 'IBM Plex Mono', monospace;
     font-style: normal;
-    font-size: 9px; letter-spacing: 0.08em;
-    padding: 3px 5px;
-    min-width: 40px; text-align: center;
+    font-size: 8px; letter-spacing: 0.06em;
+    padding: 3px 4px;
+    min-width: 34px; text-align: center;
     border: 1px solid rgba(255,255,255,0.12);
     background: rgba(255,255,255,0.03);
     color: rgba(255,255,255,0.28);
@@ -586,14 +596,16 @@
   #tWeapons {
     position: absolute; right: 22px; top: 50%;
     transform: translateY(-50%);
-    display: flex; flex-direction: column; gap: 6px;
+    display: flex; flex-direction: column; gap: 4px;
     pointer-events: none;
   }
+  /* Six of these stack to ~180px, which still clears the middle of a landscape
+     phone. They shrank when the roster did not fit at the old height. */
   #touch .tw {
     pointer-events: auto;
     font-family: 'VT323', monospace;
-    font-size: 16px;
-    width: 34px; height: 30px;
+    font-size: 15px;
+    width: 32px; height: 26px;
     border: 1px solid rgba(127,255,107,0.24);
     background: rgba(10,26,46,0.42);
     color: rgba(127,255,107,0.7);

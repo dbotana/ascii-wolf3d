@@ -5,6 +5,9 @@
 
 // ─── INPUT ──────────────────────────────────────────────────
 const keys = new Set();
+// One digit per weapon, in roster order. A seventh weapon would want a
+// non-digit here, which is the point at which this stops being a slice.
+const WEAPON_KEYS = WEAPONS.map((w, i) => String(i + 1));
 let mouseLocked = false;
 let firePressed = false;
 // held, as opposed to firePressed, which is one edge. The auto weapons read
@@ -13,8 +16,10 @@ let mouseHeld = false;
 
 addEventListener('keydown', e => {
   const k = e.key.toLowerCase();
+  // WEAPON_KEYS is derived from the roster rather than typed out, so a new
+  // row in WEAPONS binds its own key and stops its digit scrolling the page.
   if (['arrowleft','arrowright','arrowup','arrowdown','w','a','s','d','e','r',' ',
-       '1','2','3','4','tab'].includes(k)) e.preventDefault();
+       'tab'].includes(k) || WEAPON_KEYS.includes(k)) e.preventDefault();
   if (keys.has(k)) return;
   keys.add(k);
   if (k === ' ')     firePressed = true;
@@ -28,7 +33,7 @@ addEventListener('keydown', e => {
   if (k === 'escape') togglePause();
   if (k === 'r')     { if (gameState === 'playing') startReload(); }
   if (k === 'p')     startLevel(gameState === 'won' ? 0 : levelIndex);
-  if (k >= '1' && k <= '4') pickWeapon(+k - 1);
+  if (WEAPON_KEYS.includes(k)) pickWeapon(+k - 1);
   if (k === 'tab')   toggleMinimap();
 });
 addEventListener('keyup', e => keys.delete(e.key.toLowerCase()));

@@ -106,7 +106,11 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    gap: 26px;
+    /* wraps rather than squeezes: the weapon strip grew from four slots to six
+       and a narrow window would otherwise crush the ammo and keycard slots
+       off the end of the bar */
+    flex-wrap: wrap;
+    gap: 4px 26px;
     padding: 6px 18px;
     background: linear-gradient(to bottom, rgba(2,3,10,0.0), rgba(2,3,10,0.82) 35%);
     font-family: 'IBM Plex Mono', monospace;
@@ -192,18 +196,24 @@
   #sKeys i.blue.on { background: #4FA8FF; border-color: #A6D4FF; box-shadow: 0 0 8px #4FA8FF; }
 
   /* ── the weapon strip ─────────────────────────────────────
-     Four slots rather than one name, because the single name was the whole
-     reason a playthrough could end without the player learning the other
-     three exist. A locked slot shows its price in kills, so the strip is
-     also the progress bar toward the next gun. */
-  #sWeapons { display: flex; gap: 4px; justify-content: center; margin-top: 3px; }
+     One slot per weapon rather than one name, because the single name was the
+     whole reason a playthrough could end without the player learning the rest
+     of the roster exists. A locked slot shows its price in kills, so the strip
+     is also the progress bar toward the next gun.
+
+     It wraps: six slots do not always fit one line, and a strip that scrolls
+     off the bar is the same bug in a new shape. */
+  #sWeapons {
+    display: flex; flex-wrap: wrap;
+    gap: 3px; justify-content: center; margin-top: 3px;
+  }
   #sWeapons i {
     display: block;
     font-family: 'IBM Plex Mono', monospace;
     font-style: normal;
-    font-size: 9px; letter-spacing: 0.08em;
-    padding: 3px 5px;
-    min-width: 40px; text-align: center;
+    font-size: 8px; letter-spacing: 0.06em;
+    padding: 3px 4px;
+    min-width: 34px; text-align: center;
     border: 1px solid rgba(255,255,255,0.12);
     background: rgba(255,255,255,0.03);
     color: rgba(255,255,255,0.28);
@@ -594,14 +604,16 @@
   #tWeapons {
     position: absolute; right: 22px; top: 50%;
     transform: translateY(-50%);
-    display: flex; flex-direction: column; gap: 6px;
+    display: flex; flex-direction: column; gap: 4px;
     pointer-events: none;
   }
+  /* Six of these stack to ~180px, which still clears the middle of a landscape
+     phone. They shrank when the roster did not fit at the old height. */
   #touch .tw {
     pointer-events: auto;
     font-family: 'VT323', monospace;
-    font-size: 16px;
-    width: 34px; height: 30px;
+    font-size: 15px;
+    width: 32px; height: 26px;
     border: 1px solid rgba(127,255,107,0.24);
     background: rgba(10,26,46,0.42);
     color: rgba(127,255,107,0.7);
@@ -677,7 +689,8 @@
     </div>
     <div class="slot"><span class="lbl">weapon</span>
       <div id="sWeapons">
-        <i id="sW0"></i><i id="sW1"></i><i id="sW2"></i><i id="sW3"></i>
+        <i id="sW0"></i><i id="sW1"></i><i id="sW2"></i>
+        <i id="sW3"></i><i id="sW4"></i><i id="sW5"></i>
       </div>
     </div>
     <div class="slot"><span class="lbl">ammo</span><span class="val" id="sAmmo">8/24</span></div>
@@ -714,6 +727,8 @@
       <button type="button" class="tw" id="tW1">2</button>
       <button type="button" class="tw" id="tW2">3</button>
       <button type="button" class="tw" id="tW3">4</button>
+      <button type="button" class="tw" id="tW4">5</button>
+      <button type="button" class="tw" id="tW5">6</button>
     </div>
     <div id="tBtns">
       <button type="button" class="tb" id="tReload">R</button>
@@ -752,7 +767,7 @@
       <kbd>Space</kbd> / click fire &nbsp;
       <kbd>E</kbd> use door &middot; switch &middot; search walls &nbsp;
       <kbd>R</kbd> reload &nbsp;
-      <kbd>1</kbd>&hellip;<kbd>4</kbd> swap weapon &nbsp;
+      <kbd>1</kbd>&hellip;<kbd>6</kbd> swap weapon &nbsp;
       <kbd>Tab</kbd> map<br>
       <kbd>P</kbd> restart floor &nbsp; <kbd>M</kbd> mute &nbsp; <kbd>Esc</kbd> pause &middot; release mouse
     </div>
@@ -2299,8 +2314,8 @@ const DECAL_SPR = [
 //
 // Every art table is the same 13-column x 10-row grid as GUN_IDLE, because
 // blitArt() scales whatever it is handed into one fixed 39x22 cell span. The
-// pistol's own frames stay in art.js next to the reload keyframes, which all
-// four weapons share.
+// pistol's own frames stay in art.js next to the reload keyframes, which every
+// weapon that reloads shares.
 
 // ─── KNIFE ──────────────────────────────────────────────────
 // Held low and to the left, edge up. The fire frame is a thrust into the
@@ -2422,6 +2437,89 @@ const CHAIN_RECOIL = [
   '  ▜███████▛  ',
 ];
 
+// ─── SHOTGUN ────────────────────────────────────────────────
+// Twin barrels over a fat pump slide. The recoil frame drops the whole model
+// two rows rather than one — at a 0.8s cycle there is time to see the kick,
+// and the barrels leaving the top of the cell is what sells it.
+const SHOT_IDLE = [
+  '    ██ ██    ',
+  '    ██ ██    ',
+  '   ▟█████▙   ',
+  '  ▟███████▙  ',
+  '  █████████  ',
+  ' ▗█████████▖ ',
+  ' ▐█████████▌ ',
+  '  ▜███████▛  ',
+  '  ███▛▀▜███  ',
+  '  ██▌   ▐██  ',
+];
+const SHOT_FIRE = [
+  '   ╲▲╱╲▲╱    ',
+  '   ▄██▄██▄   ',
+  '   ▟█████▙   ',
+  '  ▟███████▙  ',
+  '  █████████  ',
+  ' ▗█████████▖ ',
+  ' ▐█████████▌ ',
+  '  ▜███████▛  ',
+  '  ███▛▀▜███  ',
+  '  ██▌   ▐██  ',
+];
+const SHOT_RECOIL = [
+  '             ',
+  '             ',
+  '    ██ ██    ',
+  '   ▟█████▙   ',
+  '  ▟███████▙  ',
+  '  █████████  ',
+  ' ▗█████████▖ ',
+  ' ▐█████████▌ ',
+  '  ▜███████▛  ',
+  '  ███▛▀▜███  ',
+];
+
+// ─── SNIPER ─────────────────────────────────────────────────
+// Thin barrel, a scope tube across the receiver, a bolt handle out to the
+// right. The lens is the one accent char the idle frame carries, so the
+// weapon reads as the scoped one even when nothing is firing; the recoil
+// frame cycles the bolt rather than flashing anything.
+const SNIPE_IDLE = [
+  '   ██        ',
+  '   ██        ',
+  '   ██        ',
+  '  ▟██▙▄▄▄▖   ',
+  '  █████████  ',
+  '  ▜██●██▛▘   ',
+  '  ▟██████▙   ',
+  ' ▐████████▙  ',
+  ' ▐█████████▙ ',
+  '  ▜████████▛ ',
+];
+const SNIPE_FIRE = [
+  '  ╲▲▲╱       ',
+  '  ▟██▙       ',
+  '   ██        ',
+  '  ▟██▙▄▄▄▖   ',
+  '  █████████  ',
+  '  ▜██●██▛▘   ',
+  '  ▟██████▙   ',
+  ' ▐████████▙  ',
+  ' ▐█████████▙ ',
+  '  ▜████████▛ ',
+];
+const SNIPE_RECOIL = [
+  '             ',
+  '   ██        ',
+  '   ██        ',
+  '  ▟██▙▄▄▄▖   ',
+  '  █████████  ',
+  '  ▜██●██▛▘   ',
+  '  ▟██████▙   ',
+  ' ▐███████▛▀  ',
+  ' ▐█████████▙ ',
+  '  ▜████████▛ ',
+];
+
 // ─── THE ROSTER ─────────────────────────────────────────────
 //
 // Index is the number key minus one. Row 1 (the pistol) reproduces the
@@ -2430,7 +2528,8 @@ const CHAIN_RECOIL = [
 // existing test suite still describes the default weapon exactly.
 //
 //   cd       seconds between shots
-//   auto     does holding the trigger repeat? (the pistol is one shot per press)
+//   auto     does holding the trigger repeat? False is a manual action — the
+//            pistol, the pump shotgun and the sniper's bolt are one per press
 //   dmgMin   damage is dmgMin + floor(random() * dmgSpan)
 //   cost     rounds spent per shot; 0 means the weapon needs no ammo at all
 //   clip     magazine capacity; 0 alongside cost 0 means "never reloads"
@@ -2448,6 +2547,14 @@ const CHAIN_RECOIL = [
 //            identically at 0.2u and 20u.)
 //   reach    melee radius in tiles — a true distance, not the forward depth
 //            above, so a body beside you is not stabbable. 0 means no cap.
+//   pellets  projectiles per pull, each with its OWN spread roll. Absent means
+//            one, and the shotgun is the only row that sets it. Damage is
+//            rolled per pellet, so a shotgun's damage at range is not a
+//            falloff curve anyone had to write: the pellets that miss are
+//            simply the ones whose jitter exceeded the target's half-width.
+//   pierce   how many bodies ONE projectile passes through, nearest first.
+//            Absent means one, which is the nearest-target-only rule every
+//            other weapon has always had.
 //   spinUp   seconds of held trigger before the first round leaves the barrel
 //   flash    seconds of muzzle wash; 0 for anything with no muzzle
 //   alert    radius in tiles that the noise wakes idle enemies in
@@ -2488,6 +2595,35 @@ const WEAPONS = [
     spread: 9.0, minDepth: 0.35, reach: 0,
     spinUp: 0.42, flash: 0.09, alert: 12,
     fireT: 0.035, recoilT: 0.035, sfx: 'chain' },
+
+  // Eight pellets on eight separate rolls, each worth a fraction of a shot.
+  // Inside ~4.5u a guard's half-width (58.9/depth columns) is wider than the
+  // 13 columns of jitter, so the whole 64-120 lands at once; by 9u the body is
+  // 6.5 columns and half the volley goes past it, and by 13u two thirds does.
+  // That falloff IS the shotgun, and the spread column is the whole of it —
+  // there is no range term anywhere in fire().
+  { name: 'SHOTGUN',
+    idle: SHOT_IDLE, fire: SHOT_FIRE, recoil: SHOT_RECOIL,
+    accent: '╲╱▲▄', base: 'gun', hi: 'gunHi', accentColor: 'muzzle',
+    cd: 0.80, auto: false, dmgMin: 8, dmgSpan: 8,
+    cost: 1, clip: 6, reload: 1.55,
+    pellets: 8, spread: 13.0, minDepth: 0.35, reach: 0,
+    spinUp: 0, flash: 0.16, alert: 14,
+    fireT: 0.10, recoilT: 0.17, sfx: 'boom' },
+
+  // The opposite weapon in every column: one projectile, no jitter at all, and
+  // a cycle long enough that a missed shot is a real cost. `pierce: 2` is the
+  // only reason to hold it in a corridor rather than the chaingun — a round
+  // that keeps going is worth more the more bodies are queued up in front of
+  // you, which is exactly the geometry the chaingun's spread is worst in.
+  { name: 'SNIPER',
+    idle: SNIPE_IDLE, fire: SNIPE_FIRE, recoil: SNIPE_RECOIL,
+    accent: '╲╱▲●', base: 'gun', hi: 'gunHi', accentColor: 'muzzle',
+    cd: 1.30, auto: false, dmgMin: 90, dmgSpan: 45,
+    cost: 1, clip: 5, reload: 2.10,
+    pierce: 2, spread: 0, minDepth: 0.35, reach: 0,
+    spinUp: 0, flash: 0.18, alert: 16,
+    fireT: 0.11, recoilT: 0.24, sfx: 'bolt' },
 ];
 
 const PISTOL = 1;   // the weapon a cold start hands you
@@ -2495,8 +2631,15 @@ const PISTOL = 1;   // the weapon a cold start hands you
 // Cumulative kills THIS RUN that earn each weapon; 0 means you start with it.
 // Indexed like WEAPONS, so earning a gun is a column of that table rather than
 // a branch anywhere — checkWeaponUnlock() walks it and grants the first row it
-// has paid for. A fifth weapon is a row here and a row there, still no code.
-const WEAPON_UNLOCK = [0, 0, 5, 10];
+// has paid for. A seventh weapon is a row here and a row there, still no code.
+//
+// The gaps widen deliberately. Floor 1 holds fifteen bodies and floor 2
+// fifteen more, so 5 and 10 both come due on the first floor, 18 early on the
+// second and 28 around the third — one reward per floor after the opening,
+// rather than the whole roster inside the atrium. They also stay far enough
+// apart that two can never come due on the same kill, which is what lets
+// checkWeaponUnlock() return after granting one.
+const WEAPON_UNLOCK = [0, 0, 5, 10, 18, 28];
 
 ;
 'use strict';
@@ -2702,6 +2845,11 @@ function sfx(name) {
     case 'knife':     noiseBurst(0.07, 3200, 0.16, 3.0); blip(1500, 0.05, 'sine', 0.06, 2600); break;
     case 'smg':       noiseBurst(0.07, 1800, 0.34, 1.1); blip(230, 0.05, 'square', 0.11, 90); break;
     case 'chain':     noiseBurst(0.05, 1200, 0.30, 0.7); blip(150, 0.04, 'square', 0.10, 70); break;
+    // the shotgun is the widest, lowest noise in the game and the sniper the
+    // sharpest — they are 0.80s and 1.30s apart, so both get room to ring out
+    case 'boom':      noiseBurst(0.30, 620, 0.60, 0.45); blip(96, 0.20, 'square', 0.22, 34); break;
+    case 'bolt':      noiseBurst(0.22, 2800, 0.52, 2.4); noiseBurst(0.34, 420, 0.26, 0.6);
+                      blip(300, 0.14, 'square', 0.19, 58); break;
     case 'spin':      blip(90, 0.42, 'sawtooth', 0.13, 320); break;
     case 'swap':      blip(520, 0.05, 'square', 0.10, 780); noiseBurst(0.04, 2400, 0.07, 1.6); break;
     case 'enemyShot': noiseBurst(0.11, 1100, 0.22, 0.9); break;
@@ -2920,6 +3068,9 @@ function stepMusic() {
 
 // ─── INPUT ──────────────────────────────────────────────────
 const keys = new Set();
+// One digit per weapon, in roster order. A seventh weapon would want a
+// non-digit here, which is the point at which this stops being a slice.
+const WEAPON_KEYS = WEAPONS.map((w, i) => String(i + 1));
 let mouseLocked = false;
 let firePressed = false;
 // held, as opposed to firePressed, which is one edge. The auto weapons read
@@ -2928,8 +3079,10 @@ let mouseHeld = false;
 
 addEventListener('keydown', e => {
   const k = e.key.toLowerCase();
+  // WEAPON_KEYS is derived from the roster rather than typed out, so a new
+  // row in WEAPONS binds its own key and stops its digit scrolling the page.
   if (['arrowleft','arrowright','arrowup','arrowdown','w','a','s','d','e','r',' ',
-       '1','2','3','4','tab'].includes(k)) e.preventDefault();
+       'tab'].includes(k) || WEAPON_KEYS.includes(k)) e.preventDefault();
   if (keys.has(k)) return;
   keys.add(k);
   if (k === ' ')     firePressed = true;
@@ -2943,7 +3096,7 @@ addEventListener('keydown', e => {
   if (k === 'escape') togglePause();
   if (k === 'r')     { if (gameState === 'playing') startReload(); }
   if (k === 'p')     startLevel(gameState === 'won' ? 0 : levelIndex);
-  if (k >= '1' && k <= '4') pickWeapon(+k - 1);
+  if (WEAPON_KEYS.includes(k)) pickWeapon(+k - 1);
   if (k === 'tab')   toggleMinimap();
 });
 addEventListener('keyup', e => keys.delete(e.key.toLowerCase()));
@@ -3177,7 +3330,7 @@ function tapButton(id, fn) {
 tapButton('tUse',    () => use());
 tapButton('tReload', () => { if (gameState === 'playing') startReload(); });
 tapButton('tPause',  () => togglePause());
-for (let i = 0; i < 4; i++) tapButton('tW' + i, () => pickWeapon(i));
+for (let i = 0; i < WEAPONS.length; i++) tapButton('tW' + i, () => pickWeapon(i));
 
 // Show the overlay on a device that has no mouse, without waiting for the
 // first touch. A desktop browser matches neither branch and never sees it.
@@ -3221,10 +3374,13 @@ const player = {
   keyRed: false, keyBlue: false,
   fireCd: 0, bob: 0, hurtT: 0, flashT: 0,
   reloadT: 0, clip: CLIP_SIZE,
-  // Which weapon is up, and which ones you own. You start with the knife and
-  // the pistol; the SMG and the chaingun are earned — see WEAPON_UNLOCK and
-  // checkWeaponUnlock(). selectWeapon refuses any index that is 0 here.
-  weapon: PISTOL, weapons: [1, 1, 0, 0],
+  // Which weapon is up, and which ones you own. You start with whatever
+  // WEAPON_UNLOCK prices at zero kills — the knife and the pistol — and earn
+  // the rest; see checkWeaponUnlock(). selectWeapon refuses any index that is
+  // 0 here. Derived from the same table resetWeapons() uses rather than
+  // written out, so the cold start and the restart can never disagree about
+  // the loadout, and a new row does not need editing in two places.
+  weapon: PISTOL, weapons: WEAPON_UNLOCK.map(n => (n === 0 ? 1 : 0)),
   // Kills for the whole RUN, which is what buys guns. Deliberately NOT
   // player.kills: startLevel zeroes that every floor because the tally reports
   // a per-floor ratio, so spending it here would reset your progress toward
@@ -4468,11 +4624,11 @@ function selectWeapon(i) {
 // ─── EARNING THE ROSTER ─────────────────────────────────────
 //
 // The guns are a reward, not a menu. WEAPON_UNLOCK is a column of the WEAPONS
-// table, so this is a walk rather than a branch per weapon, and a fifth gun
+// table, so this is a walk rather than a branch per weapon, and a seventh gun
 // needs nothing here.
 
 /**
- * Kills earn guns. Called once per kill from fire()'s death branch.
+ * Kills earn guns. Called once per kill from resolveHit()'s death branch.
  *
  * Grants the first unowned weapon the run has paid for and puts it straight
  * up — Wolf3D hands you the gun the moment you find it, and a weapon you have
@@ -4585,58 +4741,100 @@ function fire() {
   sfx(w.sfx);
   syncHud();
 
-  // One spread roll per shot, drawn OUTSIDE the candidate loop: rolling per
-  // enemy would not be a cone, it would be a hit test that widens with the
-  // number of things standing in front of you.
-  const aimCol = COLS / 2 + (w.spread ? (Math.random() * 2 - 1) * w.spread : 0);
-
+  // A pull sends `pellets` projectiles, each of which passes through `pierce`
+  // bodies. Both default to 1, so a weapon that declares neither runs exactly
+  // the single-shot, nearest-target path the game shipped with — the shotgun
+  // and the sniper are the two rows that ask for more, and neither is named
+  // anywhere below.
   const cosA = Math.cos(player.a), sinA = Math.sin(player.a);
-  let best = null, bestD = Infinity;
-  for (const e of enemies) {
-    if (!e.alive) continue;
-    const ex = e.x - player.x, ey = e.y - player.y;
-    const depth = ex * cosA + ey * sinA;
-    // the far cull matches drawSprites', so you can always shoot what you see
-    if (depth <= w.minDepth || depth >= MAX_DEPTH) continue;
-    // A melee weapon caps on true distance; a gun does not cap at all. Note
-    // this is a RADIUS, not the forward depth above — a body 1.5u to your side
-    // is not something you can stab, however far in front of you it projects.
-    if (w.reach && Math.hypot(ex, ey) > w.reach) continue;
-    const lateral = -ex * sinA + ey * cosA;
-    // SPR[e.type], not enemySprite(e): the hit span is the body's, not the
-    // view's, so turning sideways never makes a guard harder to shoot. Safe
-    // only while every live view keeps the base width — asserted in the suite.
-    const { centerCol, halfW } = spriteSpan(depth, lateral, SPR[e.type].wW);
-    if (Math.abs(centerCol - aimCol) > halfW) continue;
-    if (!hasLOS(player.x, player.y, e.x, e.y)) continue;
-    if (depth < bestD) { bestD = depth; best = e; }
+  const pellets = w.pellets || 1, pierce = w.pierce || 1;
+  // Damage totalled per body rather than applied per pellet, because every
+  // consequence of being shot — the damage number, the death, the drop, the
+  // unlock — is once per body per pull, not once per pellet.
+  const hits = new Map();
+  const line = [];
+  for (let p = 0; p < pellets; p++) {
+    // One spread roll per PELLET, drawn OUTSIDE the candidate loop: rolling
+    // per enemy would not be a cone, it would be a hit test that widens with
+    // the number of things standing in front of you.
+    const aimCol = COLS / 2 + (w.spread ? (Math.random() * 2 - 1) * w.spread : 0);
+    line.length = 0;
+    for (const e of enemies) {
+      if (!e.alive) continue;
+      const ex = e.x - player.x, ey = e.y - player.y;
+      const depth = ex * cosA + ey * sinA;
+      // the far cull matches drawSprites', so you can always shoot what you see
+      if (depth <= w.minDepth || depth >= MAX_DEPTH) continue;
+      // A melee weapon caps on true distance; a gun does not cap at all. Note
+      // this is a RADIUS, not the forward depth above — a body 1.5u to your side
+      // is not something you can stab, however far in front of you it projects.
+      if (w.reach && Math.hypot(ex, ey) > w.reach) continue;
+      const lateral = -ex * sinA + ey * cosA;
+      // SPR[e.type], not enemySprite(e): the hit span is the body's, not the
+      // view's, so turning sideways never makes a guard harder to shoot. Safe
+      // only while every live view keeps the base width — asserted in the suite.
+      const { centerCol, halfW } = spriteSpan(depth, lateral, SPR[e.type].wW);
+      if (Math.abs(centerCol - aimCol) > halfW) continue;
+      if (!hasLOS(player.x, player.y, e.x, e.y)) continue;
+      line.push({ e, depth });
+    }
+    // Nearest first, because a round that stops after one body has to stop at
+    // the FRONT one — and because pierce order is the whole of what the sniper
+    // buys. The sort is skipped for the single candidate that is the common
+    // case, where it would only be reordering a list of one.
+    if (line.length > 1) line.sort((a, b) => a.depth - b.depth);
+    for (let i = 0; i < pierce && i < line.length; i++) {
+      const e = line[i].e;
+      const dmg = w.dmgMin + Math.floor(Math.random() * w.dmgSpan);
+      e.hp -= dmg;
+      hits.set(e, (hits.get(e) || 0) + dmg);
+      // A body already taken under zero stops being a candidate for the rest
+      // of the volley: `alive` is what the loop above filters on, so clearing
+      // it here is the whole of "the back half of a blast goes to whatever was
+      // standing behind the guard the front half just killed". The death
+      // itself is resolved below, once, with the volley's total.
+      if (e.hp <= 0) e.alive = false;
+    }
   }
-  if (!best) return;
+  for (const [e, dmg] of hits) resolveHit(e, dmg);
+  // gunfire wakes the neighbourhood — a blade barely does
+  alertNear(player.x, player.y, w.alert);
+}
 
-  const dmg = w.dmgMin + Math.floor(Math.random() * w.dmgSpan);
-  best.hp -= dmg;
-  if (best.hp <= 0) {
-    addDmgPop(best, dmg, true);
-    best.alive = false;
-    best.state = 'dying';
-    best.stateT = 0;
+/**
+ * One body, one pull's worth of damage — split out of fire() because a shotgun
+ * hits the same guard eight times per trigger pull and every line in here is a
+ * once-per-body event: one damage number, one death, one drop, one unlock.
+ * Eight of each would be eight overlapping pops and eight kill sounds.
+ *
+ * `e.alive` is already false by the time a lethal volley reaches this, since
+ * fire() clears it the moment a pellet takes the body under zero so the rest
+ * of the volley can look past the corpse. The death test is therefore on `hp`,
+ * which is the number that was actually decided, and the flag is written again
+ * below rather than trusted — a hit that is resolved twice must not count
+ * twice, and `hp <= 0` is the condition that says which branch this is.
+ */
+function resolveHit(e, dmg) {
+  if (e.hp <= 0) {
+    addDmgPop(e, dmg, true);
+    e.alive = false;
+    e.state = 'dying';
+    e.stateT = 0;
     player.kills++;
     player.runKills++;
-    player.score += ENEMY_TYPES[best.type].score;
-    dropLoot(best);
-    spillBlood(best);
-    if (ENEMY_TYPES[best.type].blast) deathBlast(best);
+    player.score += ENEMY_TYPES[e.type].score;
+    dropLoot(e);
+    spillBlood(e);
+    if (ENEMY_TYPES[e.type].blast) deathBlast(e);
     sfx('kill');
     checkWeaponUnlock();      // before syncHud, so the strip paints the new gun
     syncHud();
   } else {
-    addDmgPop(best, dmg, false);
-    best.state = 'hurt';
-    best.stateT = 0.22;
+    addDmgPop(e, dmg, false);
+    e.state = 'hurt';
+    e.stateT = 0.22;
     sfx('hit');
   }
-  // gunfire wakes the neighbourhood — a blade barely does
-  alertNear(player.x, player.y, w.alert);
 }
 
 // ─── DAMAGE NUMBERS ─────────────────────────────────────────
@@ -5393,10 +5591,10 @@ function syncHud() {
 }
 
 /**
- * The four weapon slots under the status bar.
+ * The weapon slots under the status bar, one per row of WEAPONS.
  *
  * The game shipped showing one name, which is exactly why a whole playthrough
- * could end on the pistol: nothing ever said the other three existed. A locked
+ * could end on the pistol: nothing ever said the rest of the roster existed. A locked
  * slot shows what it costs instead of what it is, so the strip doubles as the
  * progress bar toward the next gun — and the number on it is the number the
  * key press quotes back at you.
@@ -5415,8 +5613,8 @@ function paintWeaponStrip() {
     s.classList.toggle('owned', owned && i !== player.weapon);
     s.classList.toggle('locked', !owned);
     // the touch row is the same three states, painted from the same place —
-    // four identical buttons, three of which silently do nothing, is the touch
-    // half of the bug the strip exists to fix
+    // a column of identical buttons, most of which silently do nothing, is the
+    // touch half of the bug the strip exists to fix
     const tw = el('tW' + i);
     if (tw) {
       tw.classList.toggle('on', owned && i === player.weapon);

@@ -133,9 +133,9 @@ module.exports = [
     note: 'you shoot enemies through solid walls' },
 
   { id: 'fire-hits-farthest', group: 'MVP core', file: 'wolf3d/combat.js',
-    find: 'if (depth < bestD) { bestD = depth; best = e; }',
-    replace: '{ bestD = depth; best = e; }',
-    note: 'a shot picks the LAST candidate in the list rather than the nearest, so you shoot past the guard in front of you' },
+    find: 'if (line.length > 1) line.sort((a, b) => a.depth - b.depth);',
+    replace: 'if (line.length > 1) line.sort((a, b) => b.depth - a.depth);',
+    note: 'a projectile takes the FAR end of the line rather than the near one, so you shoot past the guard in front of you — and a piercing round leaves the nearest body standing while it kills the two behind it' },
 
   { id: 'fire-no-aim-test', group: 'MVP core', file: 'wolf3d/combat.js',
     find: 'if (Math.abs(centerCol - aimCol) > halfW) continue;',
@@ -460,6 +460,11 @@ module.exports = [
   // The weapon roster, spread, difficulty scaling and the damage arc. Thirty-one
   // ran and three survived: the accuracy and damage multipliers, and a floor
   // thinned to zero enemies. Two more are still live — see the notes.
+  //
+  // Five more arrived with the shotgun and the sniper, at the bottom of the
+  // group. They are the only entries in the catalog that four of the six
+  // weapons cannot observe at all: `pellets` and `pierce` both default to 1,
+  // so every one of them is invisible outside the corridor fixture.
 
   { id: 'weapon-lookup-frozen', group: 'Phase 3', file: 'wolf3d/combat.js',
     find: 'function curWeapon() { return WEAPONS[player.weapon]; }',
@@ -525,6 +530,35 @@ module.exports = [
     find: 'player.clip = Math.min(curWeapon().clip, player.ammo);',
     replace: 'player.clip = curWeapon().clip;',
     note: 'a reload seats a full magazine regardless of the reserve, so the last 8 rounds become 8 forever' },
+
+  // ── pellets and pierce. Both columns default to 1, so every mutation here is
+  // invisible to four of the six weapons — which is the point: they are only
+  // observable through the shotgun and the sniper, in the corridor fixture.
+
+  { id: 'shotgun-one-pellet', group: 'Phase 3', file: 'wolf3d/combat.js',
+    find: 'const pellets = w.pellets || 1, pierce = w.pierce || 1;',
+    replace: 'const pellets = 1, pierce = w.pierce || 1;',
+    note: 'the shotgun fires one pellet, so it is a slow pistol doing an eighth of the damage and its whole close-range identity is gone' },
+
+  { id: 'sniper-no-pierce', group: 'Phase 3', file: 'wolf3d/combat.js',
+    find: 'const pellets = w.pellets || 1, pierce = w.pierce || 1;',
+    replace: 'const pellets = w.pellets || 1, pierce = 1;',
+    note: 'a sniper round stops at the first body — the one reason to hold it in a corridor rather than the chaingun' },
+
+  { id: 'volley-pounds-the-corpse', group: 'Phase 3', file: 'wolf3d/combat.js',
+    find: '      if (e.hp <= 0) e.alive = false;',
+    replace: '      if (false) e.alive = false;',
+    note: 'a body killed by the front of a volley stays a candidate for the rest of it, so the back half of a blast is spent on a corpse instead of on whatever was standing behind it' },
+
+  { id: 'volley-reports-last-pellet', group: 'Phase 3', file: 'wolf3d/combat.js',
+    find: 'hits.set(e, (hits.get(e) || 0) + dmg);',
+    replace: 'hits.set(e, dmg);',
+    note: 'the damage number reports the last pellet rather than the volley, so a shotgun that just took 90 off a guard prints 11. The hp arithmetic is untouched — this is only visible through the pop' },
+
+  { id: 'strip-paints-four-slots', group: 'Phase 7', file: 'wolf3d/hud.js',
+    find: 'for (let i = 0; i < slots.children.length; i++) {',
+    replace: 'for (let i = 0; i < 4; i++) {',
+    note: 'the strip paints the first four slots and the guns past them are permanently blank — the discoverability bug the strip exists to fix, in the shape it comes back in every time the roster grows' },
 
   { id: 'difficulty-accuracy', group: 'Phase 3', file: 'wolf3d/enemies.js',
     find: 'const p = Math.min(1, Math.max(0.16, 0.72 - dist * 0.045) * D.acc);',
@@ -942,7 +976,7 @@ module.exports = [
     note: 'every body of a type shares one spec object, so a boss phase re-tunes the whole floor — and permanently, because the roster outlives the level' },
 
   { id: 'roster-score-flat', group: 'Roster', file: 'wolf3d/combat.js',
-    find: 'player.score += ENEMY_TYPES[best.type].score;',
+    find: 'player.score += ENEMY_TYPES[e.type].score;',
     replace: 'player.score += 150;',
     note: 'every kill pays a drone’s 150, so a boss is worth the same as the cheapest body on the floor' },
 
@@ -962,8 +996,8 @@ module.exports = [
     note: 'a rooted turret cycles a door it can never reach, from across the room' },
 
   { id: 'blast-never-fires', group: 'Roster', file: 'wolf3d/combat.js',
-    find: 'if (ENEMY_TYPES[best.type].blast) deathBlast(best);',
-    replace: 'if (false) deathBlast(best);',
+    find: 'if (ENEMY_TYPES[e.type].blast) deathBlast(e);',
+    replace: 'if (false) deathBlast(e);',
     note: 'a spark charge dies quietly — killing one at your feet is free' },
 
   { id: 'blast-unbounded', group: 'Roster', file: 'wolf3d/enemies.js',

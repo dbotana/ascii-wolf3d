@@ -113,10 +113,10 @@ function syncHud() {
 }
 
 /**
- * The four weapon slots under the status bar.
+ * The weapon slots under the status bar, one per row of WEAPONS.
  *
  * The game shipped showing one name, which is exactly why a whole playthrough
- * could end on the pistol: nothing ever said the other three existed. A locked
+ * could end on the pistol: nothing ever said the rest of the roster existed. A locked
  * slot shows what it costs instead of what it is, so the strip doubles as the
  * progress bar toward the next gun — and the number on it is the number the
  * key press quotes back at you.
@@ -135,8 +135,8 @@ function paintWeaponStrip() {
     s.classList.toggle('owned', owned && i !== player.weapon);
     s.classList.toggle('locked', !owned);
     // the touch row is the same three states, painted from the same place —
-    // four identical buttons, three of which silently do nothing, is the touch
-    // half of the bug the strip exists to fix
+    // a column of identical buttons, most of which silently do nothing, is the
+    // touch half of the bug the strip exists to fix
     const tw = el('tW' + i);
     if (tw) {
       tw.classList.toggle('on', owned && i === player.weapon);

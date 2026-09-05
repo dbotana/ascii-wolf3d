@@ -196,7 +196,7 @@ function tapButton(id, fn) {
 tapButton('tUse',    () => use());
 tapButton('tReload', () => { if (gameState === 'playing') startReload(); });
 tapButton('tPause',  () => togglePause());
-for (let i = 0; i < 4; i++) tapButton('tW' + i, () => pickWeapon(i));
+for (let i = 0; i < WEAPONS.length; i++) tapButton('tW' + i, () => pickWeapon(i));
 
 // Show the overlay on a device that has no mouse, without waiting for the
 // first touch. A desktop browser matches neither branch and never sees it.

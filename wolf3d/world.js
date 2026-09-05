@@ -26,10 +26,13 @@ const player = {
   keyRed: false, keyBlue: false,
   fireCd: 0, bob: 0, hurtT: 0, flashT: 0,
   reloadT: 0, clip: CLIP_SIZE,
-  // Which weapon is up, and which ones you own. You start with the knife and
-  // the pistol; the SMG and the chaingun are earned — see WEAPON_UNLOCK and
-  // checkWeaponUnlock(). selectWeapon refuses any index that is 0 here.
-  weapon: PISTOL, weapons: [1, 1, 0, 0],
+  // Which weapon is up, and which ones you own. You start with whatever
+  // WEAPON_UNLOCK prices at zero kills — the knife and the pistol — and earn
+  // the rest; see checkWeaponUnlock(). selectWeapon refuses any index that is
+  // 0 here. Derived from the same table resetWeapons() uses rather than
+  // written out, so the cold start and the restart can never disagree about
+  // the loadout, and a new row does not need editing in two places.
+  weapon: PISTOL, weapons: WEAPON_UNLOCK.map(n => (n === 0 ? 1 : 0)),
   // Kills for the whole RUN, which is what buys guns. Deliberately NOT
   // player.kills: startLevel zeroes that every floor because the tally reports
   // a per-floor ratio, so spending it here would reset your progress toward

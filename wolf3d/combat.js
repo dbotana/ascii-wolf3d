@@ -40,11 +40,11 @@ function selectWeapon(i) {
 // ─── EARNING THE ROSTER ─────────────────────────────────────
 //
 // The guns are a reward, not a menu. WEAPON_UNLOCK is a column of the WEAPONS
-// table, so this is a walk rather than a branch per weapon, and a fifth gun
+// table, so this is a walk rather than a branch per weapon, and a seventh gun
 // needs nothing here.
 
 /**
- * Kills earn guns. Called once per kill from fire()'s death branch.
+ * Kills earn guns. Called once per kill from resolveHit()'s death branch.
  *
  * Grants the first unowned weapon the run has paid for and puts it straight
  * up — Wolf3D hands you the gun the moment you find it, and a weapon you have
@@ -157,58 +157,100 @@ function fire() {
   sfx(w.sfx);
   syncHud();
 
-  // One spread roll per shot, drawn OUTSIDE the candidate loop: rolling per
-  // enemy would not be a cone, it would be a hit test that widens with the
-  // number of things standing in front of you.
-  const aimCol = COLS / 2 + (w.spread ? (Math.random() * 2 - 1) * w.spread : 0);
-
+  // A pull sends `pellets` projectiles, each of which passes through `pierce`
+  // bodies. Both default to 1, so a weapon that declares neither runs exactly
+  // the single-shot, nearest-target path the game shipped with — the shotgun
+  // and the sniper are the two rows that ask for more, and neither is named
+  // anywhere below.
   const cosA = Math.cos(player.a), sinA = Math.sin(player.a);
-  let best = null, bestD = Infinity;
-  for (const e of enemies) {
-    if (!e.alive) continue;
-    const ex = e.x - player.x, ey = e.y - player.y;
-    const depth = ex * cosA + ey * sinA;
-    // the far cull matches drawSprites', so you can always shoot what you see
-    if (depth <= w.minDepth || depth >= MAX_DEPTH) continue;
-    // A melee weapon caps on true distance; a gun does not cap at all. Note
-    // this is a RADIUS, not the forward depth above — a body 1.5u to your side
-    // is not something you can stab, however far in front of you it projects.
-    if (w.reach && Math.hypot(ex, ey) > w.reach) continue;
-    const lateral = -ex * sinA + ey * cosA;
-    // SPR[e.type], not enemySprite(e): the hit span is the body's, not the
-    // view's, so turning sideways never makes a guard harder to shoot. Safe
-    // only while every live view keeps the base width — asserted in the suite.
-    const { centerCol, halfW } = spriteSpan(depth, lateral, SPR[e.type].wW);
-    if (Math.abs(centerCol - aimCol) > halfW) continue;
-    if (!hasLOS(player.x, player.y, e.x, e.y)) continue;
-    if (depth < bestD) { bestD = depth; best = e; }
+  const pellets = w.pellets || 1, pierce = w.pierce || 1;
+  // Damage totalled per body rather than applied per pellet, because every
+  // consequence of being shot — the damage number, the death, the drop, the
+  // unlock — is once per body per pull, not once per pellet.
+  const hits = new Map();
+  const line = [];
+  for (let p = 0; p < pellets; p++) {
+    // One spread roll per PELLET, drawn OUTSIDE the candidate loop: rolling
+    // per enemy would not be a cone, it would be a hit test that widens with
+    // the number of things standing in front of you.
+    const aimCol = COLS / 2 + (w.spread ? (Math.random() * 2 - 1) * w.spread : 0);
+    line.length = 0;
+    for (const e of enemies) {
+      if (!e.alive) continue;
+      const ex = e.x - player.x, ey = e.y - player.y;
+      const depth = ex * cosA + ey * sinA;
+      // the far cull matches drawSprites', so you can always shoot what you see
+      if (depth <= w.minDepth || depth >= MAX_DEPTH) continue;
+      // A melee weapon caps on true distance; a gun does not cap at all. Note
+      // this is a RADIUS, not the forward depth above — a body 1.5u to your side
+      // is not something you can stab, however far in front of you it projects.
+      if (w.reach && Math.hypot(ex, ey) > w.reach) continue;
+      const lateral = -ex * sinA + ey * cosA;
+      // SPR[e.type], not enemySprite(e): the hit span is the body's, not the
+      // view's, so turning sideways never makes a guard harder to shoot. Safe
+      // only while every live view keeps the base width — asserted in the suite.
+      const { centerCol, halfW } = spriteSpan(depth, lateral, SPR[e.type].wW);
+      if (Math.abs(centerCol - aimCol) > halfW) continue;
+      if (!hasLOS(player.x, player.y, e.x, e.y)) continue;
+      line.push({ e, depth });
+    }
+    // Nearest first, because a round that stops after one body has to stop at
+    // the FRONT one — and because pierce order is the whole of what the sniper
+    // buys. The sort is skipped for the single candidate that is the common
+    // case, where it would only be reordering a list of one.
+    if (line.length > 1) line.sort((a, b) => a.depth - b.depth);
+    for (let i = 0; i < pierce && i < line.length; i++) {
+      const e = line[i].e;
+      const dmg = w.dmgMin + Math.floor(Math.random() * w.dmgSpan);
+      e.hp -= dmg;
+      hits.set(e, (hits.get(e) || 0) + dmg);
+      // A body already taken under zero stops being a candidate for the rest
+      // of the volley: `alive` is what the loop above filters on, so clearing
+      // it here is the whole of "the back half of a blast goes to whatever was
+      // standing behind the guard the front half just killed". The death
+      // itself is resolved below, once, with the volley's total.
+      if (e.hp <= 0) e.alive = false;
+    }
   }
-  if (!best) return;
+  for (const [e, dmg] of hits) resolveHit(e, dmg);
+  // gunfire wakes the neighbourhood — a blade barely does
+  alertNear(player.x, player.y, w.alert);
+}
 
-  const dmg = w.dmgMin + Math.floor(Math.random() * w.dmgSpan);
-  best.hp -= dmg;
-  if (best.hp <= 0) {
-    addDmgPop(best, dmg, true);
-    best.alive = false;
-    best.state = 'dying';
-    best.stateT = 0;
+/**
+ * One body, one pull's worth of damage — split out of fire() because a shotgun
+ * hits the same guard eight times per trigger pull and every line in here is a
+ * once-per-body event: one damage number, one death, one drop, one unlock.
+ * Eight of each would be eight overlapping pops and eight kill sounds.
+ *
+ * `e.alive` is already false by the time a lethal volley reaches this, since
+ * fire() clears it the moment a pellet takes the body under zero so the rest
+ * of the volley can look past the corpse. The death test is therefore on `hp`,
+ * which is the number that was actually decided, and the flag is written again
+ * below rather than trusted — a hit that is resolved twice must not count
+ * twice, and `hp <= 0` is the condition that says which branch this is.
+ */
+function resolveHit(e, dmg) {
+  if (e.hp <= 0) {
+    addDmgPop(e, dmg, true);
+    e.alive = false;
+    e.state = 'dying';
+    e.stateT = 0;
     player.kills++;
     player.runKills++;
-    player.score += ENEMY_TYPES[best.type].score;
-    dropLoot(best);
-    spillBlood(best);
-    if (ENEMY_TYPES[best.type].blast) deathBlast(best);
+    player.score += ENEMY_TYPES[e.type].score;
+    dropLoot(e);
+    spillBlood(e);
+    if (ENEMY_TYPES[e.type].blast) deathBlast(e);
     sfx('kill');
     checkWeaponUnlock();      // before syncHud, so the strip paints the new gun
     syncHud();
   } else {
-    addDmgPop(best, dmg, false);
-    best.state = 'hurt';
-    best.stateT = 0.22;
+    addDmgPop(e, dmg, false);
+    e.state = 'hurt';
+    e.stateT = 0.22;
     sfx('hit');
   }
-  // gunfire wakes the neighbourhood — a blade barely does
-  alertNear(player.x, player.y, w.alert);
 }
 
 // ─── DAMAGE NUMBERS ─────────────────────────────────────────

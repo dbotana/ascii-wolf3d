@@ -562,21 +562,27 @@ group('weapons');
 // and the "earning the roster" group below is what proves that. Everything
 // here is about what a weapon DOES once it is in your hands, so hand them all
 // over after every startLevel, which cold-starts back to knife + pistol.
-const armAll = () => { P.player.weapons = [1, 1, 1, 1]; };
+// Sized off the roster, not typed out, so a new row does not silently arrive
+// unowned in every test below it.
+const armAll = () => { P.player.weapons = P.weapons().map(() => 1); };
 P.startLevel();
 armAll();
-const KNIFE = 0, PISTOL_I = 1, SMG_I = 2, CHAIN = 3;
+const KNIFE = 0, PISTOL_I = 1, SMG_I = 2, CHAIN = 3, SHOT = 4, SNIPE = 5;
 const W = P.weapons();
-ok(W.length === 4, `the roster has four weapons (${W.map(w => w.name).join(', ')})`);
+ok(W.length === 6, `the roster has six weapons (${W.map(w => w.name).join(', ')})`);
+ok(W[SHOT].name === 'SHOTGUN' && W[SNIPE].name === 'SNIPER',
+   'and the last two are the shotgun and the sniper');
 ok(P.player.weapon === PISTOL_I && P.curWeapon().name === 'PISTOL',
    'a cold start hands you the pistol');
 ok(W[PISTOL_I].cd === 0.28 && W[PISTOL_I].dmgMin === 22 && W[PISTOL_I].dmgSpan === 20 &&
    W[PISTOL_I].clip === 8 && W[PISTOL_I].spread === 0 && W[PISTOL_I].alert === 9,
    'the pistol row still describes the weapon the game shipped with');
 
-// only the pistol is single-shot; that is the whole semi-auto item
-ok(W[PISTOL_I].auto === false, 'the pistol does not repeat on a held trigger');
-ok(W[KNIFE].auto && W[SMG_I].auto && W[CHAIN].auto, 'everything else does');
+// `auto` splits the roster by ACTION, not by era: the pistol, the pump and
+// the bolt are one shot per press, and everything else repeats while held.
+ok(W[PISTOL_I].auto === false && W[SHOT].auto === false && W[SNIPE].auto === false,
+   'the pistol, the shotgun and the sniper are all manual actions');
+ok(W[KNIFE].auto && W[SMG_I].auto && W[CHAIN].auto, 'the other three repeat on a held trigger');
 
 // ── selection
 ok(P.selectWeapon(SMG_I) && P.player.weapon === SMG_I, 'a number key selects a weapon');
@@ -680,15 +686,16 @@ ok(P.player.ammo < spinAmmo, `holding it spins up and then fires (${spinAmmo} ->
 P.startLevel();
 armAll();
 freezeEnemies();
-for (const [idx, name] of [[PISTOL_I, 'pistol'], [SMG_I, 'SMG']]) {
+for (const [idx, name] of [[PISTOL_I, 'pistol'], [SHOT, 'shotgun'], [SNIPE, 'sniper'],
+                           [SMG_I, 'SMG']]) {
   P.player.weapon = idx;
   P.player.ammo = 300; P.player.clip = P.curWeapon().clip;
   P.player.fireCd = 0; P.player.reloadT = 0;
   const before = P.player.ammo;
   run(40, [' ']);            // ~0.64s with the trigger held down
   const shots = before - P.player.ammo;
-  if (name === 'pistol') ok(shots === 0, `holding fire does not repeat the pistol (${shots} shots)`);
-  else ok(shots >= 4, `holding fire does repeat the ${name} (${shots} shots)`);
+  if (P.weapons()[idx].auto) ok(shots >= 4, `holding fire does repeat the ${name} (${shots} shots)`);
+  else ok(shots === 0, `holding fire does not repeat the ${name} (${shots} shots)`);
 }
 
 // ── reload cycle length is the weapon's own, not always the pistol's
@@ -716,10 +723,16 @@ P.startLevel();
 const UNLOCK = P.weaponUnlock();
 ok(UNLOCK.length === P.weapons().length,
    `every weapon has an unlock threshold (${UNLOCK.join(',')})`);
-ok(UNLOCK[KNIFE] === 0 && UNLOCK[PISTOL_I] === 0 && UNLOCK[SMG_I] === 5 && UNLOCK[CHAIN] === 10,
-   'knife and pistol are free; the SMG costs 5 kills and the chaingun 10');
+ok(UNLOCK[KNIFE] === 0 && UNLOCK[PISTOL_I] === 0 && UNLOCK[SMG_I] === 5 &&
+   UNLOCK[CHAIN] === 10 && UNLOCK[SHOT] === 18 && UNLOCK[SNIPE] === 28,
+   'knife and pistol are free; SMG 5 kills, chaingun 10, shotgun 18, sniper 28');
+// One gun per kill only works while no two thresholds coincide, and the
+// checkWeaponUnlock() early return is written on that promise.
+ok(new Set(UNLOCK.slice(2)).size === UNLOCK.length - 2,
+   `no two earned weapons come due on the same kill (${UNLOCK.join(',')})`);
 ok(P.player.weapons[KNIFE] === 1 && P.player.weapons[PISTOL_I] === 1 &&
-   !P.player.weapons[SMG_I] && !P.player.weapons[CHAIN],
+   !P.player.weapons[SMG_I] && !P.player.weapons[CHAIN] &&
+   !P.player.weapons[SHOT] && !P.player.weapons[SNIPE],
    'a cold start hands you the knife and the pistol, and nothing else');
 ok(P.player.runKills === 0, 'and a run-long kill counter at zero');
 
@@ -876,12 +889,21 @@ ok(slot(2).classList.contains('locked') && slot(2).textContent === '0/5',
 P.player.runKills = 3;
 P.syncHud();
 ok(slot(2).textContent === '3/5', `and counts down as you earn it (${slot(2).textContent})`);
-ok(slot(3).textContent === '3/10', `all the way to the last slot (${slot(3).textContent})`);
+ok(slot(P.weapons().length - 1).textContent === '3/28',
+   `all the way to the last slot (${slot(P.weapons().length - 1).textContent})`);
+// The strip paints from WEAPONS, so a slot per row or the newest guns are
+// invisible — which is the whole bug this display exists to fix, in the shape
+// it comes back in every time the roster grows.
+ok(g.el('sWeapons').children.length >= P.weapons().length,
+   `the strip has a slot for every weapon (${g.el('sWeapons').children.length} ` +
+   `for ${P.weapons().length})`);
 // the touch row carries the same three states, or a phone gets four identical
 // buttons three of which silently do nothing
 ok(g.el('tW1').classList.contains('on'), 'the touch row marks the weapon in hand');
 ok(g.el('tW0').classList.contains('owned'), 'and the ones you merely own');
 ok(g.el('tW3').classList.contains('locked'), 'and dims the ones you have not earned');
+ok(g.el('tW' + (P.weapons().length - 1)).classList.contains('locked'),
+   'right through to the last button, which the row only reaches if it is sized off the roster');
 
 // ── the objective line ───────────────────────────────────────────────────────
 //
@@ -2553,6 +2575,135 @@ group('weapon spread (fixture)');
   F.player.fireCd = 0;
   F.fire();
   ok(foe.hp < 1e9, 'and does connect once the body is genuinely within reach');
+}
+
+// ── pellets and pierce (fixture) ─────────────────────────────────────────────
+//
+// The two rows that are not "one round into the nearest body". `pellets` and
+// `pierce` both default to 1, so every other weapon runs the same code — which
+// is exactly why they need geometry of their own to be visible at all: a clear
+// sightline long enough for the shotgun's falloff, and bodies queued on one
+// line for the sniper's pierce. The shipped floors give neither reliably.
+group('pellets and pierce (fixture)');
+{
+  const f = loadWithLevel([
+    '####################',
+    '#..................#',
+    '#@.....g....g....g.#',
+    '#..................#',
+    '####################',
+  ], { htmlPath: process.env.WOLF3D_HTML });
+  const F = f.P;
+  const R = F.weapons();
+  const PIST = R.findIndex(w => w.name === 'PISTOL');
+  const SG   = R.findIndex(w => w.name === 'SHOTGUN');
+  const SR   = R.findIndex(w => w.name === 'SNIPER');
+  ok(SG > 0 && SR > 0, `test setup: the roster carries both new rows (${SG}, ${SR})`);
+  // Own everything. Not cosmetic: these shots KILL, and a kill runs
+  // checkWeaponUnlock, which would grant a gun and put it up — swapping the
+  // weapon out from under the test between one pull and the next.
+  F.player.weapons = R.map(() => 1);
+
+  const foes = F.enemies().filter(e => e.type === 'guard');
+  ok(foes.length === 3, `test setup: three guards to queue up (${foes.length})`);
+
+  /**
+   * One pull down the corridor. `depths` is one entry per guard, in tiles
+   * straight ahead; `undefined` takes that body off the floor for the shot.
+   * Returns the damage each of them took, in the same order.
+   */
+  const pull = (idx, depths, hp) => {
+    F.player.x = 1.5; F.player.y = 2.5; F.player.a = 0;
+    foes.forEach((e, i) => {
+      e.alive = depths[i] !== undefined;
+      e.hp = (hp && hp[i] !== undefined) ? hp[i] : 1e9;
+      e.state = 'hurt'; e.stateT = 1e9;      // parked; this is about aim only
+      if (e.alive) { e.x = F.player.x + depths[i]; e.y = F.player.y; }
+    });
+    const start = foes.map(e => e.hp);
+    F.player.weapon = idx;
+    F.player.ammo = 500; F.player.clip = F.curWeapon().clip;
+    F.player.fireCd = 0; F.player.reloadT = 0; F.player.windT = F.curWeapon().spinUp;
+    F.fire();
+    return foes.map((e, i) => start[i] - e.hp);
+  };
+
+  // ── the shotgun is a volley, not a shot
+  const sg = R[SG];
+  const onePellet = sg.dmgMin + sg.dmgSpan - 1;      // the most one can do
+  ok(sg.pellets > 1 && !R[PIST].pellets,
+     `test setup: the shotgun declares ${sg.pellets} pellets and the pistol none`);
+  const close = pull(SG, [1.2]);
+  ok(close[0] > onePellet,
+     `one shotgun pull is worth more than one pellet (${close[0]} > ${onePellet})`);
+  ok(close[0] >= sg.pellets * sg.dmgMin && close[0] <= sg.pellets * onePellet,
+     `at 1.2u the whole volley lands (${close[0]}, between ${sg.pellets * sg.dmgMin} ` +
+     `and ${sg.pellets * onePellet})`);
+
+  // ── ...and it is still ONE damage number. Eight pops on one guard would be
+  //    eight illegible overlapping numbers, and eight kill sounds on a kill.
+  F.dmgPops().length = 0;
+  const popped = pull(SG, [1.2]);
+  ok(F.dmgPops().length === 1,
+     `a volley leaves one damage number per body, not one per pellet (${F.dmgPops().length})`);
+  ok(F.dmgPops().length === 1 && parseInt(F.dmgPops()[0].text, 10) === popped[0],
+     `and the number on it is the whole volley, not the last pellet through ` +
+     `(${F.dmgPops()[0] && F.dmgPops()[0].text} for ${popped[0]} damage)`);
+
+  // ── the falloff, which nothing in fire() computes: a target's half-width is
+  //    58.9/depth columns against a fixed 13 columns of jitter, so the pellets
+  //    that miss at range are simply the ones whose roll was wider than the
+  //    body. 200 pulls a side — a mean over 1600 pellet rolls, not a coin flip.
+  const mean = (idx, depth, n) => {
+    let sum = 0;
+    for (let i = 0; i < n; i++) sum += pull(idx, [depth])[0];
+    return sum / n;
+  };
+  const sgNear = mean(SG, 3.0, 200), sgFar = mean(SG, 13.0, 200);
+  ok(sgFar < sgNear * 0.6,
+     `the shotgun loses most of its damage by 13u (${sgNear.toFixed(1)} at 3u -> ` +
+     `${sgFar.toFixed(1)} at 13u, ratio ${(sgFar / sgNear).toFixed(2)})`);
+  // and the corridor is not doing it: an accurate weapon hits the same at both
+  const pNear = mean(PIST, 3.0, 60), pFar = mean(PIST, 13.0, 60);
+  ok(pFar > pNear * 0.9,
+     `while the pistol is worth the same at either range (${pNear.toFixed(1)} -> ` +
+     `${pFar.toFixed(1)})`);
+
+  // ── the back half of a blast goes past a body the front half killed. This is
+  //    what clearing `alive` mid-volley buys, and it needs a front body thin
+  //    enough that one pellet takes it: 5hp against a pellet's 8 minimum.
+  const through = pull(SG, [2.0, 3.0], [5, 1e9]);
+  ok(foes[0].hp <= 0 && !foes[0].alive,
+     `the front body dies to the front of the volley (${through[0]} onto 5hp)`);
+  ok(through[1] > 0,
+     `and the rest of it carries into the body behind (${through[1]})`);
+  ok(through[1] >= sg.dmgMin,
+     'by at least a whole pellet, so this is pellets and not a stray roll');
+
+  // ── pierce: one round, two bodies, NEAREST FIRST
+  const sr = R[SR];
+  ok(sr.pierce === 2 && !R[PIST].pierce,
+     `test setup: the sniper declares pierce ${sr.pierce} and the pistol none`);
+  const two = pull(SR, [3.0, 5.0]);
+  ok(two[0] > 0 && two[1] > 0,
+     `a sniper round goes through the front body into the one behind (${two.join('/')})`);
+  const one = pull(PIST, [3.0, 5.0]);
+  ok(one[0] > 0 && one[1] === 0,
+     `a pistol round stops at the first (${one.join('/')})`);
+
+  // Depths deliberately out of array order, so "the first two in `enemies`"
+  // and "the two nearest" are different answers. They coincide above; where
+  // they coincide the assertion proves nothing.
+  const three = pull(SR, [7.0, 3.0, 5.0]);
+  ok(three[1] > 0 && three[2] > 0 && three[0] === 0,
+     `pierce takes the two NEAREST bodies and stops (3u and 5u hit, 7u untouched: ` +
+     `${three.join('/')})`);
+
+  // ── and it is the accurate weapon: no jitter at all, at any range
+  ok(sr.spread === 0, 'the sniper has no spread');
+  let srHits = 0;
+  for (let i = 0; i < 60; i++) if (pull(SR, [13.0])[0] > 0) srHits++;
+  ok(srHits === 60, `so it never misses a centred target at 13u (${srHits}/60)`);
 }
 
 // ── thin-wall doors (fixture) ────────────────────────────────────────────────

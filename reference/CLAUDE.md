@@ -61,7 +61,7 @@ the bundler and the harness both read it rather than keeping their own list.
 
 | file | lines | what |
 |---|---|---|
-| `wolf3d/style.css` | 638 | all CSS |
+| `wolf3d/style.css` | 650 | all CSS |
 | `wolf3d/config.js` | 116 | screen/projection constants, `DIFFICULTY`, `DEATH_TIME`, palette + fog cache, distance ramps, faces |
 | `wolf3d/scores.js` | 148 | the persistent high score table and its three storage guards |
 | `wolf3d/levels.js` | 286 | the five floors, `FLOOR_NAMES`, `PAR_TIME` |
@@ -69,18 +69,18 @@ the bundler and the harness both read it rather than keeping their own list.
 | `wolf3d/bodies.js` | 270 | the post-MVP enemy sprites, spread into `SPR` by art.js |
 | `wolf3d/art.js` | 312 | the MVP roster's sprites + pickups (opens with `...BODY_SPR`), the pistol's `GUN_*` frames |
 | `wolf3d/gore.js` | 201 | `DEATH_SEQ` death-frame sequences, `DECAL_SPR` blood splats |
-| `wolf3d/weapons.js` | 208 | knife / SMG / chaingun art, the `WEAPONS` table, `WEAPON_UNLOCK` |
+| `wolf3d/weapons.js` | 336 | knife / SMG / chaingun / shotgun / sniper art, the `WEAPONS` table, `WEAPON_UNLOCK` |
 | `wolf3d/gfx.js` | 92 | glyph atlas, `drawChar`, wall shading, `neonHex`/`lockColor` |
-| `wolf3d/audio.js` | 316 | the Web Audio graph, the `MUSIC` table, and the scheduler + track lookup |
-| `wolf3d/input.js` | 64 | keyboard, mouse-look, pointer lock, the pause hooks |
+| `wolf3d/audio.js` | 323 | the Web Audio graph, the `MUSIC` table, and the scheduler + track lookup |
+| `wolf3d/input.js` | 69 | keyboard, mouse-look, pointer lock, `WEAPON_KEYS`, the pause hooks |
 | `wolf3d/touch.js` | 212 | the twin-stick overlay: stick math, look pad, buttons |
-| `wolf3d/world.js` | 333 | grid + entities, difficulty, pause, grid queries (`inMap`, `cellAt`, `hasKey`), doors, push-walls |
+| `wolf3d/world.js` | 336 | grid + entities, difficulty, pause, grid queries (`inMap`, `cellAt`, `hasKey`), doors, push-walls |
 | `wolf3d/level.js` | 259 | `populateEnemies`, `parseLevel` (incl. the door-axis pass), `startLevel`, `nextLevel` |
 | `wolf3d/raycast.js` | 92 | DDA raycast incl. thin-wall doors, `hasLOS`, `spriteSpan` |
 | `wolf3d/nav.js` | 103 | the BFS flow field |
 | `wolf3d/enemies.js` | 362 | FSM, steering, patrols, separation, loot, blood, death blasts |
 | `wolf3d/boss.js` | 69 | `stepBossPhase`, `summonMinions`, `bossRow` — generic over `phases` |
-| `wolf3d/combat.js` | 310 | the roster lookup, earning it, firing, the magazine cycle, damage numbers, pickups |
+| `wolf3d/combat.js` | 352 | the roster lookup, earning it, firing, `resolveHit`, the magazine cycle, damage numbers, pickups |
 | `wolf3d/render.js` | 399 | `drawWalls`, sprites, decals, the weapon view-model, crosshair, the damage arc |
 | `wolf3d/minimap.js` | 137 | the auto-map: `seen`, the reveal sweep, `drawMinimap` |
 | `wolf3d/hud.js` | 250 | toasts, banners, status bar, health bar, the weapon strip, the objective line |
@@ -671,7 +671,7 @@ last floor sets `gameState = 'won'` and shows the OUT banner instead.
 Run all of these before shipping any change. None of them needs a browser.
 
 ```sh
-node reference/run-tests.js                              # 731 assertions against the real game loop
+node reference/run-tests.js                              # 755 assertions against the real game loop
 WOLF3D_HTML=dist/wolf3d.html node reference/run-tests.js # ...and against the shipped bundle
 node reference/validate-level.js                         # map geometry + key-gated reachability, all 3 floors
 node reference/bundle.js                                 # rebuild dist/wolf3d.html
@@ -916,8 +916,9 @@ That is the failure this system exists to fix, and it was a presentation
 failure, not a missing feature.
 
 `WEAPON_UNLOCK` in `weapons.js` is a column of the `WEAPONS` table — `[0, 0, 5,
-10]`, cumulative kills for the run — so a fifth weapon is a row in each and no
-code anywhere. `checkWeaponUnlock()` is called once per kill from `fire()`'s
+10, 18, 28]`, cumulative kills for the run — so a seventh weapon is a row in
+each and no code anywhere. The shotgun and the sniper were added later and cost
+exactly that: two rows, six art tables, two `sfx` cases and two `<i>` tags. `checkWeaponUnlock()` is called once per kill from `fire()`'s
 death branch, grants the first row the run has paid for, and **puts it straight
 up**: a weapon you have to go and select is a weapon a player never learns they
 own. One gun per kill; the thresholds are far enough apart that two can never
@@ -939,8 +940,46 @@ Three things about it are load-bearing:
   which toasts the count. A key that does nothing teaches a player the key does
   not exist.
 
-The status bar carries all four slots now (`#sWeapons`), and a locked slot shows
-`runKills/threshold` rather than a name, so the strip is also the progress bar.
+The status bar carries a slot per weapon now (`#sWeapons`), and a locked slot
+shows `runKills/threshold` rather than a name, so the strip is also the progress
+bar. Everything that walks the roster is sized off `WEAPONS.length` rather than
+a literal `4` — `paintWeaponStrip` off `slots.children.length`, the touch row
+and `WEAPON_KEYS` off the table itself, `player.weapons` off `WEAPON_UNLOCK` —
+because the four-slot literals are exactly how the newest gun goes invisible,
+which is the bug this whole display exists to fix. The harness's element stub
+carries six children for the same reason: a stub with too few makes a painter
+that walks its slots silently do half its work.
+
+### Pellets and pierce
+
+`fire()` sends `pellets` projectiles per pull, each passing through `pierce`
+bodies nearest-first. Both columns are absent from every row but two and both
+default to 1, so the other four weapons run the identical single-shot,
+nearest-body path they always did — the shotgun and the sniper are not named
+anywhere in `combat.js`.
+
+Three things fell out of that shape rather than being written:
+
+- **The shotgun's damage falloff is `spread`, not a range term.** Each pellet
+  rolls its own aim column, and a body's on-screen half-width is `58.9/depth`
+  columns. Inside ~4.5u that is wider than the 13 columns of jitter and the
+  whole volley lands; by 9u the body is 6.5 columns and half the volley goes
+  past it. Nothing in `fire()` knows how far away anything is.
+- **A volley resolves per BODY, not per pellet.** The pellet loop only totals
+  damage into a `Map`; `resolveHit()` then runs once per body. Everything in it
+  — the damage number, the death, the drop, the unlock, the kill sound — is a
+  once-per-body event, and eight of each would be eight overlapping numbers and
+  eight kill sounds on one guard.
+- **A body taken under zero mid-volley has `alive` cleared immediately**, which
+  is the whole of "the back half of a blast goes to whatever was standing
+  behind the guard the front half just killed" — `alive` is what the candidate
+  loop filters on. The kill itself is still resolved once, afterwards, on the
+  volley's total. `resolveHit` therefore branches on `hp <= 0`, never on the
+  flag, because the flag is already false by the time it is called.
+
+`auto: false` stopped meaning "the pistol" and started meaning "a manual
+action": the pistol, the pump and the bolt. The suite reads the column rather
+than naming the pistol, so the next manual weapon needs no test edit.
 
 ## The auto-map and the objective line
 
