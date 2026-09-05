@@ -656,7 +656,7 @@
   <div id="hpVignette"></div>
 
   <div id="bossBar">
-    <span class="name">CHIEF EXECUTIVE OFFICER</span>
+    <span class="name" id="bossName"></span>
     <div class="track"><div id="bossFill"></div></div>
     <span class="phase" id="bossPhase"></span>
   </div>
@@ -779,7 +779,6 @@ const WALL_H = 3;             // every wall is flat-topped, Wolf3D style
 const EYE_Z = 1.6;            // player eye height
 const FOCAL = COLS / (2 * Math.tan(FOV / 2));
 const CLIP_SIZE = 8;          // rounds per magazine before a reload cycle
-const KILL_SCORE = { guard: 200, drone: 150, ceo: 5000 };
 const RELOAD_TIME = 1.05;     // seconds for the full reload animation
 const DEATH_TIME = 0.45;      // the 'dying' window, subdivided across DEATH_SEQ
 const SPAWN_GRACE = 0.75;     // seconds an idle enemy ignores the player after spawn
@@ -822,6 +821,11 @@ const COLOR = {
   guard:'#C8B090', guardSuit:'#5C6B80', visor:'#55E6E6', visorHot:'#FF3B7C',
   ceoSuit:'#6A5480', ceoTrim:'#FFC24A',
   drone:'#9FB4C8', droneEye:'#FF3B7C',
+  turretEye:'#FF6B2B',
+  spark:'#BFD4E6', sparkCore:'#9CFF3B',
+  enforcer:'#55604C', enforcerTrim:'#C9A227',
+  ice:'#3E6E8E', iceCore:'#7FE8FF',
+  founderCoat:'#2E2A38', founderTrim:'#E8D6A0',
   blood:'#B3243C',
   gun:'#6E7B8C', gunHi:'#AAB8C8', muzzle:'#FFE9A8',
   cash:'#FFD07A', ramen:'#FF9500', cell:'#7FFF6B',
@@ -1059,7 +1063,9 @@ function paintScores() {
 // ─── LEVEL ──────────────────────────────────────────────────
 // #  panel   |  window   N  neon sign   X  exit switch
 // D  door    R  red-locked door   B  blue-locked door   S  secret push-wall
-// g  salaryman guard   d  sec-drone   C  the CEO (floor 3 only)
+// g  salaryman guard   d  sec-drone   t  ceiling turret
+// k  spark charge      h  corporate enforcer
+// C  the CEO (floor 3)   I  BLACK ICE (floor 4)   F  the FOUNDER (floor 5)
 // +  ramen   a  battery cell   r/b  keycard   $  crypto wallet   @  spawn
 
 // FLOOR 1 — ATRIUM · SUBLEVEL. The teaching floor: a plain door on the spine
@@ -1076,21 +1082,21 @@ const LEVEL_1 = [
   '#########.......###...###.......########',
   '#########a$.....###...###......$########',
   '#########.....................b.########',
-  '#########.+.....S##...###...g...########',
+  '#########.+.....S##...###...t...########',
   '#########.....$a.$#...###a$.....########',
   '#########.........#...###.....a.########',
   '################a$#...##################',
   '###################...##################',
   '#########.......###...###.......########',
   '#########.$....a###...###.$....a########',
-  '#########....d.............d....########',
+  '#########....d.............k....########',
   '#########a....$.###...###a....$.########',
   '#########.......###...###.......########',
   '#########NN###NN####R###################',
   '#########.......###...###.......########',
   '#####$a.#.$....a###...###.$....a#..$####',
   '#####...S..r....................S...####',
-  '#####$..#..g....###...###...g...#.a$####',
+  '#####$..#..t....###...###...g...#.a$####',
   '#########a....$.###...###a....$.########',
   '#########.......###...###.......########',
   '#####..............................#####',
@@ -1124,7 +1130,7 @@ const LEVEL_2 = [
   '#########a$.....###...###.....$a########',
   '#########..g................g...########',
   '#########.......S##...###.......########',
-  '#########.....$a.$#.d.###a$.....########',
+  '#########.....$a.$#.t.###a$.....########',
   '#########.........#...###.......########',
   '################a$#...##################',
   '####################R###################',
@@ -1133,17 +1139,17 @@ const LEVEL_2 = [
   '######.....$.a#####...####.$.....a######',
   '##$a.#...##...#####...####...##...#..$##',
   '##...S.r.##...D..........D...##.b.S...##',
-  '##$..#...##g..#####...####..g##...#.a$##',
+  '##$..#...##g..#####...####..h##...#.a$##',
   '######a.....$.#####...####a.$.....######',
   '######........#####...####........######',
   '###################...##################',
   '#####..............................#####',
-  '#####.+.$.d.....$......$.....d.$.+.#####',
+  '#####.+.$.k.....$......$.....k.$.+.#####',
   '#####..............................#####',
   '########D######D###...###D#####D########',
   '######......#.....#...#.....#......#####',
   '######.$..$.#.$.$.#...#.$.$.#.$..$.#####',
-  '######..d...#..d..#...#..d..#..d...#####',
+  '######..d...#..t..#...#..d..#..d...#####',
   '######....a.#...a.#...#...a.#....a.#####',
   '######......#.....#...#.....#......#####',
   '###################...##################',
@@ -1181,17 +1187,17 @@ const LEVEL_3 = [
   '###################...##################',
   '#####...........$.......$..........#####',
   '#####.$....$...####...###$....$....#####',
-  '#####..g....d..####...###........g.#####',
+  '#####..h....d..####...###........g.#####',
   '#####+...a....a####.d.###...a....a+#####',
   '#####.####.########...#######.####.#####',
   '#####..............................#####',
   '#$a.#.$....$...####...###$....$....#..$#',
-  '#...S.......g..####...###.g......d.S...#',
+  '#...S.......k..####...###.t......k.S...#',
   '#$..#....a....a####.d.###...a....a.#.a$#',
   '#####.####.########...#######.####.#####',
   '#####..............................#####',
   '#####.$....$...####...###$....$....#####',
-  '#####..g....d..####...###.d......g.#####',
+  '#####..g....d..####...###.d......h.#####',
   '#####+...a....a####.d.###...a....a+#####',
   '#####.####.########...#######.####.#####',
   '#####...........$.......$..........#####',
@@ -1204,22 +1210,581 @@ const LEVEL_3 = [
   '########################################',
 ];
 
+// FLOOR 4 — BLACK ICE \u00b7 DATA VAULT. Cold storage: four east-west aisles of
+// racks off the spine, a ring around all of them, and the vault behind the red
+// door. The vault is the floor's one large room, and unlike the boardroom it is
+// full of pillars on purpose — BLACK ICE opens rooted with a 16u reach, so the
+// fight is about what you can put between you and it. The blue keycard is
+// inside, which is what makes the vault the route and not a detour.
+const LEVEL_4 = [
+  '########################################',
+  '####################X###################',
+  '#################.......################',
+  '#################...$...################',
+  '#################.......################',
+  '###########NN#######B#######NN##########',
+  '########.......................#########',
+  '########.....##..........##....#########',
+  '########..$..##....I.....##.$..#########',
+  '########.......................#########',
+  '########....t.............t....#########',
+  '########.##.....a.....a.....##.#########',
+  '########.##........b........##.#########',
+  '########.......................#########',
+  '########.....##..........##....#########',
+  '########..$..##....t.....##.$..#########',
+  '########......+..........+.....#########',
+  '####################R###################',
+  '###################...##################',
+  '#####..a..g..................d.....#####',
+  '#####.a.h.....d.$.......a.g....h.a.#####',
+  '##.a#.###########.#....###########.#####',
+  '##$.S.#############...############.#####',
+  '##..#.#############...############.#####',
+  '#####..g..a..k...t.......k...a..g..#####',
+  '#####.###########.#....###########.#####',
+  '#####.#############.$.############.#####',
+  '#####.#############...############.#####',
+  '#####.a..d.....h........d.....g..a.#####',
+  '#####.###########.#....###########.#a.##',
+  '#####.#############..a############.S.$##',
+  '#####.#############...############.#..##',
+  '#####...k..a..g.........a..h..t.d..#####',
+  '#####.###########.#....###########.#####',
+  '#####.#############+..############.#####',
+  '#####.#############...############.#####',
+  '#####.......k.#.............g....$.#####',
+  '######..a.....D.....@.........a...######',
+  '######.r...$..#..............+..$.######',
+  '########################################',
+];
+
+// FLOOR 5 — THE SPIRE \u00b7 HELIPAD. The service level is four plant rooms on a
+// ring with the red door on the spine; the blue door opens onto the deck. The
+// deck is glass on every side and almost bare — four service blocks and nothing
+// else. That is the counterpart to the vault: THE FOUNDER's phases shorten its
+// reach as they raise its speed, so a floor that let you keep breaking line of
+// sight would be fighting its own boss.
+const LEVEL_5 = [
+  '########################################',
+  '####################X###################',
+  '############||||||.....|||||############',
+  '###########|................|###########',
+  '#########|.........$..........|#########',
+  '#######|......h..........h......|#######',
+  '######|..........................|######',
+  '######|....##...............##...|######',
+  '######|....##...............##...|######',
+  '######|......a............a......|######',
+  '######|..$.........F..........$..|######',
+  '######|..........................|######',
+  '######|....##...............##...|######',
+  '######|....##...............##...|######',
+  '######|..........................|######',
+  '#######|........+......+........|#######',
+  '#########|.........$..........|#########',
+  '###########|................|###########',
+  '############|||||||#B#||||||############',
+  '###################...##################',
+  '####................................####',
+  '####.#########.#k##...##k.#########.####',
+  '####.#...h.....####.$.###.....h...#.####',
+  '####.#..r......####...###.........#.####',
+  '####.......k.................k......####',
+  '####.#......$..####...###...$.....#.####',
+  '####.#.a.......####...###.......a.#.####',
+  '####.###############R##############.####',
+  '####t##############...#############t####',
+  '####.##############...#############.####',
+  '####.#.g.......####...###.......g.#.####',
+  '####.#.+.......####.a.###.......+.#.####',
+  '####.........d.............d........####',
+  '####.#......$..####...###...$..b..#.####',
+  '####.#....t....####.+.###.....t...#.####',
+  '####.............g.....g............####',
+  '###########.a.#####...#####.+.##########',
+  '###########$..S...........S..$##########',
+  '###########...#..a..@..$..#...##########',
+  '########################################',
+];
+
 // Floors in play order. Each stays its own `const LEVEL_*` array so
 // reference/validate-level.js keeps finding them by name.
-const LEVELS = [LEVEL_1, LEVEL_2, LEVEL_3];
-const FLOOR_NAMES = ['ATRIUM \u00b7 SUBLEVEL', 'R&D \u00b7 SERVER FARM', 'EXECUTIVE SUITE'];
+const LEVELS = [LEVEL_1, LEVEL_2, LEVEL_3, LEVEL_4, LEVEL_5];
+const FLOOR_NAMES = ['ATRIUM \u00b7 SUBLEVEL', 'R&D \u00b7 SERVER FARM', 'EXECUTIVE SUITE',
+                     'BLACK ICE \u00b7 DATA VAULT', 'THE SPIRE \u00b7 HELIPAD'];
 // seconds a competent run takes; drives the time bonus on the tally screen
-const PAR_TIME = [150, 180, 210];
+const PAR_TIME = [150, 180, 210, 230, 260];
 
 ;
 'use strict';
 
-// ASCII art tables: every enemy sprite (with its four guard rotations) and
-// every weapon view-model frame. Data only — no functions live here. Adding a
-// weapon or an enemy should mean adding rows to these tables, not code.
+// The bestiary. One row per enemy type, and every per-type difference in the
+// game is a column of it.
+//
+// This file exists because the alternative was a ternary chain in mkEnemy plus
+// a dozen `e.type === 'ceo'` guards scattered across enemies.js, level.js,
+// render.js and hud.js — one branch per type per behaviour, growing as the
+// product of the two. Growth rule 1: new content is a table row, not a code
+// path. A new enemy is a row here, four sprites in bodies.js, a death sequence
+// in gore.js, and a character in a level. No new code.
+//
+// ─── THE COLUMNS ────────────────────────────────────────────
+//   char       the level-map character that spawns one; see levels.js
+//   name       what it is, for readers — nothing renders this
+//   spec       hp / speed / range / cd / dmg / sight. COPIED per body by
+//              mkEnemy, never shared: a boss phase rewrites these in place.
+//   want       standoff distance held while chasing with line of sight
+//   burst      shots per attack entry
+//   radius     how much room the body claims in separateEnemies
+//   score      points for the kill
+//   loot       probability of dropping an ammo cell
+//   blood      [lo, hi] splats; hi is rolled at 0.4, else lo. [0,0] is a machine
+//   patrol     does it pace its beat while idle
+//   rotates    does it have back/left/right sprites (only a guard does)
+//   bobs       does it hover
+//   relocate   may spawn-safety walk it out of the player's opening sightline
+//   alertSfx   what it says when it notices you
+//   blast      optional { radius, dmg }: the body goes up when it dies
+//
+// ─── BOSS COLUMNS ───────────────────────────────────────────
+//   boss       exempt from difficulty thinning, and claims the `boss` handle.
+//              A boss row carries no `want` or `burst` of its own: phases[0] is
+//              the only source, so the two can never drift apart
+//   phases     the whole fight: a health fraction `at`, a display `name`, any
+//              of speed/cd/dmg/range/sight to write onto the spec, plus want,
+//              burst and an optional summon { type, n }
+//   title      the boss bar's name
+//   tag        the phase-change toast's prefix
+//   objective  the objective line while it lives
+//   heldBy     the exit prompt while it lives
+//   deny       the toast for trying the exit anyway
+//   track      which MUSIC row plays once it has noticed you
+
+const ENEMY_TYPES = {
+
+  guard: {
+    char: 'g', name: 'SALARYMAN GUARD',
+    spec: { hp: 45, speed: 1.35, range: 9.5, cd: 1.15, dmg: 11, sight: 15 },
+    want: 3.2, burst: 1, radius: 0.35, score: 200,
+    loot: 0.55, blood: [1, 2],
+    patrol: true, rotates: true, bobs: false, relocate: true,
+    alertSfx: 'bark',
+  },
+
+  drone: {
+    char: 'd', name: 'SEC-DRONE',
+    spec: { hp: 28, speed: 2.10, range: 7.0, cd: 0.85, dmg: 7, sight: 13 },
+    want: 2.2, burst: 1, radius: 0.35, score: 150,
+    loot: 0.30, blood: [0, 0],
+    patrol: true, rotates: false, bobs: true, relocate: true,
+    alertSfx: 'ping',
+  },
+
+  // A fixture, not a body: `speed: 0` is the whole of "it holds position and
+  // shoots", because moveEnemy treats a zero delta as no delta and the chase
+  // state then has nothing to do. It out-ranges everything but the chaingun,
+  // and `relocate: false` keeps it in the sightline a level places it in.
+  turret: {
+    char: 't', name: 'CEILING TURRET',
+    spec: { hp: 35, speed: 0, range: 14.0, cd: 1.60, dmg: 12, sight: 18 },
+    want: 0, burst: 2, radius: 0.40, score: 250,
+    loot: 0.40, blood: [0, 0],
+    patrol: false, rotates: false, bobs: false, relocate: false,
+    alertSfx: 'ping',
+  },
+
+  // A charge on rotors. `range` 1.4 means it has to reach you before it can do
+  // anything at all, and `want: 0` means it never stops closing — then it goes
+  // off when it dies, so killing one at your feet is its own mistake.
+  spark: {
+    char: 'k', name: 'SPARK CHARGE',
+    spec: { hp: 30, speed: 2.80, range: 1.4, cd: 0.90, dmg: 10, sight: 14 },
+    want: 0, burst: 1, radius: 0.30, score: 300,
+    loot: 0.15, blood: [0, 0],
+    patrol: true, rotates: false, bobs: true, relocate: true,
+    alertSfx: 'ping',
+    blast: { radius: 2.2, dmg: 22 },
+  },
+
+  // The corridor plug. Three times a guard's hp and two thirds its speed, so
+  // backing away works and standing your ground does not; the wide radius is
+  // what makes it actually block a doorway rather than be walked around.
+  enforcer: {
+    char: 'h', name: 'CORPORATE ENFORCER',
+    spec: { hp: 140, speed: 0.90, range: 8.0, cd: 1.50, dmg: 15, sight: 16 },
+    want: 4.0, burst: 3, radius: 0.50, score: 500,
+    loot: 0.80, blood: [1, 2],
+    patrol: true, rotates: false, bobs: false, relocate: true,
+    alertSfx: 'bark',
+  },
+
+  // ─── BOSSES ───────────────────────────────────────────────
+  // Tuned as fights, not obstacles: enough hp to need several magazines,
+  // enough reach that backing off is not a free answer, and a standoff of
+  // their own so they never simply walk into your muzzle.
+
+  ceo: {
+    char: 'C', name: 'THE CEO', boss: true,
+    spec: { hp: 520, speed: 1.10, range: 12.0, cd: 1.40, dmg: 16, sight: 20 },
+    radius: 0.55, score: 5000,
+    loot: 0.30, blood: [3, 3],
+    patrol: false, rotates: false, bobs: false, relocate: false,
+    alertSfx: 'ping',
+    title: 'CHIEF EXECUTIVE OFFICER', tag: 'CEO', track: 'BOARDROOM',
+    objective: 'THE BOARD IS IN SESSION — KILL THE CEO',
+    heldBy: 'ELEVATOR — HELD BY THE BOARD',
+    deny: 'THE BOARD IS STILL IN SESSION',
+    // A three-phase fight rather than a guard with more hp. Each phase
+    // re-tunes the same spec fields the ordinary FSM already reads, so no new
+    // state machine is needed. `at` is the health fraction it takes over at.
+    phases: [
+      { at: 1.00, name: 'BOARD MEETING',    speed: 1.10, cd: 1.40, dmg: 16, want: 5.2, burst: 1 },
+      { at: 0.62, name: 'HOSTILE TAKEOVER', speed: 1.75, cd: 1.00, dmg: 14, want: 3.2, burst: 3 },
+      { at: 0.28, name: 'GOLDEN PARACHUTE', speed: 2.20, cd: 0.62, dmg: 12, want: 2.3, burst: 4,
+        summon: { type: 'drone', n: 2 } },
+    ],
+  },
+
+  // The inverse of the CEO's arc. It opens ROOTED and out-ranging every gun
+  // you own, so the vault's pillars are the fight; then it seeds the room with
+  // turrets, so the cover starts shooting back; then it comes off the pedestal
+  // and its reach shortens as it hunts. `speed: 0` in the first two phases is
+  // the same field the turret uses — the FSM needs nothing new for either.
+  blackice: {
+    char: 'I', name: 'BLACK ICE', boss: true,
+    spec: { hp: 640, speed: 0, range: 16.0, cd: 1.30, dmg: 14, sight: 24 },
+    radius: 0.60, score: 6000,
+    loot: 0.30, blood: [0, 0],
+    patrol: false, rotates: false, bobs: false, relocate: false,
+    alertSfx: 'ping',
+    title: 'BLACK ICE — INTRUSION COUNTERMEASURE', tag: 'BLACK ICE', track: 'ICEWALL',
+    objective: 'THE VAULT IS SEALED — BREAK THE ICE',
+    heldBy: 'ELEVATOR — LOCKED BY BLACK ICE',
+    deny: 'THE ICE STILL HOLDS THE FLOOR',
+    phases: [
+      { at: 1.00, name: 'COLD BOOT',      speed: 0,    cd: 1.30, dmg: 14, range: 16.0,
+        want: 0, burst: 2 },
+      { at: 0.60, name: 'TRACE LOCK',     speed: 0,    cd: 0.80, dmg: 13, range: 16.0,
+        want: 0, burst: 4, summon: { type: 'turret', n: 3 } },
+      { at: 0.25, name: 'SCORCHED EARTH', speed: 1.60, cd: 0.55, dmg: 12, range: 12.0,
+        want: 6.0, burst: 5 },
+    ],
+  },
+
+  // The finale, and the only fight that pulls you IN: every phase raises the
+  // speed and shortens the reach, so the room gets smaller as it gets deadlier
+  // and the last one is a knife fight. The blast on the row is the point of the
+  // whole arc — kill it at your feet and it takes you with it.
+  founder: {
+    char: 'F', name: 'THE FOUNDER', boss: true,
+    spec: { hp: 800, speed: 1.30, range: 13.0, cd: 1.20, dmg: 15, sight: 24 },
+    radius: 0.60, score: 8000,
+    loot: 0.30, blood: [3, 3],
+    patrol: false, rotates: false, bobs: false, relocate: false,
+    alertSfx: 'bark',
+    blast: { radius: 3.5, dmg: 30 },
+    title: 'THE FOUNDER — MAJORITY SHAREHOLDER', tag: 'THE FOUNDER', track: 'LAST FLIGHT',
+    objective: 'THE FOUNDER IS BOARDING — DO NOT LET THEM LEAVE',
+    heldBy: 'ELEVATOR — THE ROOF IS NOT CLEAR',
+    deny: 'THE ROOF IS NOT CLEAR',
+    phases: [
+      { at: 1.00, name: 'EXIT PACKAGE',    speed: 1.30, cd: 1.20, dmg: 15, range: 13.0,
+        want: 6.5, burst: 2 },
+      { at: 0.66, name: 'VESTED INTEREST', speed: 2.00, cd: 0.85, dmg: 16, range: 9.0,
+        want: 3.5, burst: 3, summon: { type: 'enforcer', n: 2 } },
+      { at: 0.30, name: 'LEGACY MODE',     speed: 2.60, cd: 0.50, dmg: 14, range: 5.0,
+        want: 1.6, burst: 5, summon: { type: 'spark', n: 4 } },
+    ],
+  },
+
+};
+
+;
+'use strict';
+
+// Enemy sprite art for everything added after the MVP roster. Data only.
+//
+// This is its own file rather than more rows in `art.js` for the reason
+// `gore.js` and `weapons.js` are: art.js was already 307 lines and this is
+// ~280 more, and rule 4 says a file past 400 is a signal to split, not a
+// target to fill.
+//
+// It must load BEFORE art.js, which opens its own literal with `...BODY_SPR`.
+// That spread is the whole seam: `SPR` stays one object with one lookup, so
+// enemySprite's `SPR[type + 'Fire']`, fire()'s `SPR[e.type].wW` and gore.js's
+// `SPR[type + 'Die']` never learn that the art arrived from two files.
+//
+// ─── THE RULES A BODY MUST KEEP ─────────────────────────────
+//   * `rows` must be rectangular. A short row blits `undefined` into the
+//     atlas; the suite measures every row's length for this.
+//   * every LIVE view of a type (idle, Fire, and any rotations) must carry the
+//     same `wW`. fire() measures its hit span against the base sprite, so a
+//     wider firing pose would make a body easier to shoot while it shoots.
+//     `Die` and `Dead` are free — nothing aims at a corpse.
+//   * `base` and `accentColor` are keys into COLOR, never literals: every
+//     colour reaches the screen through fade() so the glyph atlas stays small.
+const BODY_SPR = {
+
+  // ─── TURRET ───────────────────────────────────────────────
+  // Wall-mounted, so it hangs at `foot: 0.9` and never moves. It reads as a
+  // fixture rather than a body on purpose: the answer to it is cover, not aim.
+  turret: {
+    rows: [
+      '  ▄▄▄  ',
+      ' ▟█◙█▙ ',
+      '▐█████▌',
+      ' ▜███▛ ',
+      '  ▐█▌  ',
+    ],
+    wW: 1.3, wH: 1.6, foot: 0.9,
+    base: 'steelD', accent: '◙', accentColor: 'turretEye',
+  },
+  turretFire: {
+    rows: [
+      '  ▄▄▄  ',
+      ' ▟█◙█▙ ',
+      '◄█████►',
+      ' ▜███▛ ',
+      '  ▐█▌  ',
+    ],
+    wW: 1.3, wH: 1.6, foot: 0.9,
+    base: 'steelD', accent: '◙◄►', accentColor: 'muzzle',
+  },
+  turretDie: {
+    rows: [
+      ' ▄▄▄▄▄ ',
+      '▄██x██▄',
+      '▀▀▀▀▀▀▀',
+    ],
+    wW: 1.4, wH: 0.70, foot: 0.0,
+    base: 'steelD', accent: 'x', accentColor: 'muzzle',
+  },
+  turretDead: {
+    rows: [
+      '▂▂▂▂▂▂▂',
+      '▖▄▄▄▄▄▗',
+    ],
+    wW: 1.4, wH: 0.35, foot: 0.0,
+    base: 'steelD', accent: '', accentColor: 'steelD',
+  },
+
+  // ─── SPARK ────────────────────────────────────────────────
+  // A charge on rotors. Small, hovering and almost harmless at range — the
+  // whole body is a delivery system for the blast on its roster row.
+  spark: {
+    rows: [
+      '╲ ▲ ╱',
+      ' ▟◘▙ ',
+      '╱ ▼ ╲',
+      '  ·  ',
+    ],
+    wW: 0.95, wH: 0.90, foot: 0.85,
+    base: 'spark', accent: '◘', accentColor: 'sparkCore',
+  },
+  sparkFire: {
+    rows: [
+      '╲ ▲ ╱',
+      '◄▟◙▙►',
+      '╱ ▼ ╲',
+      '  ▲  ',
+    ],
+    wW: 0.95, wH: 0.90, foot: 0.85,
+    base: 'spark', accent: '◙◄►', accentColor: 'muzzle',
+  },
+  // The one death frame in the game that grows. A spark does not fall over,
+  // it goes off, and the blast it deals is a roster field the FSM reads.
+  sparkDie: {
+    rows: [
+      '╲ ◙ ╱',
+      '◄◙◙◙►',
+      '╱ ◙ ╲',
+    ],
+    wW: 1.70, wH: 1.10, foot: 0.45,
+    base: 'muzzle', accent: '◙', accentColor: 'sparkCore',
+  },
+  sparkDead: {
+    rows: [
+      '▗▄▄▄▖',
+      '▝▀▀▀▘',
+    ],
+    wW: 1.10, wH: 0.30, foot: 0.0,
+    base: 'steelD', accent: '', accentColor: 'steelD',
+  },
+
+  // ─── ENFORCER ─────────────────────────────────────────────
+  // Half again a guard's width and a head taller, which is the honest read on
+  // a body with three times the hp: you are meant to see the wall coming.
+  enforcer: {
+    rows: [
+      ' ▄███▄ ',
+      '▐█◘█◘█▌',
+      ' ▜███▛ ',
+      '▟█████▙',
+      '███▀███',
+      '▜█████▛',
+      ' ▐█ █▌ ',
+      ' ▙▛ ▜▟ ',
+    ],
+    wW: 1.7, wH: 2.4, foot: 0.0,
+    base: 'enforcer', accent: '◘', accentColor: 'enforcerTrim',
+  },
+  enforcerFire: {
+    rows: [
+      ' ▄███▄ ',
+      '▐█◘█◘█▌',
+      ' ▜███▛ ',
+      '▟█████▙',
+      '██◙▀◙██',
+      '▜█████▛',
+      ' ▐█ █▌ ',
+      ' ▙▛ ▜▟ ',
+    ],
+    wW: 1.7, wH: 2.4, foot: 0.0,
+    base: 'enforcer', accent: '◙', accentColor: 'muzzle',
+  },
+  enforcerDie: {
+    rows: [
+      '  ▄▄▄  ',
+      ' ▄███▄ ',
+      '▄██x██▄',
+      '▀▀▀▀▀▀▀',
+    ],
+    wW: 2.0, wH: 1.00, foot: 0.0,
+    base: 'enforcer', accent: 'x', accentColor: 'blood',
+  },
+  enforcerDead: {
+    rows: [
+      '▂▂▂▂▂▂▂',
+      '█▄▄▄▄▄█',
+    ],
+    wW: 2.2, wH: 0.45, foot: 0.0,
+    base: 'blood', accent: '', accentColor: 'blood',
+  },
+
+  // ─── BLACK ICE ────────────────────────────────────────────
+  // Not a body — a countermeasure. It reads as a column of frozen data with a
+  // core you can see through it, which is the tell for where the phase is.
+  blackice: {
+    rows: [
+      '   ▄▄▄▄▄   ',
+      '  ╱█████╲  ',
+      ' ▟███◙███▙ ',
+      '▐█████████▌',
+      '▐██◙███◙██▌',
+      '▐█████████▌',
+      ' ▜███◙███▛ ',
+      '  ╲█████╱  ',
+      '   ▐███▌   ',
+      '   ▟███▙   ',
+    ],
+    wW: 2.5, wH: 2.9, foot: 0.0,
+    base: 'ice', accent: '◙', accentColor: 'iceCore',
+  },
+  blackiceFire: {
+    rows: [
+      '   ▄▄▄▄▄   ',
+      '  ╱█████╲  ',
+      ' ▟███◙███▙ ',
+      '◄█████████►',
+      '▐██◙███◙██▌',
+      '◄█████████►',
+      ' ▜███◙███▛ ',
+      '  ╲█████╱  ',
+      '   ▐███▌   ',
+      '   ▟███▙   ',
+    ],
+    wW: 2.5, wH: 2.9, foot: 0.0,
+    base: 'ice', accent: '◙◄►', accentColor: 'muzzle',
+  },
+  blackiceDie: {
+    rows: [
+      '╲  ▄▄▄▄▄  ╱',
+      '▄██▀▀x▀▀██▄',
+      '▀▀▀▀▀▀▀▀▀▀▀',
+    ],
+    wW: 2.9, wH: 1.30, foot: 0.0,
+    base: 'ice', accent: 'x', accentColor: 'iceCore',
+  },
+  blackiceDead: {
+    rows: [
+      '▂▂▂▂▂▂▂▂▂▂▂',
+      '▖▄▄▄▄▄▄▄▄▄▗',
+    ],
+    wW: 3.0, wH: 0.50, foot: 0.0,
+    base: 'steelD', accent: '', accentColor: 'steelD',
+  },
+
+  // ─── THE FOUNDER ──────────────────────────────────────────
+  // Taller than the CEO and narrower: a long coat over an exoframe, and the
+  // last thing between you and the roof.
+  founder: {
+    rows: [
+      '    ▄▄▄    ',
+      '   ▟█◙█▙   ',
+      '   ▜███▛   ',
+      '  ▟█████▙  ',
+      ' ▟███◘███▙ ',
+      '▐█████████▌',
+      '▐██▛███▜██▌',
+      ' ▜██▌ ▐██▛ ',
+      '  ▐█▌ ▐█▌  ',
+      '  ▟█▙ ▟█▙  ',
+    ],
+    wW: 2.3, wH: 3.0, foot: 0.0,
+    base: 'founderCoat', accent: '◙◘', accentColor: 'founderTrim',
+  },
+  founderFire: {
+    rows: [
+      '    ▄▄▄    ',
+      '   ▟█◙█▙   ',
+      '   ▜███▛   ',
+      '  ▟█████▙  ',
+      '◄▟███◙███▙►',
+      '▐█████████▌',
+      '▐██▛███▜██▌',
+      ' ▜██▌ ▐██▛ ',
+      '  ▐█▌ ▐█▌  ',
+      '  ▟█▙ ▟█▙  ',
+    ],
+    wW: 2.3, wH: 3.0, foot: 0.0,
+    base: 'founderCoat', accent: '◙◄►', accentColor: 'muzzle',
+  },
+  founderDie: {
+    rows: [
+      '  ▄▄▄▄▄▄▄  ',
+      ' ▄███████▄ ',
+      '▄███▀x▀███▄',
+      '▀▀▀▀▀▀▀▀▀▀▀',
+    ],
+    wW: 2.8, wH: 1.40, foot: 0.0,
+    base: 'founderCoat', accent: 'x', accentColor: 'blood',
+  },
+  founderDead: {
+    rows: [
+      '▂▂▂▂▂▂▂▂▂▂▂',
+      '██▄▄▄▄▄▄▄██',
+    ],
+    wW: 3.0, wH: 0.55, foot: 0.0,
+    base: 'blood', accent: '', accentColor: 'blood',
+  },
+
+};
+
+;
+'use strict';
+
+// ASCII art tables: the MVP roster's sprites (with the four guard rotations),
+// the pickups, and every weapon view-model frame. Data only — no functions live
+// here. Adding a weapon or an enemy should mean adding rows to a table, not
+// code; enemy bodies added after the MVP live in bodies.js, which this file
+// spreads in below.
 
 // ─── SPRITE ART ─────────────────────────────────────────────
+// Opens with everything bodies.js declares — see the note at the top of that
+// file. The spread is why every consumer still reads one `SPR[type + view]`.
 const SPR = {
+  ...BODY_SPR,
   guard: {
     rows: [
       ' ▄▄▄ ',
@@ -1576,6 +2141,100 @@ const DEATH_SEQ = {
       ],
       wW: 1.2, wH: 0.50, foot: 0.0,
       base: 'steelD', accent: 'x', accentColor: 'muzzle',
+    },
+  ],
+  // A turret does not fall — it is bolted on. It bursts and hangs there.
+  turret: [
+    SPR.turretDie,
+    {
+      rows: [
+        '▄▄▄▄▄▄▄',
+        '▀▀▀x▀▀▀',
+      ],
+      wW: 1.4, wH: 0.45, foot: 0.0,
+      base: 'steelD', accent: 'x', accentColor: 'muzzle',
+    },
+  ],
+  // The only sequence that expands before it collapses: the detonation frame
+  // is the one the blast on its roster row is dealt under.
+  spark: [
+    SPR.sparkDie,
+    {
+      rows: [
+        '◄ ◙ ►',
+        ' ▄▄▄ ',
+        '▀▀▀▀▀',
+      ],
+      wW: 1.30, wH: 0.60, foot: 0.0,
+      base: 'muzzle', accent: '◙', accentColor: 'sparkCore',
+    },
+  ],
+  // Three frames, like the CEO: a body this size has to land in stages or it
+  // reads as a sprite being swapped rather than a thing going down.
+  enforcer: [
+    SPR.enforcerDie,
+    {
+      rows: [
+        ' ▄▄▄▄▄ ',
+        '▄█████▄',
+        '██▀x▀██',
+        '▀▀▀▀▀▀▀',
+      ],
+      wW: 2.1, wH: 0.80, foot: 0.0,
+      base: 'enforcer', accent: 'x', accentColor: 'blood',
+    },
+    {
+      rows: [
+        '▄▄▄▄▄▄▄',
+        '███▛███',
+        '▀▀▀▀▀▀▀',
+      ],
+      wW: 2.2, wH: 0.55, foot: 0.0,
+      base: 'enforcer', accent: '', accentColor: 'blood',
+    },
+  ],
+  // It does not fall over, it shatters — so the frames spread outward and go
+  // dark rather than folding down onto a corpse.
+  blackice: [
+    SPR.blackiceDie,
+    {
+      rows: [
+        '╲▄       ▄╱',
+        '▀▀▀▄▄x▄▄▀▀▀',
+        '   ▀▀▀▀▀   ',
+      ],
+      wW: 3.1, wH: 0.90, foot: 0.0,
+      base: 'ice', accent: 'x', accentColor: 'iceCore',
+    },
+    {
+      rows: [
+        '▄▄       ▄▄',
+        '▀▀▀▄▄▄▄▄▀▀▀',
+      ],
+      wW: 3.2, wH: 0.55, foot: 0.0,
+      base: 'steelD', accent: '', accentColor: 'steelD',
+    },
+  ],
+  founder: [
+    SPR.founderDie,
+    {
+      rows: [
+        ' ▄▄▄▄▄▄▄▄▄ ',
+        '▄█████████▄',
+        '███▀▀x▀▀███',
+        '▀▀▀▀▀▀▀▀▀▀▀',
+      ],
+      wW: 2.9, wH: 0.95, foot: 0.0,
+      base: 'founderCoat', accent: 'x', accentColor: 'blood',
+    },
+    {
+      rows: [
+        '▄▄▄▄▄▄▄▄▄▄▄',
+        '█████▛█████',
+        '▀▀▀▀▀▀▀▀▀▀▀',
+      ],
+      wW: 3.0, wH: 0.60, foot: 0.0,
+      base: 'founderCoat', accent: '', accentColor: 'blood',
     },
   ],
   ceo: [
@@ -2052,6 +2711,7 @@ function sfx(name) {
     case 'reloadDone': blip(760, 0.06, 'square', 0.11, 1080); noiseBurst(0.05, 1800, 0.08, 1.4); break;
     case 'hit':       noiseBurst(0.07, 480, 0.20, 2.0); break;
     case 'kill':      noiseBurst(0.30, 320, 0.30, 0.8); blip(140, 0.32, 'sawtooth', 0.12, 42); break;
+    case 'blast':     noiseBurst(0.45, 180, 0.42, 0.55); blip(70, 0.40, 'sawtooth', 0.20, 34); break;
     case 'ouch':      blip(240, 0.16, 'sawtooth', 0.20, 90); noiseBurst(0.10, 700, 0.16, 1.4); break;
     case 'bark':      blip(300, 0.10, 'square', 0.16, 420); blip(430, 0.09, 'square', 0.12, 300); break;
     case 'ping':      blip(1250, 0.07, 'sine', 0.13, 1750); break;
@@ -2101,12 +2761,30 @@ const MUSIC = [
     bass: [[0, 0.5], [7, 0.5], [0, 0.5], [10, 0.5], [0, 1], [-1, 1]],
     lead: [[19, 0.5], [17, 0.5], [15, 1], [12, 0.5], [15, 0.5], [17, 1]],
     drum: 'xxs.xxs.' },
-  // The boardroom. Last row by convention — musicTrackFor() reaches for it by
-  // position, so the floor tracks stay the first LEVELS-many rows.
+  { name: 'VAULT', bpm: 138, root: 42,            // F#2 — still, and very cold
+    bass: [[0, 1], [0, 0.5], [-2, 0.5], [0, 1], [5, 1]],
+    lead: [[12, 1], [null, 0.5], [11, 0.5], [12, 0.5], [7, 0.5], [null, 1]],
+    drum: 'x...s...' },
+  { name: 'SPIRE', bpm: 156, root: 40,            // E2 — thinner air
+    bass: [[0, 0.5], [12, 0.5], [0, 0.5], [7, 0.5], [-3, 1], [0, 1]],
+    lead: [[19, 0.5], [16, 0.5], [19, 0.5], [21, 0.5], [16, 1], [12, 1]],
+    drum: 'x.s.xxs.' },
+  // The boss tracks. Found by NAME off the boss's roster row, not by position:
+  // with three bosses "the last row" stopped being a rule and became a bug
+  // waiting for the fourth. The floor tracks are still the first LEVELS-many
+  // rows, which musicTrackFor indexes directly.
   { name: 'BOARDROOM', bpm: 168, root: 37,        // Db2 — faster, meaner
     bass: [[0, 0.25], [0, 0.25], [0, 0.5], [6, 0.5], [0, 0.5], [8, 0.5], [7, 0.5]],
     lead: [[12, 0.25], [13, 0.25], [12, 0.5], [8, 0.5], [6, 0.5], [12, 1]],
     drum: 'xxsxxxsx' },
+  { name: 'ICEWALL', bpm: 160, root: 38,          // D2 — a wall of it
+    bass: [[0, 0.5], [0, 0.5], [1, 0.5], [0, 0.5], [8, 0.5], [7, 0.5], [6, 1]],
+    lead: [[12, 0.5], [18, 0.5], [17, 0.5], [12, 0.5], [11, 1], [12, 1]],
+    drum: 'xxsxx.sx' },
+  { name: 'LAST FLIGHT', bpm: 176, root: 36,      // C2 — the bottom of the keyboard
+    bass: [[0, 0.25], [0, 0.25], [7, 0.5], [0, 0.25], [0, 0.25], [10, 0.5], [-2, 1]],
+    lead: [[24, 0.25], [23, 0.25], [19, 0.5], [15, 0.5], [12, 0.5], [19, 0.5], [24, 0.5]],
+    drum: 'xxsxxsxs' },
 ];
 
 const MUSIC_LOOKAHEAD = 0.25;   // seconds of notes queued ahead of the clock
@@ -2114,13 +2792,23 @@ const MUSIC_LOOKAHEAD = 0.25;   // seconds of notes queued ahead of the clock
 let musicVoices = null, musicDrumV = null, musicTrack = null, musicPending = null;
 
 /**
- * Which march is playing. The boardroom track takes over the moment the CEO
- * has actually noticed you — the same liveness test the boss bar uses, so the
- * music and the health bar arrive together rather than one spoiling the other.
+ * Which march is playing. A boss's track takes over the moment it has actually
+ * noticed you — the same liveness test the boss bar uses, so the music and the
+ * health bar arrive together rather than one spoiling the other.
+ *
+ * The boss track is looked up by the NAME on its roster row. It used to be
+ * `MUSIC[MUSIC.length - 1]`, which was fine while there was one boss and is a
+ * silent mis-pick the moment there are two. Floor tracks are still positional:
+ * the first LEVELS-many rows, in floor order.
  */
 function musicTrackFor() {
-  if (boss && boss.alive && boss.state !== 'idle') return MUSIC[MUSIC.length - 1];
-  return MUSIC[levelIndex % (MUSIC.length - 1)];
+  if (boss && boss.alive && boss.state !== 'idle') {
+    const want = bossRow().track;
+    // the fallback is the first boss row: a roster typo should cost the right
+    // march, not silence the scheduler mid-fight. A test pins every name.
+    return MUSIC.find(t => t.name === want) || MUSIC[LEVELS.length];
+  }
+  return MUSIC[levelIndex % LEVELS.length];
 }
 
 function midiHz(n) { return 440 * Math.pow(2, (n - 69) / 12); }
@@ -2615,14 +3303,12 @@ function mkSecret(x, y, seed) {
            gx: x, gy: y, dx: 0, dy: 0, push: 0, span: 0, phase: 'idle' };
 }
 function mkEnemy(type, x, y) {
-  // The CEO is tuned as a fight, not an obstacle: enough hp to need three
-  // magazines, enough reach that backing off is not a free answer, and a
-  // standoff of its own so it never simply walks into your muzzle.
-  const spec = type === 'ceo'
-    ? { hp: 520, speed: 1.10, range: 12.0, cd: 1.40, dmg: 16, sight: 20 }
-    : type === 'guard'
-    ? { hp: 45, speed: 1.35, range: 9.5, cd: 1.15, dmg: 11, sight: 15 }
-    : { hp: 28, speed: 2.10, range: 7.0, cd: 0.85, dmg:  7, sight: 13 };
+  const row = ENEMY_TYPES[type];
+  // A COPY, never the roster's own object. stepBossPhase writes speed, cd and
+  // damage straight onto e.spec as a fight escalates; sharing one spec across
+  // every body of a type would re-tune the whole floor — and permanently, for
+  // the rest of the session, since the roster is a module-level literal.
+  const spec = { ...row.spec };
   return {
     type, x, y, spawnX: x, spawnY: y,
     hp: spec.hp, maxHp: spec.hp, spec,
@@ -2638,8 +3324,12 @@ function mkEnemy(type, x, y) {
     // guard that has never taken a step.
     heading: -Math.PI / 2,
     patrolDir: null, patrolT: Math.random() * 1.2, patrolTX: 0, patrolTY: 0,
-    phase: 0, burst: 1, shotsLeft: 1,
-    want: type === 'ceo' ? CEO_PHASES[0].want : undefined,
+    phase: 0, shotsLeft: 1,
+    // A boss opens on phase 0, so its standoff and burst come from there rather
+    // than from the row's plain fields — stepBossPhase rewrites both from the
+    // same table the moment its health drops.
+    burst: row.phases ? row.phases[0].burst : row.burst,
+    want:  row.phases ? row.phases[0].want  : row.want,
   };
 }
 function mkItem(kind, x, y) {
@@ -2831,8 +3521,8 @@ function use() {
   } else if (c.secret && c.phase === 'idle') {
     pushSecret(c);
   } else if (c.tag === 'exit') {
-    // the CEO holds the elevator: no leaving the floor while the board sits
-    if (boss && boss.alive) { toast('THE BOARD IS STILL IN SESSION'); sfx('deny'); return; }
+    // a live boss holds the elevator; what it says about that is `deny` on its row
+    if (boss && boss.alive) { toast(bossRow().deny); sfx('deny'); return; }
     clearLevel();
   }
 }
@@ -2868,20 +3558,20 @@ function use() {
  */
 function populateEnemies(spawns) {
   const D = DIFFICULTY[difficulty];
-  const mob = spawns.filter(s => s[0] !== 'ceo').length;
+  const mob = spawns.filter(s => !ENEMY_TYPES[s[0]].boss).length;
   const want = Math.min(mob, Math.max(1, Math.round(mob * D.keep)));
 
   const survivors = [];
   let acc = 0;
   for (const s of spawns) {
-    if (s[0] !== 'ceo') {
+    if (!ENEMY_TYPES[s[0]].boss) {
       acc += want;
       if (acc < mob) continue;      // this one does not make the cut
       acc -= mob;
     }
     const e = mkEnemy(s[0], s[1], s[2]);
     enemies.push(e);
-    if (s[0] === 'ceo') boss = e;
+    if (ENEMY_TYPES[s[0]].boss) boss = e;
     else survivors.push(s);
   }
 
@@ -2903,8 +3593,9 @@ function populateEnemies(spawns) {
 // included, since they land on a survivor's authored tile — to the nearest open
 // tile with no line of sight back to the spawn, staying inside its own room
 // (doors are walls here: a body parked behind a closed door can neither patrol
-// nor be reached). The CEO is exempt — it is the floor's win condition, tuned
-// to a fixed boardroom, and never spawns in view anyway.
+// nor be reached). `relocate: false` rows are exempt: a boss is the floor's win
+// condition, tuned to a fixed arena, and a wall-mounted body is placed in a
+// sightline on purpose.
 const RELOCATE_DIRS = [[1, 0], [-1, 0], [0, 1], [0, -1]];
 
 function relocateSpawnLOS() {
@@ -2914,7 +3605,7 @@ function relocateSpawnLOS() {
   for (const e of enemies) occupied.add((e.x | 0) + ',' + (e.y | 0));
 
   for (const e of enemies) {
-    if (e.type === 'ceo') continue;
+    if (!ENEMY_TYPES[e.type].relocate) continue;
     const d = Math.hypot(e.x - px, e.y - py);
     if (d >= e.spec.sight || !hasLOS(e.x, e.y, px, py)) continue;
     const spot = findCoverTile(e, px, py, occupied);
@@ -2933,11 +3624,11 @@ function relocateSpawnLOS() {
 // place rather than dropping it somewhere unreachable.
 function findCoverTile(e, px, py, occupied) {
   const gx0 = e.x | 0, gy0 = e.y | 0;
-  const seen = new Uint8Array(MAP_W * MAP_H);
+  const visited = new Uint8Array(MAP_W * MAP_H);
   const queue = new Int32Array(MAP_W * MAP_H);
   let head = 0, tail = 0;
   const start = gy0 * MAP_W + gx0;
-  seen[start] = 1;
+  visited[start] = 1;
   queue[tail++] = start;
   while (head < tail) {
     const at = queue[head++];
@@ -2952,11 +3643,19 @@ function findCoverTile(e, px, py, occupied) {
       if (cellAt(nx, ny)) continue;            // wall or door — stay in-room
       if (occupied.has(nx + ',' + ny)) continue;
       const ni = ny * MAP_W + nx;
-      if (seen[ni]) continue;
-      seen[ni] = 1;
+      if (visited[ni]) continue;
+      visited[ni] = 1;
       queue[tail++] = ni;
     }
   }
+  return null;
+}
+
+// Which enemy type a map character spawns, or null for scenery. A scan rather
+// than a derived lookup table so roster.js stays data with no top-level
+// derivation of its own; it runs once per tile per floor load.
+function enemyTypeForChar(ch) {
+  for (const t in ENEMY_TYPES) if (ENEMY_TYPES[t].char === ch) return t;
   return null;
 }
 
@@ -2992,17 +3691,20 @@ function parseLevel(src) {
           row[x] = sec; secretList.push(sec);
           break;
         }
-        // bodies are collected, not built, because how many of them actually
-        // appear is a difficulty question — see populateEnemies below
-        case 'g': spawns.push(['guard', x + 0.5, y + 0.5]); break;
-        case 'd': spawns.push(['drone', x + 0.5, y + 0.5]); break;
-        case 'C': spawns.push(['ceo',   x + 0.5, y + 0.5]); break;
         case '+': items.push(mkItem('health',  x + 0.5, y + 0.5)); break;
         case 'a': items.push(mkItem('ammo',    x + 0.5, y + 0.5)); break;
         case 'r': items.push(mkItem('keyRed',  x + 0.5, y + 0.5)); break;
         case 'b': items.push(mkItem('keyBlue', x + 0.5, y + 0.5)); break;
         case '$': items.push(mkItem('cash',    x + 0.5, y + 0.5)); totalTreasure++; break;
         case '@': player.x = x + 0.5; player.y = y + 0.5; break;
+        // Bodies are collected, not built, because how many of them actually
+        // appear is a difficulty question — see populateEnemies below. They come
+        // last and off the roster's own `char` column, so adding an enemy type
+        // never touches this switch.
+        default: {
+          const t = enemyTypeForChar(ch);
+          if (t) spawns.push([t, x + 0.5, y + 0.5]);
+        }
       }
     }
     grid.push(row);
@@ -3289,16 +3991,18 @@ function navStep(e) {
 'use strict';
 
 // Everything that drives a body other than the player: the state machine, the
-// flow-field steering, patrols, separation, loot drops, and the CEO fight.
+// flow-field steering, patrols, separation and loot drops. What differs BETWEEN
+// types is a row of ENEMY_TYPES in roster.js, never a branch in here; the boss
+// fights themselves live in boss.js.
 //
 // Every move goes through moveEnemy() — chase, patrol and separation alike — so
 // collision is enforced in exactly one place.
 
 // ─── ENEMY LOOT ─────────────────────────────────────────────
-// Guards carry a spare cell more often than drones do; the drop lands on the
-// corpse tile so it is always reachable.
+// How often a body leaves a spare cell is `loot` on its roster row; the drop
+// lands on the corpse tile so it is always reachable.
 function dropLoot(e) {
-  const chance = e.type === 'guard' ? 0.55 : 0.30;
+  const chance = ENEMY_TYPES[e.type].loot;
   if (Math.random() > chance) return;
   items.push(mkItem('ammo', e.x, e.y));
 }
@@ -3309,11 +4013,16 @@ function dropLoot(e) {
 // tile if it does. That is the same question `itemAt` exists to ask about
 // push-walls: anything placed in the world has to ask what else owns the tile.
 //
-// Drones bleed nothing. They are drones.
+// How much a body bleeds is `blood: [lo, hi]` on its roster row — hi is rolled
+// at 0.4, else lo. A machine's row is [0, 0] and it bleeds nothing.
 const DECAL_CAP = 64;
 function spillBlood(e) {
-  if (e.type === 'drone') return;
-  const n = e.type === 'ceo' ? 3 : (Math.random() < 0.4 ? 2 : 1);
+  // No early-out for [0, 0]: the count is already 0 and the loop already does
+  // not run. A guard here would LOOK like the reason machines do not bleed
+  // while the roster row was the real one, and a mutation that deleted it
+  // would survive — which is exactly what happened when this had one.
+  const [lo, hi] = ENEMY_TYPES[e.type].blood;
+  const n = hi > lo && Math.random() < 0.4 ? hi : lo;
   for (let i = 0; i < n; i++) {
     let x = e.x + (Math.random() - 0.5) * 0.7;
     let y = e.y + (Math.random() - 0.5) * 0.7;
@@ -3356,62 +4065,27 @@ function hurtPlayer(amount, sx, sy) {
   syncHud();
 }
 
-// ─── THE CEO ────────────────────────────────────────────────
-// A three-phase fight rather than a guard with more hp. Each phase re-tunes
-// the same spec fields the ordinary FSM already reads — speed, cooldown,
-// damage, standoff — plus a burst length, so no new state machine is needed.
-const CEO_PHASES = [
-  // `at` is the health fraction at or below which the phase takes over
-  { at: 1.00, name: 'BOARD MEETING',    speed: 1.10, cd: 1.40, dmg: 16, want: 5.2, burst: 1 },
-  { at: 0.62, name: 'HOSTILE TAKEOVER', speed: 1.75, cd: 1.00, dmg: 14, want: 3.2, burst: 3 },
-  { at: 0.28, name: 'GOLDEN PARACHUTE', speed: 2.20, cd: 0.62, dmg: 12, want: 2.3, burst: 4,
-    summon: 2 },
-];
-
-// Drones the CEO calls in are real enemies, so they count toward the floor's
-// kill ratio — the denominator grows with them and 100% stays achievable.
-function summonDrones(e, n) {
-  const spots = [];
-  for (let r = 2; r <= 4 && spots.length < n; r++) {
-    for (let k = 0; k < 12 && spots.length < n; k++) {
-      const th = (k / 12) * Math.PI * 2;
-      const x = e.x + Math.cos(th) * r, y = e.y + Math.sin(th) * r;
-      if (blockAt(x, y)) continue;
-      if (spots.some(p => Math.hypot(p[0] - x, p[1] - y) < 1.2)) continue;
-      spots.push([x, y]);
-    }
-  }
-  for (const [x, y] of spots) {
-    const d = mkEnemy('drone', x, y);
-    d.state = 'chase';
-    enemies.push(d);
-    totalEnemies++;
-  }
-  if (spots.length) { sfx('ping'); syncHud(); }
+/**
+ * A body that goes up when it dies, if its roster row says so. Line-of-sight
+ * gated and falling off with distance, like every other source of damage in
+ * the game — a charge that detonates through a wall would make cover a lie.
+ *
+ * Called from fire()'s kill branch rather than from the FSM: a corpse is not
+ * stepped, and the blast belongs to the moment of the kill.
+ */
+function deathBlast(e) {
+  const b = ENEMY_TYPES[e.type].blast;
+  const dist = Math.hypot(player.x - e.x, player.y - e.y);
+  sfx('blast');
+  alertNear(e.x, e.y, b.radius * 3);
+  if (dist >= b.radius) return;
+  if (!hasLOS(e.x, e.y, player.x, player.y)) return;
+  hurtPlayer(Math.round(b.dmg * DIFFICULTY[difficulty].dmg * (1 - dist / b.radius * 0.5)),
+             e.x, e.y);
 }
 
-function stepCeoPhase(e) {
-  const frac = e.hp / e.maxHp;
-  let want = 0;
-  for (let i = 0; i < CEO_PHASES.length; i++) if (frac <= CEO_PHASES[i].at) want = i;
-  if (want === e.phase) return;
-  e.phase = want;
-  const ph = CEO_PHASES[want];
-  e.spec.speed = ph.speed;
-  e.spec.cd    = ph.cd;
-  e.spec.dmg   = ph.dmg;
-  e.want  = ph.want;
-  e.burst = ph.burst;
-  e.atkCd = Math.min(e.atkCd, 0.5);
-  if (want > 0) {
-    toast('CEO  ·  ' + ph.name);
-    sfx('bark');
-    alertNear(e.x, e.y, 12);
-    if (ph.summon) summonDrones(e, ph.summon);
-  }
-}
-
-// One enemy shot, shared by the whole roster: the CEO's bursts are this same
+// ─── ENEMY FIRE ─────────────────────────────────────────────
+// One enemy shot, shared by the whole roster: a boss's bursts are this same
 // call repeated, so accuracy falloff and damage scaling stay in one place.
 function enemyShot(e, dist) {
   if (!hasLOS(e.x, e.y, player.x, player.y)) return;
@@ -3458,9 +4132,9 @@ function openDoorAhead(e, gx, gy) {
   sfx('door');
 }
 
-// How much room a body claims. The CEO is two and a half tiles across, so a
+// How much room a body claims. A boss is two and a half tiles across, so a
 // single radius would let the drones it summons stand inside its jacket.
-function bodyRadius(e) { return e.type === 'ceo' ? 0.55 : 0.35; }
+function bodyRadius(e) { return ENEMY_TYPES[e.type].radius; }
 
 /**
  * Push overlapping enemies apart. Before this, six seconds of a group chase
@@ -3496,12 +4170,16 @@ function separateEnemies() {
       } else {
         nx = dx / d; ny = dy / d;
       }
-      const shove = (R - d) * 0.5;
+      // A rooted body (speed 0) is a fixture, not a crowd member: it does not
+      // give ground, so its partner takes the whole shove instead of half.
+      const aFixed = a.spec.speed === 0, bFixed = b.spec.speed === 0;
+      if (aFixed && bFixed) continue;
+      const shove = (R - d) * (aFixed || bFixed ? 1 : 0.5);
       const ux = nx * shove, uy = ny * shove;
       // heading belongs to where a body is *going*, not to being jostled
       const ha = a.heading, hb = b.heading;
-      moveEnemy(a, -ux, -uy);
-      moveEnemy(b,  ux,  uy);
+      if (!aFixed) moveEnemy(a, -ux, -uy);
+      if (!bFixed) moveEnemy(b,  ux,  uy);
       a.heading = ha; b.heading = hb;
     }
   }
@@ -3553,7 +4231,7 @@ function patrolAim(e) {
 }
 
 function stepPatrol(e, dt) {
-  if (e.type === 'ceo') return;                  // the board does not pace the halls
+  if (!ENEMY_TYPES[e.type].patrol) return;       // boards do not pace; turrets cannot
   if (e.patrolT > 0) { e.patrolT -= dt; return; }
   if (!e.patrolDir) {
     pickPatrolDir(e);
@@ -3590,7 +4268,7 @@ function stepEnemies(dt) {
       continue;
     }
     if (gameState !== 'playing') continue;
-    if (e.type === 'ceo') stepCeoPhase(e);
+    if (ENEMY_TYPES[e.type].phases) stepBossPhase(e);
 
     const dx = player.x - e.x, dy = player.y - e.y;
     const dist = Math.hypot(dx, dy);
@@ -3610,7 +4288,7 @@ function stepEnemies(dt) {
           if (dist < e.spec.sight && hasLOS(e.x, e.y, player.x, player.y)) {
             e.state = 'alert';
             e.stateT = 0.4;
-            sfx(e.type === 'guard' ? 'bark' : 'ping');
+            sfx(ENEMY_TYPES[e.type].alertSfx);
             alertNear(e.x, e.y, 7);
           }
         }
@@ -3635,20 +4313,19 @@ function stepEnemies(dt) {
           e.heading = Math.atan2(dy, dx);       // you get shot at face-on
           break;
         }
-        // Close the gap, but keep a little standoff. The standoff is only
-        // meaningful with line of sight: holding position at 3.2u through a
-        // wall is how a guard used to freeze one room short of the fight.
-        const want = e.want !== undefined ? e.want
-                   : e.type === 'guard' ? 3.2 : 2.2;
-        if (!los || dist > want) {
+        // Close the gap, but keep the standoff its roster row asks for. It is
+        // only meaningful with line of sight: holding position at 3.2u through
+        // a wall is how a guard used to freeze one room short of the fight.
+        if (!los || dist > e.want) {
           const sp = e.spec.speed * dt;
           // straight at the player while it can see them — that reads better
           // in an open room than snapping between tile centres — and down the
           // flow field the moment the geometry gets in the way
           const w = los ? null : navStep(e);
           if (w) {
-            moveEnemy(e, w.x * sp, w.y * sp);
-            openDoorAhead(e, w.gx, w.gy);
+            // gated on actually moving: a rooted body has a waypoint like
+            // anything else, and would otherwise cycle a door it can never reach
+            if (moveEnemy(e, w.x * sp, w.y * sp)) openDoorAhead(e, w.gx, w.gy);
           } else {
             moveEnemy(e, dx / dist * sp, dy / dist * sp);
           }
@@ -3664,7 +4341,7 @@ function stepEnemies(dt) {
             e.stateT = 0.16;          // stay in the muzzle-flash frame
           } else {
             e.state = 'chase';
-            // scaled HERE and not in mkEnemy: stepCeoPhase reassigns e.spec.cd
+            // scaled HERE and not in mkEnemy: stepBossPhase reassigns e.spec.cd
             // outright on every phase change, so a multiplier baked into the
             // spec would silently evaporate the moment the boss hit 62%
             e.atkCd = e.spec.cd * DIFFICULTY[difficulty].cd * (0.75 + Math.random() * 0.5);
@@ -3675,6 +4352,77 @@ function stepEnemies(dt) {
     }
   }
   if (gameState === 'playing') separateEnemies();
+}
+
+;
+'use strict';
+
+// The boss fights. A boss is an ordinary member of `enemies` — same FSM, same
+// line of sight, same death animation — with a `phases` table on its roster row
+// that re-tunes its own spec as its health falls. Everything here is generic
+// over that table, so a new boss is a row in roster.js, four sprites and a
+// character in a level, and nothing in this file changes.
+//
+// Split out of enemies.js when the roster grew past one boss: that file owns
+// the shared FSM and was at its line budget, and bosses are the growth area.
+
+// The live boss's roster row, or null. hud.js and audio.js both ask, and both
+// would otherwise reach through `boss.type` into a table they do not own.
+function bossRow() { return boss ? ENEMY_TYPES[boss.type] : null; }
+
+// Minions a boss calls in are real enemies, so they count toward the floor's
+// kill ratio — the denominator grows with them and 100% stays achievable. If
+// they were excluded the ratio could exceed 100% the moment you killed one.
+function summonMinions(e, type, n) {
+  const spots = [];
+  for (let r = 2; r <= 4 && spots.length < n; r++) {
+    for (let k = 0; k < 12 && spots.length < n; k++) {
+      const th = (k / 12) * Math.PI * 2;
+      const x = e.x + Math.cos(th) * r, y = e.y + Math.sin(th) * r;
+      if (blockAt(x, y)) continue;
+      if (spots.some(p => Math.hypot(p[0] - x, p[1] - y) < 1.2)) continue;
+      spots.push([x, y]);
+    }
+  }
+  for (const [x, y] of spots) {
+    const d = mkEnemy(type, x, y);
+    d.state = 'chase';
+    enemies.push(d);
+    totalEnemies++;
+  }
+  if (spots.length) { sfx('ping'); syncHud(); }
+}
+
+/**
+ * Advance a boss to whichever phase its health has earned, and re-tune it.
+ *
+ * The spec fields are written one by one rather than spread, so a phase row
+ * only moves what it names and a typo cannot invent a field the FSM never
+ * reads. They are written onto `e.spec` IN PLACE, which is safe only because
+ * mkEnemy copies the roster's spec per body — see the note there.
+ */
+function stepBossPhase(e) {
+  const row = ENEMY_TYPES[e.type];
+  const frac = e.hp / e.maxHp;
+  let want = 0;
+  for (let i = 0; i < row.phases.length; i++) if (frac <= row.phases[i].at) want = i;
+  if (want === e.phase) return;
+  e.phase = want;
+  const ph = row.phases[want];
+  if (ph.speed !== undefined) e.spec.speed = ph.speed;
+  if (ph.cd    !== undefined) e.spec.cd    = ph.cd;
+  if (ph.dmg   !== undefined) e.spec.dmg   = ph.dmg;
+  if (ph.range !== undefined) e.spec.range = ph.range;
+  if (ph.sight !== undefined) e.spec.sight = ph.sight;
+  e.want  = ph.want;
+  e.burst = ph.burst;
+  e.atkCd = Math.min(e.atkCd, 0.5);
+  if (want > 0) {
+    toast(row.tag + '  ·  ' + ph.name);
+    sfx('bark');
+    alertNear(e.x, e.y, 12);
+    if (ph.summon) summonMinions(e, ph.summon.type, ph.summon.n);
+  }
 }
 
 ;
@@ -3874,9 +4622,10 @@ function fire() {
     best.stateT = 0;
     player.kills++;
     player.runKills++;
-    player.score += KILL_SCORE[best.type] || 150;
+    player.score += ENEMY_TYPES[best.type].score;
     dropLoot(best);
     spillBlood(best);
+    if (ENEMY_TYPES[best.type].blast) deathBlast(best);
     sfx('kill');
     checkWeaponUnlock();      // before syncHud, so the strip paints the new gun
     syncHud();
@@ -4056,7 +4805,7 @@ function enemySprite(e) {
     return seq[Math.min(seq.length - 1, (e.stateT / DEATH_TIME * seq.length) | 0)];
   }
   if (e.state === 'attack') return SPR[e.type + 'Fire'];
-  if (e.type !== 'guard') return SPR[e.type];
+  if (!ENEMY_TYPES[e.type].rotates) return SPR[e.type];
   const view = Math.atan2(e.y - player.y, e.x - player.x);
   let rel = view - e.heading;
   rel -= Math.PI * 2 * Math.floor((rel + Math.PI) / (Math.PI * 2));   // -> [-π, π)
@@ -4101,7 +4850,7 @@ function drawSprites(zbuf, horizon) {
   for (const s of spriteList()) {
     if (s.kind === 'e') {
       const e = s.ref;
-      const bob = e.alive && e.type === 'drone' ? Math.sin(e.bob) * 0.12 : 0;
+      const bob = e.alive && ENEMY_TYPES[e.type].bobs ? Math.sin(e.bob) * 0.12 : 0;
       drawSprite(enemySprite(e), e.x, e.y, zbuf, horizon, bob);
     } else if (s.kind === 'p') {
       drawSprite(s.ref.spr, s.ref.x, s.ref.y, zbuf, horizon, 0);
@@ -4690,7 +5439,7 @@ function objectiveText() {
   const needs = lock => doorList.some(d => d.lock === lock);
   if (needs('red')  && !player.keyRed)  return 'FIND THE RED KEYCARD';
   if (needs('blue') && !player.keyBlue) return 'FIND THE BLUE KEYCARD';
-  if (boss && boss.alive)               return 'THE BOARD IS IN SESSION \u2014 KILL THE CEO';
+  if (boss && boss.alive)               return bossRow().objective;
   return 'RIDE THE ELEVATOR OUT';
 }
 
@@ -4704,16 +5453,19 @@ function paintObjective() {
   o.classList.toggle('show', show);
 }
 
-// The bar stays hidden until the CEO has actually noticed you, so walking in
-// does not spoil the reveal, and drops away the moment it dies.
+// The bar stays hidden until the boss has actually noticed you, so walking in
+// does not spoil the reveal, and drops away the moment it dies. Its name and
+// phase both come off the roster row, so a second boss needs nothing here.
 function paintBossBar() {
   const bar = el('bossBar');
   const live = boss && boss.alive && boss.state !== 'idle' && gameState === 'playing';
   bar.classList.toggle('show', !!live);
   if (!live) return;
+  const row = bossRow();
   const frac = Math.max(0, boss.hp / boss.maxHp);
   el('bossFill').style.width = (frac * 100).toFixed(1) + '%';
-  el('bossPhase').textContent = CEO_PHASES[boss.phase].name;
+  el('bossName').textContent  = row.title;
+  el('bossPhase').textContent = row.phases[boss.phase].name;
 }
 
 function showBanner(title, body, hint, fail) {
@@ -4769,7 +5521,7 @@ function updatePrompt() {
                    (hasKey(c.lock) ? '  [E] OPEN' : '  — LOCKED')
                  : '[E] OPEN';
   } else if (c.tag === 'exit') {
-    msg = (boss && boss.alive) ? 'ELEVATOR — HELD BY THE BOARD'
+    msg = (boss && boss.alive) ? bossRow().heldBy
         : levelIndex + 1 >= LEVELS.length ? 'ELEVATOR  [E] SURFACE'
         : 'ELEVATOR  [E] DESCEND';
   }

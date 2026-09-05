@@ -35,8 +35,9 @@ Live public build: `https://blackice.taila0726f.ts.net:8443/city/`
 ## WOLFENSTAIN 3D — Neon Reich
 
 `wolf3d.html` — an ASCII Wolfenstein 3D parody built on the same engine. You
-raid a megacorp arcology: salaryman guards, sec-drones, sliding shutters,
-keycards, and an elevator out.
+raid a megacorp arcology from the sublevel to the roof: five floors, five kinds
+of body and three bosses between you and the elevator, sliding shutters,
+keycards, and a helicopter someone is very keen to reach.
 
 | key             | action                            |
 |-----------------|-----------------------------------|
@@ -68,9 +69,13 @@ from `ascii_city.html`. The city itself is untouched.
   the ray landed) and lets rays slip through the opened slice of a door, so a
   half-open shutter really does show the room behind it. Red and blue keycards
   gate the route.
-- **Enemies** — an `idle → alert → chase → attack → hurt → dead` state machine
-  with line-of-sight checks that reuse `castRay`. Gunfire and barks wake nearby
-  guards.
+- **Enemies, as a table** — one `idle → alert → chase → attack → hurt → dead`
+  state machine with line-of-sight checks that reuse `castRay`, and a row per
+  type in `wolf3d/roster.js` for everything that differs: health, speed, reach,
+  standoff, burst length, body radius, whether it patrols, whether it bleeds.
+  Gunfire and barks wake nearby guards. A new enemy is a row, four sprites and
+  a character in a map — there is no per-type code path, and a wall turret is
+  just a row whose speed is zero.
 - **Multi-cell sprites** — the city drew one char per NPC; this scales ASCII art
   into a projected screen rect with per-column z-testing.
 - **Four weapons, earned** — knife, pistol, SMG and chaingun, each an ASCII
@@ -89,10 +94,11 @@ from `ascii_city.html`. The city itself is untouched.
 
 ### The floors
 
-Three hand-authored 40x40 maps, each an array of strings in its own
+Five hand-authored 40x40 maps, each an array of strings in its own
 `LEVEL_*`. Legend:
 `#` panel, `|` window, `N` neon sign, `D` door, `R`/`B` locked doors, `X` exit,
-`g` guard, `d` drone, `+` ramen, `a` battery cell, `r`/`b` keycards,
+`g` guard, `d` drone, `t` turret, `k` spark charge, `h` enforcer,
+`C`/`I`/`F` the three bosses, `+` ramen, `a` battery cell, `r`/`b` keycards,
 `$` crypto wallet, `@` spawn.
 
 | | floor | route |
@@ -100,6 +106,8 @@ Three hand-authored 40x40 maps, each an array of strings in its own
 | 1 | ATRIUM · SUBLEVEL | plain door → red keycard (west office) → red door → blue keycard (neon office) → blue door → elevator |
 | 2 | R&D · SERVER FARM | both keycards in mirrored lab wings behind plain doors → red door → clean room → blue door |
 | 3 | EXECUTIVE SUITE | red keycard in a corner office off the aisle → red door → boardroom → kill the CEO → elevator |
+| 4 | BLACK ICE · DATA VAULT | red keycard off the spawn bay → red door → the vault → kill BLACK ICE for the blue card → blue door → elevator |
+| 5 | THE SPIRE · HELIPAD | red keycard west, blue east, both off the plant-room ring → the deck → kill THE FOUNDER → elevator |
 
 Every floor is built the same way: one 3-wide spine runs north from the spawn to
 the elevator, every room hangs off it as a bay of about 7x6, and the locked
@@ -109,21 +117,48 @@ floor so backtracking is never retracing. The first draft was four or five very
 large open halls per floor and was close to unnavigable; the layout language is
 written up in `reference/CLAUDE.md`.
 
-Floors run 15, 15 and 17 enemies and 50-55 pickups.
+Each boss floor breaks that rule once, on purpose, for one room. The boardroom,
+the vault and the helipad are the only large spaces in the game, and each is
+shaped against the fight it holds: the vault is full of pillars because BLACK
+ICE opens rooted with a reach nothing you carry can match, and the helipad is
+nearly bare because THE FOUNDER's reach *shrinks* as its speed climbs — a deck
+full of cover would be fighting its own boss.
+
+Floors run 15, 15, 17, 26 and 19 enemies.
 `node reference/validate-level.js` prints the current counts, and proves every
 floor's exit is reachable through its keycard gates.
 
 Secret walls look exactly like the panelling they hide in — press `E` facing a
 wall and it grinds back two tiles into an alcove. The status bar tracks how many
 you have found, and the end-of-floor tally scores kills, secrets and treasure
-against par time. Floor 3 ends with the CEO, who re-tunes himself through three
-phases and summons drones on the last one.
+against par time.
+
+### What is shooting at you
+
+Five ordinary bodies and three bosses, all of them rows in
+`wolf3d/roster.js` rather than code paths:
+
+| | what it makes you do |
+|---|---|
+| salaryman guard | the baseline — the only one with rotation sprites |
+| sec-drone | fast and fragile, hovers, bleeds nothing |
+| ceiling turret | bolted down and out-ranges you: take cover, don't strafe |
+| spark charge | closes to contact and detonates when killed — back up before you shoot it |
+| corporate enforcer | 140 hp, three-round bursts, and wide enough to plug a doorway |
+
+Each floor from 3 up ends with a boss, and each one is a different problem.
+The **CEO** closes and speeds up as it falls, summoning drones. **BLACK ICE**
+does the opposite: it opens rooted with a reach nothing you carry can match, so
+the vault's pillars are the fight, then it seeds the room with turrets, then it
+finally comes for you. **THE FOUNDER** pulls you in — every phase raises its
+speed and shortens its reach until the last one is a knife fight, and it goes up
+when it dies.
 
 ## Tech
 
 - Vanilla JS, no build step required to run or test
 - `ascii_city.html` is one self-contained file, ~34 KB
-- `wolf3d.html` is a 19-file source tree that bundles into one ~178 KB file
+- `wolf3d.html` is a 24-file source tree that bundles into one ~232 KB file
 - Google Fonts: VT323 + IBM Plex Mono
 - Palette: sodium orange / CRT green / neon pink+cyan / slate / warm wood
 - CSP-safe: no external scripts, images, or audio files
@@ -154,7 +189,7 @@ Nothing here needs a browser, and nothing needs `npm install` — there are no
 dependencies.
 
 ```sh
-node reference/run-tests.js                               # 580 assertions against the real game loop
+node reference/run-tests.js                               # 731 assertions against the real game loop
 WOLF3D_HTML=dist/wolf3d.html node reference/run-tests.js  # ...and against the shipped bundle
 node reference/validate-level.js                          # map geometry + key-gated reachability
 node reference/check-structure.js                         # src tags resolve, no ESM, dist current
@@ -168,7 +203,9 @@ dropping its marker.
 
 All of them exit non-zero on failure. GitHub Actions runs the first four on
 every push and pull request, against both the split tree and the bundle; the
-mutation battery runs weekly and on demand, because it is a quarter-hour job.
+mutation battery runs weekly and on demand, because it is a ~25-minute job
+on ten cores (181 mutants, and `--bail` means most stop at the assertion that
+catches them). It prints what it cost and which mutants were slowest.
 
 There is an opt-in pre-commit hook that runs the same checks locally:
 

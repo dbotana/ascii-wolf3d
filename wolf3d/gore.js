@@ -55,6 +55,100 @@ const DEATH_SEQ = {
       base: 'steelD', accent: 'x', accentColor: 'muzzle',
     },
   ],
+  // A turret does not fall — it is bolted on. It bursts and hangs there.
+  turret: [
+    SPR.turretDie,
+    {
+      rows: [
+        '▄▄▄▄▄▄▄',
+        '▀▀▀x▀▀▀',
+      ],
+      wW: 1.4, wH: 0.45, foot: 0.0,
+      base: 'steelD', accent: 'x', accentColor: 'muzzle',
+    },
+  ],
+  // The only sequence that expands before it collapses: the detonation frame
+  // is the one the blast on its roster row is dealt under.
+  spark: [
+    SPR.sparkDie,
+    {
+      rows: [
+        '◄ ◙ ►',
+        ' ▄▄▄ ',
+        '▀▀▀▀▀',
+      ],
+      wW: 1.30, wH: 0.60, foot: 0.0,
+      base: 'muzzle', accent: '◙', accentColor: 'sparkCore',
+    },
+  ],
+  // Three frames, like the CEO: a body this size has to land in stages or it
+  // reads as a sprite being swapped rather than a thing going down.
+  enforcer: [
+    SPR.enforcerDie,
+    {
+      rows: [
+        ' ▄▄▄▄▄ ',
+        '▄█████▄',
+        '██▀x▀██',
+        '▀▀▀▀▀▀▀',
+      ],
+      wW: 2.1, wH: 0.80, foot: 0.0,
+      base: 'enforcer', accent: 'x', accentColor: 'blood',
+    },
+    {
+      rows: [
+        '▄▄▄▄▄▄▄',
+        '███▛███',
+        '▀▀▀▀▀▀▀',
+      ],
+      wW: 2.2, wH: 0.55, foot: 0.0,
+      base: 'enforcer', accent: '', accentColor: 'blood',
+    },
+  ],
+  // It does not fall over, it shatters — so the frames spread outward and go
+  // dark rather than folding down onto a corpse.
+  blackice: [
+    SPR.blackiceDie,
+    {
+      rows: [
+        '╲▄       ▄╱',
+        '▀▀▀▄▄x▄▄▀▀▀',
+        '   ▀▀▀▀▀   ',
+      ],
+      wW: 3.1, wH: 0.90, foot: 0.0,
+      base: 'ice', accent: 'x', accentColor: 'iceCore',
+    },
+    {
+      rows: [
+        '▄▄       ▄▄',
+        '▀▀▀▄▄▄▄▄▀▀▀',
+      ],
+      wW: 3.2, wH: 0.55, foot: 0.0,
+      base: 'steelD', accent: '', accentColor: 'steelD',
+    },
+  ],
+  founder: [
+    SPR.founderDie,
+    {
+      rows: [
+        ' ▄▄▄▄▄▄▄▄▄ ',
+        '▄█████████▄',
+        '███▀▀x▀▀███',
+        '▀▀▀▀▀▀▀▀▀▀▀',
+      ],
+      wW: 2.9, wH: 0.95, foot: 0.0,
+      base: 'founderCoat', accent: 'x', accentColor: 'blood',
+    },
+    {
+      rows: [
+        '▄▄▄▄▄▄▄▄▄▄▄',
+        '█████▛█████',
+        '▀▀▀▀▀▀▀▀▀▀▀',
+      ],
+      wW: 3.0, wH: 0.60, foot: 0.0,
+      base: 'founderCoat', accent: '', accentColor: 'blood',
+    },
+  ],
   ceo: [
     SPR.ceoDie,
     {

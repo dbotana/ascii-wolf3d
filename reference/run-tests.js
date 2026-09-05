@@ -41,7 +41,9 @@ function group(name) { console.log(`\n${name}`); }
 
 const g = load({ htmlPath: process.env.WOLF3D_HTML });
 const P = g.P;
-const run = (n, held) => g.run(n, held);
+// Third argument is the harness's per-frame hook. It used to be dropped here,
+// silently, so a test that passed one got no hook and no error.
+const run = (n, held, perFrame) => g.run(n, held, perFrame);
 
 /** Put the player `dist` in front of `e`, on a tile that exists and has LOS. */
 function place(e, dist) {
@@ -258,10 +260,13 @@ run(625);                                            // 10s of everyone convergi
      `a group chase keeps bodies apart (closest pair ${closest.toFixed(3)}u; was 0.009u pre-Phase-2)`);
 }
 
-// forced full overlap — this is the state summoned drones can spawn into
+// forced full overlap — this is the state summoned drones can spawn into.
+// Mobile bodies only: a rooted one is a fixture and deliberately does not give
+// ground, so including one would be measuring the wrong promise.
 P.startLevel();
 {
-  const stack = P.enemies().filter(e => e.alive).slice(0, 4);
+  const stack = P.enemies().filter(e => e.alive && e.spec.speed > 0).slice(0, 4);
+  ok(stack.length === 4, `test setup: four bodies that can actually give ground`);
   for (const e of stack) { e.x = 20.5; e.y = 36.5; e.state = 'chase'; }
   run(120);
   let closest = Infinity;
@@ -281,13 +286,17 @@ P.startLevel();
 P.startLevel();
 freezeEnemies();
 {
-  const pair = P.enemies().filter(e => e.alive && e.type !== 'ceo').slice(0, 2);
+  // two guards, named rather than "the first two alive": the assertion is
+  // about the sum of their radii, so which bodies they are is the measurement
+  const pair = P.enemies().filter(e => e.alive && e.type === 'guard').slice(0, 2);
+  ok(pair.length === 2, 'test setup: two guards to stack');
   for (const e of pair) { e.x = 20.5; e.y = 36.5; }
   P.separate();
+  const want = P.bodyRadius(pair[0]) + P.bodyRadius(pair[1]);
   const gap = Math.hypot(pair[0].x - pair[1].x, pair[0].y - pair[1].y);
-  ok(Math.abs(gap - 0.70) < 1e-9,
+  ok(Math.abs(gap - want) < 1e-9,
      `one pass takes a coincident pair to the full sum of their radii ` +
-     `(${gap.toFixed(3)}u, not the 0.10u a fake d = 1 gives)`);
+     `(${gap.toFixed(3)}u against ${want.toFixed(2)}, not the 0.10u a fake d = 1 gives)`);
 }
 
 // patrols: the floor should be in motion before the first shot, but on a leash
@@ -366,10 +375,17 @@ freezeEnemies();
   // The guard under test is the OUTER loop's `a`, so the crowd has to sit at
   // HIGHER indices than the corpse — that is the pairing the missing
   // `if (!a.alive) continue` would shove.
-  const corpse = es.find(e => e.alive && e.type !== 'ceo');
+  // Mobile bodies only. A rooted one (speed 0) is held still by
+  // separateEnemies' own fixture branch, so a corpse that was a turret would
+  // sit where it fell whether the corpse guard existed or not — the assertion
+  // would pass while testing nothing.
+  const mobile = e => e.alive && e.spec.speed > 0;
+  const corpse = es.find(mobile);
   const at = es.indexOf(corpse);
-  const crowd = es.filter((e, j) => j > at && e.alive && e.type !== 'ceo').slice(0, 3);
+  const crowd = es.filter((e, j) => j > at && mobile(e)).slice(0, 3);
   ok(crowd.length === 3, `test setup: three live bodies follow the corpse in the roster`);
+  ok(corpse.spec.speed > 0,
+     `test setup: the corpse is a ${corpse.type}, a body that could have drifted`);
 
   corpse.x = 20.5; corpse.y = 36.5;
   corpse.hp = 0; corpse.alive = false; corpse.state = 'dead';
@@ -477,7 +493,7 @@ P.startLevel();
   const pose = { x: 0, y: 0, alive: true, state: 'idle', heading: 0, stateT: 0 };
   const off = [];
   let poses = 0;
-  for (const type of ['guard', 'drone', 'ceo']) {
+  for (const type of Object.keys(P.roster())) {
     pose.type = type;
     for (let k = 0; k < 24; k++) {
       pose.x = P.player.x + Math.cos(k / 24 * Math.PI * 2) * 3;
@@ -892,8 +908,9 @@ ok(P.objectiveText() === 'RIDE THE ELEVATOR OUT',
 // a live boss outranks the elevator, which is the gate use() actually enforces
 P.startLevel(P.levels().length - 1);
 P.player.keyRed = true; P.player.keyBlue = true;
-ok(P.boss() && P.boss().alive, 'test setup: the last floor has a live CEO');
-ok(/CEO/.test(P.objectiveText()), `it says so (${P.objectiveText()})`);
+ok(P.boss() && P.boss().alive, 'test setup: the last floor has a live boss');
+ok(P.objectiveText() === P.bossRow().objective,
+   `it names that boss off its own roster row (${P.objectiveText()})`);
 P.boss().alive = false;
 ok(P.objectiveText() === 'RIDE THE ELEVATOR OUT', 'and stands down once it is dead');
 P.startLevel(0);
@@ -1075,17 +1092,24 @@ ok(P.totalTreasure() === beforeTotal,
 
 // ── multi-floor ──────────────────────────────────────────────────────────────
 group('floors');
-ok(P.levels().length >= 3, `the campaign has ${P.levels().length} floors`);
+ok(P.levels().length >= 5, `the campaign has ${P.levels().length} floors`);
 P.startLevel(0);
 ok(P.levelIndex() === 0, 'startLevel(0) selects the first floor');
 const sig = () => P.grid().map(r => r.map(c => (c ? '#' : '.')).join('')).join('\n');
-const sig0 = sig();
-P.startLevel(1);
-ok(P.levelIndex() === 1 && sig() !== sig0, 'startLevel(1) loads different geometry');
-const sig1 = sig();
-P.startLevel(2);
-ok(P.levelIndex() === 2 && sig() !== sig0 && sig() !== sig1,
-   'startLevel(2) loads different geometry again');
+{
+  // Every floor, not the first three: a copy-pasted LEVEL_5 would still index,
+  // still validate and still play, and would only ever be caught here.
+  const sigs = [];
+  for (let i = 0; i < P.levels().length; i++) {
+    P.startLevel(i);
+    ok(P.levelIndex() === i, `startLevel(${i}) selects floor ${i + 1}`);
+    sigs.push(sig());
+  }
+  ok(new Set(sigs).size === sigs.length,
+     `and all ${sigs.length} floors are different geometry (${new Set(sigs).size} distinct)`);
+  ok(P.levels().length === P.music().length - 3,
+     `the floor count and the track table stay in step (${P.levels().length} floors, ${P.music().length} tracks)`);
+}
 ok(P.enemies().length === P.totalEnemies(), 'each floor re-derives its enemy total');
 
 // descending carries the run with you; the floor's own counters reset
@@ -1159,99 +1183,162 @@ P.use(); P.use();
 ok(P.state() === 'won', `finishing the last floor wins the game (state=${P.state()})`);
 ok(g.el('bTitle').textContent === 'OUT', `the win banner reads OUT (got "${g.el('bTitle').textContent}")`);
 
-// ── the CEO ──────────────────────────────────────────────────────────────────
-group('the CEO');
-P.startLevel(P.levels().length - 1);
-const ceo = P.boss();
-ok(ceo && ceo.type === 'ceo', 'the last floor places a boss');
-ok(P.enemies().includes(ceo), 'the boss is an ordinary member of the enemy list');
-ok(ceo.maxHp > 400, `the boss has boss-grade health (${ceo.maxHp})`);
-ok(ceo.spec.range > 10, `the boss out-ranges a guard (${ceo.spec.range})`);
-
-// the elevator is held while the board sits
-const ex3 = exitTile();
-P.player.x = ex3[0] + 0.5; P.player.y = ex3[1] + 1.5; P.player.a = -Math.PI / 2;
-P.use(); run(2);
-ok(P.state() === 'playing', 'the exit refuses to work while the CEO is alive');
-
-// fight it down, topping the player up: we are testing the boss, not survival
-P.player.x = ceo.x; P.player.y = ceo.y + 2.5; P.player.a = -Math.PI / 2;
-const phasesSeen = new Set([ceo.phase]);
-const totalAtStart = P.totalEnemies();
-let bossFrames = 0;
-while (ceo.alive && bossFrames < 1600) {
-  P.fire(); run(18);            // one shot per 0.28s cooldown, not eight wasted calls
-  P.player.hp = 100; P.player.ammo = 200; P.player.clip = 8; P.player.reloadT = 0;
-  phasesSeen.add(ceo.phase);
-  bossFrames += 18;
+// ── the bosses ───────────────────────────────────────────────────────────────
+//
+// Every floor that places one, not just the last. With three bosses "the last
+// floor" stopped meaning the CEO, and a group pinned to one of them would have
+// left the other two entirely unasserted while still reading as covered.
+group('the bosses');
+const bossFloors = [];
+for (let i = 0; i < P.levels().length; i++) {
+  P.startLevel(i);
+  if (P.boss()) bossFloors.push([i, P.boss().type]);
 }
-ok(!ceo.alive, `the boss can be killed (${bossFrames} frames)`);
-ok(phasesSeen.size === P.ceoPhases().length,
-   `the fight passes through all ${P.ceoPhases().length} phases (saw ${[...phasesSeen].join(',')})`);
-ok(P.totalEnemies() > totalAtStart,
-   `summoned drones join the kill denominator (${totalAtStart} -> ${P.totalEnemies()})`);
-ok(P.player.score >= 5000, `the boss is worth a boss's score (${P.player.score})`);
+ok(bossFloors.length >= 3,
+   `the roster's bosses are actually placed on floors (${bossFloors.map(b => 'floor ' + (b[0] + 1) + ':' + b[1]).join(', ')})`);
+ok(new Set(bossFloors.map(b => b[1])).size === bossFloors.length,
+   'and no two floors place the same one');
 
-P.player.x = ex3[0] + 0.5; P.player.y = ex3[1] + 1.5; P.player.a = -Math.PI / 2;
-P.use(); run(2);
-ok(P.state() === 'cleared', 'the exit releases once the CEO is down');
+for (const [floor, type] of bossFloors) {
+  const N = type.toUpperCase();
+  P.startLevel(floor);
+  const b = P.boss();
+  const row = P.roster()[type];
+  const PH = row.phases;
+  ok(P.enemies().includes(b), `${N}: the boss is an ordinary member of the enemy list`);
+  ok(b.maxHp > 400, `${N}: boss-grade health (${b.maxHp})`);
+  ok(b.spec.range > 10, `${N}: it out-ranges a guard (${b.spec.range})`);
+  ok(b.want === PH[0].want && b.burst === PH[0].burst,
+     `${N}: it opens on phase 0's standoff and burst (${b.want}u, ${b.burst})`);
 
-// The boss's standoff and its burst fire both had no assertion behind them
-// until a mutation run proved it: deleting either left the suite fully green.
+  // the elevator is held while it lives
+  const ex = exitTile();
+  const atExit = () => { P.player.x = ex[0] + 0.5; P.player.y = ex[1] + 1.5; P.player.a = -Math.PI / 2; };
+  atExit(); P.use(); run(2);
+  ok(P.state() === 'playing', `${N}: the exit refuses while it is alive`);
 
-// ── standoff: a phase-1 CEO holds 5.2u, well outside the 2.2u a drone keeps
-P.startLevel(P.levels().length - 1);
-const ceo2 = P.boss();
-// The far end of the CEO's own row with a clear sightline — derived rather
-// than the literal 8.5 this used to carry, which was inside the boardroom on
-// the map it was written against and inside a wall on the next one.
-{
-  const gy = ceo2.y | 0, row = P.grid()[gy];
-  let far = null, farD = -1;
-  for (let x = 1; x < row.length - 1; x++) {
-    const cx = x + 0.5;
-    if (P.blockAt(cx, ceo2.y)) continue;
-    if (!P.hasLOS(cx, ceo2.y, ceo2.x, ceo2.y)) continue;
-    const d = Math.abs(ceo2.x - cx);
-    if (d > farD) { farD = d; far = cx; }
+  // ── THE BAR AND THE PROMPT. Both used to be one hardcoded string — the
+  //    boss name lived in wolf3d.html and the elevator line in updatePrompt —
+  //    so both were correct for the CEO and wrong for everyone else.
+  b.state = 'idle'; P.syncHud();
+  ok(!g.el('bossBar').classList.contains('show'),
+     `${N}: the bar stays hidden until it notices you`);
+  b.state = 'chase'; P.syncHud();
+  ok(g.el('bossBar').classList.contains('show'), `${N}: and shows once it does`);
+  ok(g.el('bossName').textContent === row.title,
+     `${N}: the bar names this boss, not the last one (${g.el('bossName').textContent})`);
+  ok(g.el('bossPhase').textContent === PH[b.phase].name,
+     `${N}: and its current phase (${g.el('bossPhase').textContent})`);
+  atExit(); P.updatePrompt();
+  ok(g.el('prompt').textContent === row.heldBy,
+     `${N}: the elevator says who is holding it (${g.el('prompt').textContent})`);
+
+  // fight it down, topping the player up: we are testing the boss, not survival
+  P.player.x = b.x; P.player.y = b.y + 2.5; P.player.a = -Math.PI / 2;
+  const phasesSeen = new Set([b.phase]);
+  const totalAtStart = P.totalEnemies();
+  const before = new Set(P.enemies());
+  const wantSummons = new Set(PH.filter(ph => ph.summon).map(ph => ph.summon.type));
+  let frames = 0;
+  // Sampled every frame through the perFrame hook, not once per shot: a phase
+  // is a health threshold, so a big hit can cross two of them between shots and
+  // a per-shot sample would report a phase the fight never showed.
+  const watch = () => phasesSeen.add(b.phase);
+  while (b.alive && frames < 3600) {
+    P.fire(); run(18, null, watch);   // one shot per pistol cooldown
+    P.player.hp = 100; P.player.ammo = 200; P.player.clip = 8; P.player.reloadT = 0;
+    frames += 18;
   }
-  ok(far !== null, 'test setup: found a sightline down the CEO\u2019s row');
-  P.player.x = far; P.player.y = ceo2.y;
-  P.player.a = far < ceo2.x ? 0 : Math.PI;
-}
-ok(P.hasLOS(P.player.x, P.player.y, ceo2.x, ceo2.y), 'test setup: the CEO is in view down the arena');
-ok(Math.hypot(ceo2.x - P.player.x, ceo2.y - P.player.y) > ceo2.want,
-   'test setup: it starts further out than its standoff, so it has to close');
-let minDist = Infinity;
-for (let i = 0; i < 300; i++) {
-  g.step(50);                                     // distance, not frame timing: coarse steps are fine
-  P.player.hp = 100;                              // we are measuring range, not survival
-  if (ceo2.state !== 'idle') minDist = Math.min(minDist, Math.hypot(ceo2.x - P.player.x, ceo2.y - P.player.y));
-}
-ok(ceo2.phase === 0, `the CEO stayed in its opening phase (${ceo2.phase})`);
-ok(minDist < 9, `test setup: it actually advanced (closed to ${minDist.toFixed(2)}u)`);
-ok(minDist > 4, `the CEO keeps its own ${ceo2.want}u standoff rather than a drone's 2.2u ` +
-   `(closest ${minDist.toFixed(2)}u)`);
-
-// ── bursts: a later phase fires several rounds on one trigger pull, which shows
-// up as a longer stay in the attack state — 0.22s, then 0.16s per extra shot.
-// There is no randomness in that spacing, so the frame count is deterministic.
-P.startLevel(P.levels().length - 1);
-const ceo3 = P.boss();
-P.player.x = ceo3.x; P.player.y = ceo3.y + 2.0; P.player.a = -Math.PI / 2;
-ceo3.hp = Math.floor(ceo3.maxHp * 0.2);           // drop it straight into the last phase
-let held = 0, longestAttack = 0;
-for (let i = 0; i < 400; i++) {   // ~3 attack cycles at a 0.62s cooldown
-  run(1);
+  ok(!b.alive, `${N}: it can be killed (${frames} frames)`);
+  ok(phasesSeen.size === PH.length,
+     `${N}: the fight passes through all ${PH.length} phases (saw ${[...phasesSeen].join(',')})`);
+  ok(P.totalEnemies() > totalAtStart,
+     `${N}: what it summons joins the kill denominator (${totalAtStart} -> ${P.totalEnemies()})`);
+  // ...and it summons what its OWN phase row names. Every boss summons a
+  // different type, so a stepper that ignored ph.summon.type and always called
+  // in drones would still grow the denominator and still read as covered.
+  const arrived = new Set([...P.enemies()].filter(e => !before.has(e)).map(e => e.type));
+  ok(arrived.size > 0 && [...arrived].every(t => wantSummons.has(t)),
+     `${N}: it calls in ${[...wantSummons].join('/')} — what its phase rows name ` +
+     `(saw ${[...arrived].join(', ') || 'nothing'})`);
+  ok(P.player.score >= row.score,
+     `${N}: it pays its row's score (${P.player.score} against ${row.score})`);
   P.player.hp = 100;
-  if (ceo3.state === 'attack') { held++; longestAttack = Math.max(longestAttack, held); }
-  else held = 0;
-}
-ok(ceo3.phase === P.ceoPhases().length - 1, `the CEO reached its last phase (${ceo3.phase})`);
-ok(ceo3.burst > 1, `the last phase is a burst weapon (${ceo3.burst} rounds)`);
-ok(longestAttack > 25,
-   `a burst holds the attack state for ${longestAttack} frames — a single shot is ~14`);
+  atExit(); P.use(); run(2);
+  ok(P.state() === 'cleared', `${N}: the exit releases once it is down`);
 
+  // ── THE STANDOFF. A boss holds the distance its phase names, and for a boss
+  //    whose opening phase is rooted that distance is "wherever it started".
+  //    Both arms are the same field — `want` beside `speed` — which is the
+  //    point: the FSM has one behaviour and the table decides which it is.
+  P.startLevel(floor);
+  const b2 = P.boss();
+  {
+    const gy = b2.y | 0, gw = P.grid()[gy].length;
+    let far = null, farD = -1;
+    for (let x = 1; x < gw - 1; x++) {
+      const cx = x + 0.5;
+      if (P.blockAt(cx, b2.y)) continue;
+      if (!P.hasLOS(cx, b2.y, b2.x, b2.y)) continue;
+      const d = Math.abs(b2.x - cx);
+      if (d > farD) { farD = d; far = cx; }
+    }
+    ok(far !== null, `${N}: test setup: found a sightline down its row`);
+    P.player.x = far; P.player.y = b2.y;
+    P.player.a = far < b2.x ? 0 : Math.PI;
+  }
+  const startD = Math.hypot(b2.x - P.player.x, b2.y - P.player.y);
+  const home = { x: b2.x, y: b2.y };
+  ok(startD > b2.want, `${N}: test setup: it starts outside its standoff (${startD.toFixed(1)}u)`);
+  // Run until it has settled, not for a fixed count: a mobile boss is done the
+  // moment it has closed to its standoff, and a rooted one only needs long
+  // enough to prove it has not drifted. The cap is the failure bound.
+  const settle = PH[0].speed === 0 ? 140 : 300;
+  let minDist = Infinity;
+  for (let i = 0; i < settle; i++) {
+    g.step(50);                     // distance, not frame timing: coarse steps are fine
+    P.player.hp = 100;              // we are measuring range, not survival
+    if (b2.state === 'idle') continue;
+    minDist = Math.min(minDist, Math.hypot(b2.x - P.player.x, b2.y - P.player.y));
+    if (PH[0].speed > 0 && minDist <= b2.want + 0.3) break;   // it has arrived
+  }
+  ok(b2.phase === 0, `${N}: it stayed in its opening phase (${b2.phase})`);
+  ok(b2.state !== 'idle', `${N}: test setup: it noticed the player`);
+  if (PH[0].speed === 0) {
+    const drift = Math.hypot(b2.x - home.x, b2.y - home.y);
+    ok(drift < 1e-6,
+       `${N}: a rooted opening phase never leaves its mark, so the arena is the fight ` +
+       `(drifted ${drift.toFixed(6)}u)`);
+  } else {
+    ok(minDist < startD - 1, `${N}: test setup: it actually advanced (closed to ${minDist.toFixed(2)}u)`);
+    ok(minDist > b2.want - 1.5,
+       `${N}: it keeps its own ${b2.want}u standoff rather than a drone's 2.2u ` +
+       `(closest ${minDist.toFixed(2)}u)`);
+  }
+
+  // ── BURSTS. A later phase fires several rounds on one trigger pull, which
+  //    shows up as a longer stay in the attack state — 0.22s, then 0.16s per
+  //    extra shot. There is no randomness in that spacing, so the frame count
+  //    is deterministic.
+  P.startLevel(floor);
+  const b3 = P.boss();
+  P.player.x = b3.x; P.player.y = b3.y + 2.0; P.player.a = -Math.PI / 2;
+  b3.hp = Math.floor(b3.maxHp * (PH[PH.length - 1].at - 0.05));
+  // 250 frames is ~2.5 attack cycles: a burst holds ~52 frames (0.22s, then
+  // 0.16s per extra shot) and the cooldown between them is ~40. One complete
+  // burst is all the assertion needs; the rest was margin nobody was spending.
+  let held = 0, longestAttack = 0;
+  for (let i = 0; i < 250; i++) {
+    run(1);
+    P.player.hp = 100;
+    if (b3.state === 'attack') { held++; longestAttack = Math.max(longestAttack, held); }
+    else held = 0;
+  }
+  ok(b3.phase === PH.length - 1, `${N}: it reached its last phase (${b3.phase})`);
+  ok(b3.burst > 1, `${N}: the last phase is a burst weapon (${b3.burst} rounds)`);
+  ok(longestAttack > 25,
+     `${N}: a burst holds the attack state for ${longestAttack} frames — a single shot is ~14`);
+}
 P.startLevel(0);
 
 // ── damage direction ─────────────────────────────────────────────────────────
@@ -1393,11 +1480,23 @@ P.startLevel();
   ok(M.every(t => /^[xs.]+$/.test(t.drum)),
      'and every drum pattern is made of x / s / . only');
 
-  // ── one march per floor, and the boardroom takes the CEO. The floor lookup
-  //    has to survive more floors than tracks, so it is a modulo over the
-  //    non-boss rows rather than an index that can fall off the end.
-  ok(M.length - 1 >= P.levels().length,
-     `there is a floor track for each of the ${P.levels().length} floors`);
+  // ── one march per floor, and one per boss. The boss track used to be
+  //    M[M.length - 1] — "last row by convention" — which was correct for
+  //    exactly as long as there was one boss. It is a lookup by NAME off the
+  //    roster row now, so this asserts the names resolve rather than that a
+  //    row sits in a particular place.
+  const bossFloorIdx = [];
+  const bossTracks = new Set();
+  for (let i = 0; i < P.levels().length; i++) {
+    P.startLevel(i);
+    if (!P.boss()) continue;
+    bossFloorIdx.push(i);
+    bossTracks.add(P.bossRow().track);
+  }
+  ok(bossTracks.size >= 3, `each boss names its own march (${[...bossTracks].join(' / ')})`);
+  ok(M.length >= P.levels().length + bossTracks.size,
+     `there is a track for each of the ${P.levels().length} floors and each of the ` +
+     `${bossTracks.size} bosses (${M.length} rows)`);
   const perFloor = [];
   for (let i = 0; i < P.levels().length; i++) {
     P.startLevel(i);
@@ -1405,21 +1504,25 @@ P.startLevel();
   }
   ok(new Set(perFloor).size === perFloor.length,
      `each floor gets its own march (${perFloor.map(t => t.name).join(' / ')})`);
-  ok(perFloor.every(t => t !== M[M.length - 1]),
-     'and none of them is the boardroom track');
+  ok(perFloor.every(t => !bossTracks.has(t.name)),
+     'and none of them is a boss march — the reveal is not spent on the lobby');
 
-  // the CEO's own floor, before and after it notices you
-  P.startLevel(P.levels().length - 1);
-  const ceo = P.boss();
-  ok(ceo && ceo.alive, 'test setup: the last floor has a live CEO');
-  ceo.state = 'idle';
-  ok(P.musicTrackFor() !== M[M.length - 1],
-     'a CEO that has not noticed you does not change the music — no spoiling the reveal');
-  ceo.state = 'chase';
-  ok(P.musicTrackFor() === M[M.length - 1],
-     `once it wakes, the boardroom march takes over (${P.musicTrackFor().name})`);
-  ceo.alive = false;
-  ok(P.musicTrackFor() !== M[M.length - 1], 'and drops away when it dies');
+  // every boss floor, before and after the boss notices you
+  for (const i of bossFloorIdx) {
+    P.startLevel(i);
+    const b = P.boss();
+    const N = b.type.toUpperCase();
+    const want = P.bossRow().track;
+    ok(M.some(t => t.name === want), `${N}: its row names a track that exists (${want})`);
+    b.state = 'idle';
+    ok(P.musicTrackFor().name !== want,
+       `${N}: it has not noticed you, so the music has not changed — no spoiling the reveal`);
+    b.state = 'chase';
+    ok(P.musicTrackFor().name === want,
+       `${N}: once it wakes, its own march takes over (${P.musicTrackFor().name})`);
+    b.alive = false;
+    ok(P.musicTrackFor().name !== want, `${N}: and it drops away when it dies`);
+  }
 
   // ── the scheduler is inert without an AudioContext, which is exactly the
   //    "everything degrades" constraint: a browser that refuses audio gets a
@@ -1443,12 +1546,25 @@ P.startLevel();
   //    crash in the renderer at 60fps rather than a fallback, which is the
   //    trade rule 1 asks for: new content is a row, and a missing row should
   //    fail loudly here instead of being papered over with a runtime guard.
-  const types = [...new Set(P.enemies().map(e => e.type))].concat('ceo');
+  const types = Object.keys(P.roster());
   ok(types.every(t => Array.isArray(SEQ[t]) && SEQ[t].length >= 2),
      `every enemy type has a death sequence of 2+ frames ` +
      `(${types.map(t => t + ':' + (SEQ[t] || []).length).join(' ')})`);
-  ok(['guard', 'drone', 'ceo'].every(t => SEQ[t][0] === SPRT[t + 'Die']),
+  ok(types.every(t => SEQ[t][0] === SPRT[t + 'Die']),
      'and frame 0 of each is the Die frame that shipped before sequences existed');
+
+  // ── the same ragged-row trap, over the sprite table itself. bodies.js is
+  //    spread into SPR from a second file now, so this also proves the spread
+  //    happened at all: a missing BODY_SPR would leave these keys undefined.
+  const raggedSpr = [];
+  for (const t of types)
+    for (const view of ['', 'Fire', 'Die', 'Dead']) {
+      const fr = SPRT[t + view];
+      if (!fr) { raggedSpr.push(t + view + ':missing'); continue; }
+      if (!fr.rows.every(r => r.length === fr.rows[0].length)) raggedSpr.push(t + view);
+    }
+  ok(raggedSpr.length === 0,
+     `every type has a rectangular idle/Fire/Die/Dead sprite (${raggedSpr.join(', ') || types.length + ' types'})`);
 
   // ── a ragged sprite reads art[ay][ax] off the end of a short row and blits
   //    `undefined`. Every table in the game is hand-typed ASCII, so this is a
@@ -1725,7 +1841,8 @@ ok(P.setDifficulty(99) === 3 && P.setDifficulty(-5) === 0, 'and clamps to the ta
 // ── enemy HP is deliberately NOT scaled: shots-to-kill has to mean the same
 //    thing at every setting, or the damage numbers stop being feedback.
 const hpAt = d => { P.setDifficulty(d); P.startLevel(); return firstGuard().spec.hp; };
-ok(hpAt(0) === hpAt(3), `a guard has the same health on both extremes (${hpAt(0)})`);
+const hpEasy = hpAt(0), hpHard = hpAt(3);      // each of these loads a floor: call once
+ok(hpEasy === hpHard, `a guard has the same health on both extremes (${hpEasy})`);
 
 // ── spawn counts. Deterministic, so the same setting twice gives the same
 //    floor — a random filter would make every restart a different level.
@@ -1848,14 +1965,26 @@ ok(P.difficulty() === 2, 'the default is restored before the fixtures run');
 group('spawn safety');
 {
   P.setDifficulty(2);
-  for (let floor = 0; floor < 3; floor++) {
+  for (let floor = 0; floor < P.levels().length; floor++) {
     P.startLevel(floor);
     const px = P.player.x, py = P.player.y;
     const seen = P.enemies().filter(e =>
       Math.hypot(e.x - px, e.y - py) < e.spec.sight && P.hasLOS(e.x, e.y, px, py));
     ok(seen.length === 0,
        `floor ${floor + 1} spawns no enemy with line of sight to the player ` +
-       `(${seen.length} would open fire)`);
+       `(${seen.map(e => e.type).join(', ') || seen.length} would open fire)`);
+    // ...and the exempt rows are exempt on purpose, not by accident: a boss
+    // and a wall-mounted turret are placed in their sightlines deliberately.
+    //
+    // Measured against the MAP, not against spawnX/spawnY — relocateSpawnLOS
+    // moves those with the body so the patrol leash follows it, which makes
+    // "it is still at its spawn" true of a body it just walked across a room.
+    const src = P.levels()[floor];
+    const exempt = P.enemies().filter(e => !P.roster()[e.type].relocate);
+    const off = exempt.filter(e => src[e.y | 0][e.x | 0] !== P.roster()[e.type].char);
+    ok(exempt.length > 0 && off.length === 0,
+       `floor ${floor + 1} leaves all ${exempt.length} of its un-relocatable bodies on the ` +
+       `tiles the map authored (${off.map(e => e.type).join(', ') || 'none moved'})`);
   }
 
   // Relocation removes the shipped spawn sightlines, so the grace gate itself
@@ -2850,43 +2979,61 @@ group('the tally pays only at 100%');
      `finishing far over par pays zero rather than subtracting (${Y.tally().timeBonus})`);
 }
 
-// ── the CEO re-tunes itself ──────────────────────────────────────────────────
+// ── a boss re-tunes itself ───────────────────────────────────────────────────
 //
-// stepCeoPhase mutates e.spec in place, and every field it writes had been
+// stepBossPhase mutates e.spec in place, and every field it writes had been
 // asserted only through its consequences — which meant three of them could be
-// dropped entirely without the suite noticing.
-group('the CEO re-tunes itself');
+// dropped entirely without the suite noticing. Driven over every boss, because
+// a phase row that names a field the stepper does not copy is exactly the bug
+// this catches, and each boss names a different set.
+group('a boss re-tunes itself');
 {
   const b = load({ htmlPath: process.env.WOLF3D_HTML });
   const B = b.P;
-  B.startLevel(B.levels().length - 1);
-  const ceo = B.boss();
-  ok(!!ceo && ceo.type === 'ceo', 'test setup: the last floor places a CEO');
-  const PH = B.ceoPhases();
-
-  ok(ceo.spec.speed === PH[0].speed && ceo.spec.dmg === PH[0].dmg && ceo.want === PH[0].want,
-     `it opens on ${PH[0].name}`);
-
-  for (let i = 1; i < PH.length; i++) {
-    ceo.hp = Math.floor(ceo.maxHp * PH[i].at) - 1;
-    b.run(1);
-    ok(ceo.phase === i,
-       `dropping under ${Math.round(PH[i].at * 100)}% enters ${PH[i].name}`);
-    ok(ceo.spec.speed === PH[i].speed, `taking its speed (${ceo.spec.speed})`);
-    ok(ceo.spec.dmg === PH[i].dmg,     `its damage (${ceo.spec.dmg})`);
-    ok(ceo.spec.cd === PH[i].cd,       `its cooldown (${ceo.spec.cd})`);
-    ok(ceo.want === PH[i].want,        `and closing to its standoff (${ceo.want})`);
+  const floors = [];
+  for (let i = 0; i < B.levels().length; i++) {
+    B.startLevel(i);
+    if (B.boss()) floors.push(i);
   }
+  ok(floors.length >= 3, `test setup: ${floors.length} floors place a boss`);
 
-  // It also claims more room than a guard does, or the drones it just summoned
-  // stand inside its jacket.
-  const drone = B.enemies().find(e => e.type === 'drone' && e.alive);
-  ok(!!drone, 'test setup: the last phase summoned drones to crowd it with');
-  drone.x = ceo.x; drone.y = ceo.y;
-  B.separate();                                  // one pass is the whole shove
-  const gap = Math.hypot(drone.x - ceo.x, drone.y - ceo.y);
-  ok(Math.abs(gap - 0.90) < 1e-9,
-     `the CEO holds more room than a pair of guards would (${gap.toFixed(2)}u, two guards claim 0.70)`);
+  for (const floor of floors) {
+    B.startLevel(floor);
+    const boss = B.boss();
+    const N = boss.type.toUpperCase();
+    const PH = B.roster()[boss.type].phases;
+
+    ok(boss.spec.speed === PH[0].speed && boss.spec.dmg === PH[0].dmg && boss.want === PH[0].want,
+       `${N}: it opens on ${PH[0].name}`);
+
+    for (let i = 1; i < PH.length; i++) {
+      boss.hp = Math.floor(boss.maxHp * PH[i].at) - 1;
+      b.run(1);
+      ok(boss.phase === i,
+         `${N}: dropping under ${Math.round(PH[i].at * 100)}% enters ${PH[i].name}`);
+      ok(boss.spec.speed === PH[i].speed, `${N}: taking its speed (${boss.spec.speed})`);
+      ok(boss.spec.dmg === PH[i].dmg,     `${N}: its damage (${boss.spec.dmg})`);
+      ok(boss.spec.cd === PH[i].cd,       `${N}: its cooldown (${boss.spec.cd})`);
+      ok(boss.want === PH[i].want,        `${N}: and closing to its standoff (${boss.want})`);
+      // `range` is the field the roster added for the two later bosses. Only
+      // assert it where a phase actually names one, so this stays a statement
+      // about the stepper rather than about any one fight.
+      if (PH[i].range !== undefined)
+        ok(boss.spec.range === PH[i].range, `${N}: and its reach (${boss.spec.range})`);
+    }
+
+    // It also claims more room than a guard does, or what it just summoned
+    // stands inside its jacket.
+    const minion = B.enemies().find(e => e.alive && e !== boss);
+    ok(!!minion, `${N}: test setup: something to crowd it with`);
+    minion.x = boss.x; minion.y = boss.y;
+    B.separate();                                  // one pass is the whole shove
+    const want = B.bodyRadius(boss) + B.bodyRadius(minion);
+    const gap = Math.hypot(minion.x - boss.x, minion.y - boss.y);
+    ok(Math.abs(gap - want) < 1e-9,
+       `${N}: it holds ${want.toFixed(2)}u of its own, more than the 0.70 two guards claim ` +
+       `(measured ${gap.toFixed(2)}u)`);
+  }
 }
 
 // ── touch controls (the seam) ────────────────────────────────────────────────
@@ -3513,6 +3660,266 @@ group('the decal palette (atlas fixture)');
   ok(cost < 40,
      `and they cost the bounded set of pairs an 8-step fog blend can make ` +
      `(${cost} entries over ${FRAMES} frames against an idle load's ${quiet})`);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// THE ROSTER
+//
+// Every per-type difference in the game is a column of ENEMY_TYPES now, so
+// these are the assertions that the columns are actually the thing being read
+// — not a coincidence between a table value and a constant left behind in the
+// code. Each one drives the real FSM and measures the result.
+group('the roster is the source of truth (fixture)');
+{
+  // One of each type in an open room, so the only thing separating their
+  // behaviour is their row. Two enforcers so the spec-copy check has a pair.
+  const f = loadWithLevel([
+    '########################',
+    '#@.....................#',
+    '#......................#',
+    '#....t.................#',
+    '#......................#',
+    '#..........k...........#',
+    '#......................#',
+    '#...............h.h....#',
+    '#......................#',
+    '#......................#',
+    '########################',
+  ], { htmlPath: process.env.WOLF3D_HTML });
+  const F = f.P;
+  const R = F.roster();
+  const of = t => F.enemies().filter(e => e.type === t);
+
+  ok(of('turret').length === 1 && of('spark').length === 1 && of('enforcer').length === 2,
+     `test setup: the map characters spawned the roster's types ` +
+     `(${F.enemies().map(e => e.type).join(', ')})`);
+
+  // ── THE SPEC COPY. This is the one way the table can break silently: a
+  //    boss phase writes speed/cd/damage straight onto e.spec, so a shared
+  //    spec object would re-tune every body of that type — permanently, since
+  //    the roster is a module-level literal that outlives the floor.
+  const [h1, h2] = of('enforcer');
+  ok(h1.spec !== h2.spec && h1.spec !== R.enforcer.spec,
+     'every body gets its OWN spec object, never the roster row’s');
+  h1.spec.dmg = 999;
+  ok(h2.spec.dmg === R.enforcer.spec.dmg && R.enforcer.spec.dmg !== 999,
+     `so re-tuning one body leaves its twin and the table alone ` +
+     `(twin ${h2.spec.dmg}, table ${R.enforcer.spec.dmg})`);
+  h1.spec.dmg = R.enforcer.spec.dmg;
+
+  // ── the columns actually reached the bodies
+  const mismatched = F.enemies().filter(e => e.hp !== R[e.type].spec.hp
+                                          || e.spec.sight !== R[e.type].spec.sight
+                                          || e.want !== R[e.type].want
+                                          || e.burst !== R[e.type].burst);
+  ok(mismatched.length === 0,
+     `mkEnemy seeds hp, sight, standoff and burst from the row ` +
+     `(${mismatched.map(e => e.type).join(', ') || F.enemies().length + ' bodies'})`);
+  // The standoff MECHANISM is measured three times over — once on a guard in
+  // the sight-gated fixture and once per boss — so what is left to pin for an
+  // ordinary type is that its own row's number is the one that reaches the
+  // body. That is this assertion, and it costs no frames. A fourth timed
+  // chase would have bought nothing the other three do not already own.
+  ok(R.enforcer.want > R.guard.want && R.spark.want === 0,
+     `and the rows differ, so seeding them is observable ` +
+     `(enforcer ${R.enforcer.want}u, guard ${R.guard.want}u, spark ${R.spark.want}u)`);
+  ok(F.bodyRadius(of('enforcer')[0]) === R.enforcer.radius
+     && F.bodyRadius(of('spark')[0]) === R.spark.radius,
+     `and bodyRadius reads it too (${F.bodyRadius(of('enforcer')[0])} vs ${F.bodyRadius(of('spark')[0])})`);
+
+  // ── A ROOTED BODY. `speed: 0` is the whole of the turret, so what has to
+  //    hold is that nothing in the engine moves it: not the chase state, not
+  //    separation, not a patrol. The spark beside it is the control — same
+  //    frames, same wake-up, and it must close the distance.
+  const tur = of('turret')[0], spk = of('spark')[0];
+  const tur0 = { x: tur.x, y: tur.y };
+  const spk0 = Math.hypot(spk.x - F.player.x, spk.y - F.player.y);
+  for (const e of F.enemies()) { e.graceT = 0; e.state = 'chase'; }
+  f.run(240);
+  const tMoved = Math.hypot(tur.x - tur0.x, tur.y - tur0.y);
+  const spkNow = Math.hypot(spk.x - F.player.x, spk.y - F.player.y);
+  ok(spkNow < spk0 - 1,
+     `control: a spark closes on the player over 4s (${spk0.toFixed(2)}u -> ${spkNow.toFixed(2)}u)`);
+  ok(tMoved < 1e-6,
+     `while a turret never leaves its mount — chase, separation and patrol all ` +
+     `no-op on speed 0 (drifted ${tMoved.toFixed(6)}u)`);
+  ok(tur.state !== 'idle',
+     `and it is awake, not merely asleep (${tur.state}) — being rooted is not being inert`);
+
+  // ── separation cannot shove it either, which the chase above would not
+  //    catch on its own: nothing was standing on it.
+  const guardOnIt = F.enemies()[0];
+  guardOnIt.x = tur.x; guardOnIt.y = tur.y;
+  f.run(20);
+  ok(Math.hypot(tur.x - tur0.x, tur.y - tur0.y) < 1e-6,
+     'a body shoved into a turret takes the whole shove itself');
+}
+
+group('a spark goes up when it dies (fixture)');
+{
+  // The wall at row 4 is the point of the map: it puts a tile the player can
+  // stand on within blast range of a spark it cannot see.
+  const f = loadWithLevel([
+    '############',
+    '#@.........#',
+    '#..........#',
+    '#...k...k..#',
+    '#..#########',
+    '#..........#',
+    '############',
+  ], { htmlPath: process.env.WOLF3D_HTML });
+  const F = f.P;
+  const R = F.roster();
+  const blast = R.spark.blast;
+  const sparks = F.enemies().filter(e => e.type === 'spark');
+  ok(sparks.length === 2 && blast && blast.radius > 0,
+     `test setup: two sparks and a blast on the row (r ${blast.radius}, ${blast.dmg} dmg)`);
+
+  // Two confounds, both handled every frame rather than once:
+  //
+  //  1. Enemy fire. A spark's own range is 1.4u, so without this the health it
+  //     costs to kill one point-blank could just as well be the shot it got
+  //     off first.
+  //  2. Enemy MOVEMENT. A spark chases while you shoot it, so the range in
+  //     these assertions was the range it started at, not the one it died at.
+  //     That made this test order-dependent: the mutation that removes the
+  //     blast radius deals `22 * (1 - d/4.4)` damage, which rounds to zero at
+  //     d ≈ 4.4 — so whenever the far spark happened to drift there before it
+  //     died, a bug that should have been caught read as no damage at all.
+  //     It survived the full battery while dying when run alone.
+  //
+  // Pinning them makes the distance in each message the distance under test.
+  const held = new Map(F.enemies().map(e => [e, { x: e.x, y: e.y }]));
+  // Corpses are pinned too, not just live bodies: the assertion is about the
+  // range the killing shot was taken at, and that is where the body has to be
+  // found afterwards for the measurement to mean anything.
+  const hold = () => {
+    for (const e of F.enemies()) {
+      e.atkCd = 99;
+      const at = held.get(e);
+      if (at) { e.x = at.x; e.y = at.y; }
+    }
+  };
+  // Pinned before every shot AND after the last frame — the harness runs a
+  // perFrame hook before its step, so a hook alone leaves one frame of drift
+  // on the end, which is exactly the 0.045u that made this test lie.
+  const shootDown = (e) => {
+    let shots = 0;
+    while (e.alive && shots++ < 60) { hold(); F.fire(); f.run(6, null, hold); }
+    hold();
+    return shots;
+  };
+  const gapTo = e => Math.hypot(e.x - F.player.x, e.y - F.player.y);
+
+  const near = sparks[0];
+  F.player.x = near.x - 1.0; F.player.y = near.y; F.player.a = 0;
+  F.player.hp = 100;
+  for (const e of F.enemies()) e.graceT = 0;
+  const shotsNear = shootDown(near);
+  ok(!near.alive, `test setup: the spark went down (${shotsNear} shots)`);
+  ok(Math.abs(gapTo(near) - 1.0) < 1e-9,
+     `test setup: and it died at the 1.0u this claims, not wherever it drifted to`);
+  ok(F.player.hp < 100,
+     `killing one at 1.0u costs you health with every enemy gun silenced ` +
+     `(${100 - F.player.hp} hp) — the damage is the roster's blast, not a shot`);
+
+  // The control: the same kill, the same silence, out of range.
+  const far = sparks[1];
+  F.player.x = far.x - 5.0; F.player.y = far.y; F.player.a = 0;
+  F.player.hp = 100;
+  ok(!!shootDown(far) && !far.alive, 'test setup: the far spark went down too');
+  ok(Math.abs(gapTo(far) - 5.0) < 1e-9,
+     `test setup: at 5.0u exactly (${gapTo(far).toFixed(3)}u) — the whole assertion is the range`);
+  ok(F.player.hp === 100,
+     `while killing one at 5.0u — outside its ${blast.radius}u — costs nothing (${F.player.hp} hp)`);
+
+  // ── THE LOS GATE, where fire() cannot reach: you cannot shoot what you
+  //    cannot see, so the only way to stand in a blast through a wall is to
+  //    detonate one directly. A charge that goes off through panelling would
+  //    make cover a lie.
+  const ghost = { type: 'spark', x: 4.5, y: 3.5 };
+  const px = 4.5, py = 5.5;
+  const gap = Math.hypot(px - ghost.x, py - ghost.y);
+  ok(gap < blast.radius && !F.hasLOS(ghost.x, ghost.y, px, py),
+     `test setup: a tile ${gap.toFixed(1)}u from the charge with a wall in the way`);
+  F.player.x = px; F.player.y = py; F.player.hp = 100;
+  F.deathBlast(ghost);
+  ok(F.player.hp === 100, `a blast does not carry through a wall (${F.player.hp} hp)`);
+
+  // ...and that is not vacuous: the same call from the same distance in the
+  // open does land.
+  F.player.x = ghost.x + gap; F.player.y = ghost.y; F.player.hp = 100;
+  ok(F.hasLOS(ghost.x, ghost.y, F.player.x, F.player.y), 'test setup: open ground this time');
+  F.deathBlast(ghost);
+  ok(F.player.hp < 100, `while the same blast in the open does (${100 - F.player.hp} hp)`);
+}
+
+group('a rooted body does not work the doors (fixture)');
+{
+  // The turret's flow-field waypoint is the door tile, and it is within the
+  // 1.2u openDoorAhead asks for — so the only thing keeping the door shut is
+  // that the body never actually moved. A guard in the same spot is the
+  // control: it does move, and it does lean on the door.
+  const rows = [
+    '##########',
+    '#@.......#',
+    '#........#',
+    '####D#####',
+    '#...X....#',
+    '#........#',
+    '##########',
+  ];
+  const at = (ch) => rows.map(r => r.replace('X', ch));
+
+  for (const [ch, type, wants] of [['t', 'turret', false], ['g', 'guard', true]]) {
+    const f = loadWithLevel(at(ch), { htmlPath: process.env.WOLF3D_HTML });
+    const F = f.P;
+    const e = F.enemies().find(b => b.type === type);
+    const door = F.doors()[0];
+    ok(!!e && !!door && Math.hypot(door.gx + 0.5 - e.x, door.gy + 0.5 - e.y) <= 1.2,
+       `test setup: a ${type} within openDoorAhead's reach of a shut door`);
+    e.graceT = 0; e.state = 'chase';
+    f.run(90);
+    ok((door.phase !== 'closed') === wants,
+       wants ? `a chaser that moves leans on the door in its way (${door.phase})`
+             : `while a rooted body never opens it — it has a waypoint, not a step (${door.phase})`);
+  }
+}
+
+group('spawn relocation leaves fixtures alone (fixture)');
+{
+  // The shipped floors are all clear of spawn sightlines, which means they
+  // cannot test what happens when one ISN'T — so this map puts both a guard
+  // and a turret in the player's opening view, with a wall to hide behind so
+  // relocation has somewhere to walk the guard to.
+  const f = loadWithLevel([
+    '############',
+    '#@.........#',
+    '#..........#',
+    '#...t..g...#',
+    '#..#####...#',
+    '#..........#',
+    '############',
+  ], { htmlPath: process.env.WOLF3D_HTML });
+  const F = f.P;
+  const tur = F.enemies().find(e => e.type === 'turret');
+  const guard = F.enemies().find(e => e.type === 'guard');
+  ok(!!tur && !!guard, 'test setup: a turret and a guard on the same opening sightline');
+  ok(!F.roster().turret.relocate && F.roster().guard.relocate,
+     'test setup: one row is exempt from relocation and one is not');
+
+  // The control. Without it, "the turret did not move" is also true of a build
+  // that relocates nothing at all.
+  ok(guard.x !== 7.5 || guard.y !== 3.5,
+     `a guard in the player's opening view is walked into cover (now ${guard.x},${guard.y})`);
+  ok(!F.hasLOS(guard.x, guard.y, F.player.x, F.player.y),
+     'and it lands somewhere it cannot see the player from');
+
+  ok(tur.x === 4.5 && tur.y === 3.5,
+     `while a wall-mounted turret stays exactly where the map bolted it ` +
+     `(${tur.x},${tur.y}) — it is in that sightline on purpose`);
+  ok(F.hasLOS(tur.x, tur.y, F.player.x, F.player.y),
+     'test setup: which means it really is still looking at the player');
 }
 
 // ── report ───────────────────────────────────────────────────────────────────

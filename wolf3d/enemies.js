@@ -1,16 +1,18 @@
 'use strict';
 
 // Everything that drives a body other than the player: the state machine, the
-// flow-field steering, patrols, separation, loot drops, and the CEO fight.
+// flow-field steering, patrols, separation and loot drops. What differs BETWEEN
+// types is a row of ENEMY_TYPES in roster.js, never a branch in here; the boss
+// fights themselves live in boss.js.
 //
 // Every move goes through moveEnemy() — chase, patrol and separation alike — so
 // collision is enforced in exactly one place.
 
 // ─── ENEMY LOOT ─────────────────────────────────────────────
-// Guards carry a spare cell more often than drones do; the drop lands on the
-// corpse tile so it is always reachable.
+// How often a body leaves a spare cell is `loot` on its roster row; the drop
+// lands on the corpse tile so it is always reachable.
 function dropLoot(e) {
-  const chance = e.type === 'guard' ? 0.55 : 0.30;
+  const chance = ENEMY_TYPES[e.type].loot;
   if (Math.random() > chance) return;
   items.push(mkItem('ammo', e.x, e.y));
 }
@@ -21,11 +23,16 @@ function dropLoot(e) {
 // tile if it does. That is the same question `itemAt` exists to ask about
 // push-walls: anything placed in the world has to ask what else owns the tile.
 //
-// Drones bleed nothing. They are drones.
+// How much a body bleeds is `blood: [lo, hi]` on its roster row — hi is rolled
+// at 0.4, else lo. A machine's row is [0, 0] and it bleeds nothing.
 const DECAL_CAP = 64;
 function spillBlood(e) {
-  if (e.type === 'drone') return;
-  const n = e.type === 'ceo' ? 3 : (Math.random() < 0.4 ? 2 : 1);
+  // No early-out for [0, 0]: the count is already 0 and the loop already does
+  // not run. A guard here would LOOK like the reason machines do not bleed
+  // while the roster row was the real one, and a mutation that deleted it
+  // would survive — which is exactly what happened when this had one.
+  const [lo, hi] = ENEMY_TYPES[e.type].blood;
+  const n = hi > lo && Math.random() < 0.4 ? hi : lo;
   for (let i = 0; i < n; i++) {
     let x = e.x + (Math.random() - 0.5) * 0.7;
     let y = e.y + (Math.random() - 0.5) * 0.7;
@@ -68,62 +75,27 @@ function hurtPlayer(amount, sx, sy) {
   syncHud();
 }
 
-// ─── THE CEO ────────────────────────────────────────────────
-// A three-phase fight rather than a guard with more hp. Each phase re-tunes
-// the same spec fields the ordinary FSM already reads — speed, cooldown,
-// damage, standoff — plus a burst length, so no new state machine is needed.
-const CEO_PHASES = [
-  // `at` is the health fraction at or below which the phase takes over
-  { at: 1.00, name: 'BOARD MEETING',    speed: 1.10, cd: 1.40, dmg: 16, want: 5.2, burst: 1 },
-  { at: 0.62, name: 'HOSTILE TAKEOVER', speed: 1.75, cd: 1.00, dmg: 14, want: 3.2, burst: 3 },
-  { at: 0.28, name: 'GOLDEN PARACHUTE', speed: 2.20, cd: 0.62, dmg: 12, want: 2.3, burst: 4,
-    summon: 2 },
-];
-
-// Drones the CEO calls in are real enemies, so they count toward the floor's
-// kill ratio — the denominator grows with them and 100% stays achievable.
-function summonDrones(e, n) {
-  const spots = [];
-  for (let r = 2; r <= 4 && spots.length < n; r++) {
-    for (let k = 0; k < 12 && spots.length < n; k++) {
-      const th = (k / 12) * Math.PI * 2;
-      const x = e.x + Math.cos(th) * r, y = e.y + Math.sin(th) * r;
-      if (blockAt(x, y)) continue;
-      if (spots.some(p => Math.hypot(p[0] - x, p[1] - y) < 1.2)) continue;
-      spots.push([x, y]);
-    }
-  }
-  for (const [x, y] of spots) {
-    const d = mkEnemy('drone', x, y);
-    d.state = 'chase';
-    enemies.push(d);
-    totalEnemies++;
-  }
-  if (spots.length) { sfx('ping'); syncHud(); }
+/**
+ * A body that goes up when it dies, if its roster row says so. Line-of-sight
+ * gated and falling off with distance, like every other source of damage in
+ * the game — a charge that detonates through a wall would make cover a lie.
+ *
+ * Called from fire()'s kill branch rather than from the FSM: a corpse is not
+ * stepped, and the blast belongs to the moment of the kill.
+ */
+function deathBlast(e) {
+  const b = ENEMY_TYPES[e.type].blast;
+  const dist = Math.hypot(player.x - e.x, player.y - e.y);
+  sfx('blast');
+  alertNear(e.x, e.y, b.radius * 3);
+  if (dist >= b.radius) return;
+  if (!hasLOS(e.x, e.y, player.x, player.y)) return;
+  hurtPlayer(Math.round(b.dmg * DIFFICULTY[difficulty].dmg * (1 - dist / b.radius * 0.5)),
+             e.x, e.y);
 }
 
-function stepCeoPhase(e) {
-  const frac = e.hp / e.maxHp;
-  let want = 0;
-  for (let i = 0; i < CEO_PHASES.length; i++) if (frac <= CEO_PHASES[i].at) want = i;
-  if (want === e.phase) return;
-  e.phase = want;
-  const ph = CEO_PHASES[want];
-  e.spec.speed = ph.speed;
-  e.spec.cd    = ph.cd;
-  e.spec.dmg   = ph.dmg;
-  e.want  = ph.want;
-  e.burst = ph.burst;
-  e.atkCd = Math.min(e.atkCd, 0.5);
-  if (want > 0) {
-    toast('CEO  ·  ' + ph.name);
-    sfx('bark');
-    alertNear(e.x, e.y, 12);
-    if (ph.summon) summonDrones(e, ph.summon);
-  }
-}
-
-// One enemy shot, shared by the whole roster: the CEO's bursts are this same
+// ─── ENEMY FIRE ─────────────────────────────────────────────
+// One enemy shot, shared by the whole roster: a boss's bursts are this same
 // call repeated, so accuracy falloff and damage scaling stay in one place.
 function enemyShot(e, dist) {
   if (!hasLOS(e.x, e.y, player.x, player.y)) return;
@@ -170,9 +142,9 @@ function openDoorAhead(e, gx, gy) {
   sfx('door');
 }
 
-// How much room a body claims. The CEO is two and a half tiles across, so a
+// How much room a body claims. A boss is two and a half tiles across, so a
 // single radius would let the drones it summons stand inside its jacket.
-function bodyRadius(e) { return e.type === 'ceo' ? 0.55 : 0.35; }
+function bodyRadius(e) { return ENEMY_TYPES[e.type].radius; }
 
 /**
  * Push overlapping enemies apart. Before this, six seconds of a group chase
@@ -208,12 +180,16 @@ function separateEnemies() {
       } else {
         nx = dx / d; ny = dy / d;
       }
-      const shove = (R - d) * 0.5;
+      // A rooted body (speed 0) is a fixture, not a crowd member: it does not
+      // give ground, so its partner takes the whole shove instead of half.
+      const aFixed = a.spec.speed === 0, bFixed = b.spec.speed === 0;
+      if (aFixed && bFixed) continue;
+      const shove = (R - d) * (aFixed || bFixed ? 1 : 0.5);
       const ux = nx * shove, uy = ny * shove;
       // heading belongs to where a body is *going*, not to being jostled
       const ha = a.heading, hb = b.heading;
-      moveEnemy(a, -ux, -uy);
-      moveEnemy(b,  ux,  uy);
+      if (!aFixed) moveEnemy(a, -ux, -uy);
+      if (!bFixed) moveEnemy(b,  ux,  uy);
       a.heading = ha; b.heading = hb;
     }
   }
@@ -265,7 +241,7 @@ function patrolAim(e) {
 }
 
 function stepPatrol(e, dt) {
-  if (e.type === 'ceo') return;                  // the board does not pace the halls
+  if (!ENEMY_TYPES[e.type].patrol) return;       // boards do not pace; turrets cannot
   if (e.patrolT > 0) { e.patrolT -= dt; return; }
   if (!e.patrolDir) {
     pickPatrolDir(e);
@@ -302,7 +278,7 @@ function stepEnemies(dt) {
       continue;
     }
     if (gameState !== 'playing') continue;
-    if (e.type === 'ceo') stepCeoPhase(e);
+    if (ENEMY_TYPES[e.type].phases) stepBossPhase(e);
 
     const dx = player.x - e.x, dy = player.y - e.y;
     const dist = Math.hypot(dx, dy);
@@ -322,7 +298,7 @@ function stepEnemies(dt) {
           if (dist < e.spec.sight && hasLOS(e.x, e.y, player.x, player.y)) {
             e.state = 'alert';
             e.stateT = 0.4;
-            sfx(e.type === 'guard' ? 'bark' : 'ping');
+            sfx(ENEMY_TYPES[e.type].alertSfx);
             alertNear(e.x, e.y, 7);
           }
         }
@@ -347,20 +323,19 @@ function stepEnemies(dt) {
           e.heading = Math.atan2(dy, dx);       // you get shot at face-on
           break;
         }
-        // Close the gap, but keep a little standoff. The standoff is only
-        // meaningful with line of sight: holding position at 3.2u through a
-        // wall is how a guard used to freeze one room short of the fight.
-        const want = e.want !== undefined ? e.want
-                   : e.type === 'guard' ? 3.2 : 2.2;
-        if (!los || dist > want) {
+        // Close the gap, but keep the standoff its roster row asks for. It is
+        // only meaningful with line of sight: holding position at 3.2u through
+        // a wall is how a guard used to freeze one room short of the fight.
+        if (!los || dist > e.want) {
           const sp = e.spec.speed * dt;
           // straight at the player while it can see them — that reads better
           // in an open room than snapping between tile centres — and down the
           // flow field the moment the geometry gets in the way
           const w = los ? null : navStep(e);
           if (w) {
-            moveEnemy(e, w.x * sp, w.y * sp);
-            openDoorAhead(e, w.gx, w.gy);
+            // gated on actually moving: a rooted body has a waypoint like
+            // anything else, and would otherwise cycle a door it can never reach
+            if (moveEnemy(e, w.x * sp, w.y * sp)) openDoorAhead(e, w.gx, w.gy);
           } else {
             moveEnemy(e, dx / dist * sp, dy / dist * sp);
           }
@@ -376,7 +351,7 @@ function stepEnemies(dt) {
             e.stateT = 0.16;          // stay in the muzzle-flash frame
           } else {
             e.state = 'chase';
-            // scaled HERE and not in mkEnemy: stepCeoPhase reassigns e.spec.cd
+            // scaled HERE and not in mkEnemy: stepBossPhase reassigns e.spec.cd
             // outright on every phase change, so a multiplier baked into the
             // spec would silently evaporate the moment the boss hit 62%
             e.atkCd = e.spec.cd * DIFFICULTY[difficulty].cd * (0.75 + Math.random() * 0.5);

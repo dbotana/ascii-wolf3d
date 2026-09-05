@@ -116,6 +116,7 @@ function sfx(name) {
     case 'reloadDone': blip(760, 0.06, 'square', 0.11, 1080); noiseBurst(0.05, 1800, 0.08, 1.4); break;
     case 'hit':       noiseBurst(0.07, 480, 0.20, 2.0); break;
     case 'kill':      noiseBurst(0.30, 320, 0.30, 0.8); blip(140, 0.32, 'sawtooth', 0.12, 42); break;
+    case 'blast':     noiseBurst(0.45, 180, 0.42, 0.55); blip(70, 0.40, 'sawtooth', 0.20, 34); break;
     case 'ouch':      blip(240, 0.16, 'sawtooth', 0.20, 90); noiseBurst(0.10, 700, 0.16, 1.4); break;
     case 'bark':      blip(300, 0.10, 'square', 0.16, 420); blip(430, 0.09, 'square', 0.12, 300); break;
     case 'ping':      blip(1250, 0.07, 'sine', 0.13, 1750); break;
@@ -165,12 +166,30 @@ const MUSIC = [
     bass: [[0, 0.5], [7, 0.5], [0, 0.5], [10, 0.5], [0, 1], [-1, 1]],
     lead: [[19, 0.5], [17, 0.5], [15, 1], [12, 0.5], [15, 0.5], [17, 1]],
     drum: 'xxs.xxs.' },
-  // The boardroom. Last row by convention — musicTrackFor() reaches for it by
-  // position, so the floor tracks stay the first LEVELS-many rows.
+  { name: 'VAULT', bpm: 138, root: 42,            // F#2 — still, and very cold
+    bass: [[0, 1], [0, 0.5], [-2, 0.5], [0, 1], [5, 1]],
+    lead: [[12, 1], [null, 0.5], [11, 0.5], [12, 0.5], [7, 0.5], [null, 1]],
+    drum: 'x...s...' },
+  { name: 'SPIRE', bpm: 156, root: 40,            // E2 — thinner air
+    bass: [[0, 0.5], [12, 0.5], [0, 0.5], [7, 0.5], [-3, 1], [0, 1]],
+    lead: [[19, 0.5], [16, 0.5], [19, 0.5], [21, 0.5], [16, 1], [12, 1]],
+    drum: 'x.s.xxs.' },
+  // The boss tracks. Found by NAME off the boss's roster row, not by position:
+  // with three bosses "the last row" stopped being a rule and became a bug
+  // waiting for the fourth. The floor tracks are still the first LEVELS-many
+  // rows, which musicTrackFor indexes directly.
   { name: 'BOARDROOM', bpm: 168, root: 37,        // Db2 — faster, meaner
     bass: [[0, 0.25], [0, 0.25], [0, 0.5], [6, 0.5], [0, 0.5], [8, 0.5], [7, 0.5]],
     lead: [[12, 0.25], [13, 0.25], [12, 0.5], [8, 0.5], [6, 0.5], [12, 1]],
     drum: 'xxsxxxsx' },
+  { name: 'ICEWALL', bpm: 160, root: 38,          // D2 — a wall of it
+    bass: [[0, 0.5], [0, 0.5], [1, 0.5], [0, 0.5], [8, 0.5], [7, 0.5], [6, 1]],
+    lead: [[12, 0.5], [18, 0.5], [17, 0.5], [12, 0.5], [11, 1], [12, 1]],
+    drum: 'xxsxx.sx' },
+  { name: 'LAST FLIGHT', bpm: 176, root: 36,      // C2 — the bottom of the keyboard
+    bass: [[0, 0.25], [0, 0.25], [7, 0.5], [0, 0.25], [0, 0.25], [10, 0.5], [-2, 1]],
+    lead: [[24, 0.25], [23, 0.25], [19, 0.5], [15, 0.5], [12, 0.5], [19, 0.5], [24, 0.5]],
+    drum: 'xxsxxsxs' },
 ];
 
 const MUSIC_LOOKAHEAD = 0.25;   // seconds of notes queued ahead of the clock
@@ -178,13 +197,23 @@ const MUSIC_LOOKAHEAD = 0.25;   // seconds of notes queued ahead of the clock
 let musicVoices = null, musicDrumV = null, musicTrack = null, musicPending = null;
 
 /**
- * Which march is playing. The boardroom track takes over the moment the CEO
- * has actually noticed you — the same liveness test the boss bar uses, so the
- * music and the health bar arrive together rather than one spoiling the other.
+ * Which march is playing. A boss's track takes over the moment it has actually
+ * noticed you — the same liveness test the boss bar uses, so the music and the
+ * health bar arrive together rather than one spoiling the other.
+ *
+ * The boss track is looked up by the NAME on its roster row. It used to be
+ * `MUSIC[MUSIC.length - 1]`, which was fine while there was one boss and is a
+ * silent mis-pick the moment there are two. Floor tracks are still positional:
+ * the first LEVELS-many rows, in floor order.
  */
 function musicTrackFor() {
-  if (boss && boss.alive && boss.state !== 'idle') return MUSIC[MUSIC.length - 1];
-  return MUSIC[levelIndex % (MUSIC.length - 1)];
+  if (boss && boss.alive && boss.state !== 'idle') {
+    const want = bossRow().track;
+    // the fallback is the first boss row: a roster typo should cost the right
+    // march, not silence the scheduler mid-fight. A test pins every name.
+    return MUSIC.find(t => t.name === want) || MUSIC[LEVELS.length];
+  }
+  return MUSIC[levelIndex % LEVELS.length];
 }
 
 function midiHz(n) { return 440 * Math.pow(2, (n - 69) / 12); }

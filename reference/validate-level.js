@@ -20,8 +20,8 @@ const fs = require('fs');
 const path = require('path');
 const { collectSources } = require('./harness');
 
-const WALK   = '.@gdC+ar b$';       // tiles a body can stand on
-const ITEMS  = 'gdC+arb$';          // entities that must be reachable
+const WALK   = '.@gdCtkhIF+ar b$';  // tiles a body can stand on
+const ITEMS  = 'gdCtkhIF+arb$';     // entities that must be reachable
 const LOCKS  = { R: 'red', B: 'blue' };
 const SECRET = 'S';                 // push-wall: solid until shoved, then passable
 const PICKUP = '+arb$';             // pushSecret() also stops short of these
@@ -236,7 +236,9 @@ function summarise(rows) {
   const all = rows.join('');
   const n = ch => all.split(ch).length - 1;
   return `${[...rows[0]].length}x${rows.length}  ` +
-         `enemies ${n('g') + n('d') + n('C')} (${n('g')}g/${n('d')}d/${n('C')}C)  ` +
+         `enemies ${'gdtkhCIF'.split('').reduce((t, c) => t + n(c), 0)} ` +
+         `(${'gdtkh'.split('').map(c => n(c) + c).join('/')}` +
+         `${'CIF'.split('').filter(c => n(c)).map(c => ' +boss ' + c).join('')})  ` +
          `pickups ${n('+') + n('a') + n('$') + n('r') + n('b')}  ` +
          `doors ${n('D') + n('R') + n('B')}  secrets ${n('S')}`;
 }

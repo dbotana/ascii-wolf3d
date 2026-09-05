@@ -28,20 +28,20 @@
  */
 function populateEnemies(spawns) {
   const D = DIFFICULTY[difficulty];
-  const mob = spawns.filter(s => s[0] !== 'ceo').length;
+  const mob = spawns.filter(s => !ENEMY_TYPES[s[0]].boss).length;
   const want = Math.min(mob, Math.max(1, Math.round(mob * D.keep)));
 
   const survivors = [];
   let acc = 0;
   for (const s of spawns) {
-    if (s[0] !== 'ceo') {
+    if (!ENEMY_TYPES[s[0]].boss) {
       acc += want;
       if (acc < mob) continue;      // this one does not make the cut
       acc -= mob;
     }
     const e = mkEnemy(s[0], s[1], s[2]);
     enemies.push(e);
-    if (s[0] === 'ceo') boss = e;
+    if (ENEMY_TYPES[s[0]].boss) boss = e;
     else survivors.push(s);
   }
 
@@ -63,8 +63,9 @@ function populateEnemies(spawns) {
 // included, since they land on a survivor's authored tile — to the nearest open
 // tile with no line of sight back to the spawn, staying inside its own room
 // (doors are walls here: a body parked behind a closed door can neither patrol
-// nor be reached). The CEO is exempt — it is the floor's win condition, tuned
-// to a fixed boardroom, and never spawns in view anyway.
+// nor be reached). `relocate: false` rows are exempt: a boss is the floor's win
+// condition, tuned to a fixed arena, and a wall-mounted body is placed in a
+// sightline on purpose.
 const RELOCATE_DIRS = [[1, 0], [-1, 0], [0, 1], [0, -1]];
 
 function relocateSpawnLOS() {
@@ -74,7 +75,7 @@ function relocateSpawnLOS() {
   for (const e of enemies) occupied.add((e.x | 0) + ',' + (e.y | 0));
 
   for (const e of enemies) {
-    if (e.type === 'ceo') continue;
+    if (!ENEMY_TYPES[e.type].relocate) continue;
     const d = Math.hypot(e.x - px, e.y - py);
     if (d >= e.spec.sight || !hasLOS(e.x, e.y, px, py)) continue;
     const spot = findCoverTile(e, px, py, occupied);
@@ -120,6 +121,14 @@ function findCoverTile(e, px, py, occupied) {
   return null;
 }
 
+// Which enemy type a map character spawns, or null for scenery. A scan rather
+// than a derived lookup table so roster.js stays data with no top-level
+// derivation of its own; it runs once per tile per floor load.
+function enemyTypeForChar(ch) {
+  for (const t in ENEMY_TYPES) if (ENEMY_TYPES[t].char === ch) return t;
+  return null;
+}
+
 function parseLevel(src) {
   MAP_H = src.length;
   MAP_W = src[0].length;
@@ -152,17 +161,20 @@ function parseLevel(src) {
           row[x] = sec; secretList.push(sec);
           break;
         }
-        // bodies are collected, not built, because how many of them actually
-        // appear is a difficulty question — see populateEnemies below
-        case 'g': spawns.push(['guard', x + 0.5, y + 0.5]); break;
-        case 'd': spawns.push(['drone', x + 0.5, y + 0.5]); break;
-        case 'C': spawns.push(['ceo',   x + 0.5, y + 0.5]); break;
         case '+': items.push(mkItem('health',  x + 0.5, y + 0.5)); break;
         case 'a': items.push(mkItem('ammo',    x + 0.5, y + 0.5)); break;
         case 'r': items.push(mkItem('keyRed',  x + 0.5, y + 0.5)); break;
         case 'b': items.push(mkItem('keyBlue', x + 0.5, y + 0.5)); break;
         case '$': items.push(mkItem('cash',    x + 0.5, y + 0.5)); totalTreasure++; break;
         case '@': player.x = x + 0.5; player.y = y + 0.5; break;
+        // Bodies are collected, not built, because how many of them actually
+        // appear is a difficulty question — see populateEnemies below. They come
+        // last and off the roster's own `char` column, so adding an enemy type
+        // never touches this switch.
+        default: {
+          const t = enemyTypeForChar(ch);
+          if (t) spawns.push([t, x + 0.5, y + 0.5]);
+        }
       }
     }
     grid.push(row);

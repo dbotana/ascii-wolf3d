@@ -159,7 +159,7 @@ function objectiveText() {
   const needs = lock => doorList.some(d => d.lock === lock);
   if (needs('red')  && !player.keyRed)  return 'FIND THE RED KEYCARD';
   if (needs('blue') && !player.keyBlue) return 'FIND THE BLUE KEYCARD';
-  if (boss && boss.alive)               return 'THE BOARD IS IN SESSION \u2014 KILL THE CEO';
+  if (boss && boss.alive)               return bossRow().objective;
   return 'RIDE THE ELEVATOR OUT';
 }
 
@@ -173,16 +173,19 @@ function paintObjective() {
   o.classList.toggle('show', show);
 }
 
-// The bar stays hidden until the CEO has actually noticed you, so walking in
-// does not spoil the reveal, and drops away the moment it dies.
+// The bar stays hidden until the boss has actually noticed you, so walking in
+// does not spoil the reveal, and drops away the moment it dies. Its name and
+// phase both come off the roster row, so a second boss needs nothing here.
 function paintBossBar() {
   const bar = el('bossBar');
   const live = boss && boss.alive && boss.state !== 'idle' && gameState === 'playing';
   bar.classList.toggle('show', !!live);
   if (!live) return;
+  const row = bossRow();
   const frac = Math.max(0, boss.hp / boss.maxHp);
   el('bossFill').style.width = (frac * 100).toFixed(1) + '%';
-  el('bossPhase').textContent = CEO_PHASES[boss.phase].name;
+  el('bossName').textContent  = row.title;
+  el('bossPhase').textContent = row.phases[boss.phase].name;
 }
 
 function showBanner(title, body, hint, fail) {
@@ -238,7 +241,7 @@ function updatePrompt() {
                    (hasKey(c.lock) ? '  [E] OPEN' : '  — LOCKED')
                  : '[E] OPEN';
   } else if (c.tag === 'exit') {
-    msg = (boss && boss.alive) ? 'ELEVATOR — HELD BY THE BOARD'
+    msg = (boss && boss.alive) ? bossRow().heldBy
         : levelIndex + 1 >= LEVELS.length ? 'ELEVATOR  [E] SURFACE'
         : 'ELEVATOR  [E] DESCEND';
   }

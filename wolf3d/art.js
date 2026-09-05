@@ -1,11 +1,16 @@
 'use strict';
 
-// ASCII art tables: every enemy sprite (with its four guard rotations) and
-// every weapon view-model frame. Data only — no functions live here. Adding a
-// weapon or an enemy should mean adding rows to these tables, not code.
+// ASCII art tables: the MVP roster's sprites (with the four guard rotations),
+// the pickups, and every weapon view-model frame. Data only — no functions live
+// here. Adding a weapon or an enemy should mean adding rows to a table, not
+// code; enemy bodies added after the MVP live in bodies.js, which this file
+// spreads in below.
 
 // ─── SPRITE ART ─────────────────────────────────────────────
+// Opens with everything bodies.js declares — see the note at the top of that
+// file. The spread is why every consumer still reads one `SPR[type + view]`.
 const SPR = {
+  ...BODY_SPR,
   guard: {
     rows: [
       ' ▄▄▄ ',

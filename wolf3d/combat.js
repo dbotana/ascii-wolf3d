@@ -194,9 +194,10 @@ function fire() {
     best.stateT = 0;
     player.kills++;
     player.runKills++;
-    player.score += KILL_SCORE[best.type] || 150;
+    player.score += ENEMY_TYPES[best.type].score;
     dropLoot(best);
     spillBlood(best);
+    if (ENEMY_TYPES[best.type].blast) deathBlast(best);
     sfx('kill');
     checkWeaponUnlock();      // before syncHud, so the strip paints the new gun
     syncHud();

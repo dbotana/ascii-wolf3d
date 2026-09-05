@@ -16,7 +16,6 @@ const WALL_H = 3;             // every wall is flat-topped, Wolf3D style
 const EYE_Z = 1.6;            // player eye height
 const FOCAL = COLS / (2 * Math.tan(FOV / 2));
 const CLIP_SIZE = 8;          // rounds per magazine before a reload cycle
-const KILL_SCORE = { guard: 200, drone: 150, ceo: 5000 };
 const RELOAD_TIME = 1.05;     // seconds for the full reload animation
 const DEATH_TIME = 0.45;      // the 'dying' window, subdivided across DEATH_SEQ
 const SPAWN_GRACE = 0.75;     // seconds an idle enemy ignores the player after spawn
@@ -59,6 +58,11 @@ const COLOR = {
   guard:'#C8B090', guardSuit:'#5C6B80', visor:'#55E6E6', visorHot:'#FF3B7C',
   ceoSuit:'#6A5480', ceoTrim:'#FFC24A',
   drone:'#9FB4C8', droneEye:'#FF3B7C',
+  turretEye:'#FF6B2B',
+  spark:'#BFD4E6', sparkCore:'#9CFF3B',
+  enforcer:'#55604C', enforcerTrim:'#C9A227',
+  ice:'#3E6E8E', iceCore:'#7FE8FF',
+  founderCoat:'#2E2A38', founderTrim:'#E8D6A0',
   blood:'#B3243C',
   gun:'#6E7B8C', gunHi:'#AAB8C8', muzzle:'#FFE9A8',
   cash:'#FFD07A', ramen:'#FF9500', cell:'#7FFF6B',

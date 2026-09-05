@@ -60,7 +60,16 @@ const PROBE_SRC = `global.__PROBE = {
   treasureFound: () => (typeof treasureFound !== "undefined" ? treasureFound : 0),
   tally:         () => (typeof tally !== "undefined" ? tally : null),
   itemAt:        (typeof itemAt !== "undefined" ? itemAt : null),
-  ceoPhases:     () => (typeof CEO_PHASES !== "undefined" ? CEO_PHASES : []),
+  // The roster replaced the per-type ternaries and CEO_PHASES; ceoPhases is
+  // kept as a name so the pre-roster assertions still read the same fight.
+  roster:        () => (typeof ENEMY_TYPES !== "undefined" ? ENEMY_TYPES : {}),
+  ceoPhases:     () => (typeof ENEMY_TYPES !== "undefined" ? ENEMY_TYPES.ceo.phases : []),
+  bossRow:       (typeof bossRow !== "undefined" ? bossRow : null),
+  stepBossPhase: (typeof stepBossPhase !== "undefined" ? stepBossPhase : null),
+  summonMinions: (typeof summonMinions !== "undefined" ? summonMinions : null),
+  bodyRadius:    (typeof bodyRadius !== "undefined" ? bodyRadius : null),
+  deathBlast:    (typeof deathBlast !== "undefined" ? deathBlast : null),
+  updatePrompt:  (typeof updatePrompt !== "undefined" ? updatePrompt : null),
   // Phase 2: pathfinding, separation, patrols and enemy rotations. Same
   // typeof guard as everything above, so a pre-Phase-2 build still loads.
   navAt:         (typeof navAt !== "undefined" ? navAt : null),
@@ -170,6 +179,8 @@ const REQUIRED_FNS = [
   'loadScores', 'saveScores', 'recordScore', 'paintScores', 'winGame', 'killPlayer',
   'stickVector', 'setTouchMove', 'addTouchLook',
   'patrolOpen', 'spriteList',
+  'bossRow', 'stepBossPhase', 'summonMinions', 'bodyRadius', 'deathBlast',
+  'updatePrompt',
   'checkWeaponUnlock', 'pickWeapon', 'resetWeapons', 'objectiveText', 'paintWeaponStrip',
   'markVisible', 'drawMinimap', 'toggleMinimap', 'syncHud',
 ];
@@ -181,7 +192,8 @@ function assertProbe(P, htmlPath) {
   // check the three whose emptiness would mean a data file failed to load.
   if (!P.spr || Object.keys(P.spr()).length === 0) missing.push('SPR (sprite art)');
   if (!P.levels || P.levels().length === 0) missing.push('LEVELS (level data)');
-  if (!P.ceoPhases || P.ceoPhases().length === 0) missing.push('CEO_PHASES');
+  if (!P.roster || Object.keys(P.roster()).length === 0) missing.push('ENEMY_TYPES (roster.js)');
+  if (!P.ceoPhases || P.ceoPhases().length === 0) missing.push('ENEMY_TYPES.ceo.phases');
   // weapons.js is its own <script src>. collectSources only throws on a tag
   // whose file is missing, not on a file with no tag — so without this line a
   // forgotten tag evals cleanly and first surfaces as a ReferenceError deep

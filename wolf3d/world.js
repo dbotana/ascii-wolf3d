@@ -108,14 +108,12 @@ function mkSecret(x, y, seed) {
            gx: x, gy: y, dx: 0, dy: 0, push: 0, span: 0, phase: 'idle' };
 }
 function mkEnemy(type, x, y) {
-  // The CEO is tuned as a fight, not an obstacle: enough hp to need three
-  // magazines, enough reach that backing off is not a free answer, and a
-  // standoff of its own so it never simply walks into your muzzle.
-  const spec = type === 'ceo'
-    ? { hp: 520, speed: 1.10, range: 12.0, cd: 1.40, dmg: 16, sight: 20 }
-    : type === 'guard'
-    ? { hp: 45, speed: 1.35, range: 9.5, cd: 1.15, dmg: 11, sight: 15 }
-    : { hp: 28, speed: 2.10, range: 7.0, cd: 0.85, dmg:  7, sight: 13 };
+  const row = ENEMY_TYPES[type];
+  // A COPY, never the roster's own object. stepBossPhase writes speed, cd and
+  // damage straight onto e.spec as a fight escalates; sharing one spec across
+  // every body of a type would re-tune the whole floor — and permanently, for
+  // the rest of the session, since the roster is a module-level literal.
+  const spec = { ...row.spec };
   return {
     type, x, y, spawnX: x, spawnY: y,
     hp: spec.hp, maxHp: spec.hp, spec,
@@ -131,8 +129,12 @@ function mkEnemy(type, x, y) {
     // guard that has never taken a step.
     heading: -Math.PI / 2,
     patrolDir: null, patrolT: Math.random() * 1.2, patrolTX: 0, patrolTY: 0,
-    phase: 0, burst: 1, shotsLeft: 1,
-    want: type === 'ceo' ? CEO_PHASES[0].want : undefined,
+    phase: 0, shotsLeft: 1,
+    // A boss opens on phase 0, so its standoff and burst come from there rather
+    // than from the row's plain fields — stepBossPhase rewrites both from the
+    // same table the moment its health drops.
+    burst: row.phases ? row.phases[0].burst : row.burst,
+    want:  row.phases ? row.phases[0].want  : row.want,
   };
 }
 function mkItem(kind, x, y) {
@@ -324,8 +326,8 @@ function use() {
   } else if (c.secret && c.phase === 'idle') {
     pushSecret(c);
   } else if (c.tag === 'exit') {
-    // the CEO holds the elevator: no leaving the floor while the board sits
-    if (boss && boss.alive) { toast('THE BOARD IS STILL IN SESSION'); sfx('deny'); return; }
+    // a live boss holds the elevator; what it says about that is `deny` on its row
+    if (boss && boss.alive) { toast(bossRow().deny); sfx('deny'); return; }
     clearLevel();
   }
 }

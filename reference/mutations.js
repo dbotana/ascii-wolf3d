@@ -242,49 +242,49 @@ module.exports = [
     replace: 'if (false) return false;',
     note: 'clearing the last floor descends into a floor that does not exist instead of winning' },
 
-  { id: 'ceo-phases-frozen', group: 'Phase 1', file: 'wolf3d/enemies.js',
-    find: 'for (let i = 0; i < CEO_PHASES.length; i++) if (frac <= CEO_PHASES[i].at) want = i;',
-    replace: 'for (let i = 0; i < CEO_PHASES.length; i++) if (frac <= CEO_PHASES[i].at) want = 0;',
+  { id: 'ceo-phases-frozen', group: 'Phase 1', file: 'wolf3d/boss.js',
+    find: 'for (let i = 0; i < row.phases.length; i++) if (frac <= row.phases[i].at) want = i;',
+    replace: 'for (let i = 0; i < row.phases.length; i++) if (frac <= row.phases[i].at) want = 0;',
     note: 'the CEO never leaves BOARD MEETING: no speed-up, no bursts, no drones' },
 
-  { id: 'ceo-summon-off', group: 'Phase 1', file: 'wolf3d/enemies.js',
-    find: 'if (ph.summon) summonDrones(e, ph.summon);',
-    replace: 'if (false) summonDrones(e, ph.summon);',
+  { id: 'ceo-summon-off', group: 'Phase 1', file: 'wolf3d/boss.js',
+    find: 'if (ph.summon) summonMinions(e, ph.summon.type, ph.summon.n);',
+    replace: 'if (false) summonMinions(e, ph.summon.type, ph.summon.n);',
     note: 'GOLDEN PARACHUTE summons nothing — the last phase is just a faster boss' },
 
-  { id: 'ceo-summon-denominator', group: 'Phase 1', file: 'wolf3d/enemies.js',
+  { id: 'ceo-summon-denominator', group: 'Phase 1', file: 'wolf3d/boss.js',
     find: 'totalEnemies++;',
     replace: 'void 0;',
     note: 'summoned drones are killable but not counted, so killing them pushes the kill ratio ABOVE 100%' },
 
   { id: 'ceo-elevator-ungated', group: 'Phase 1', file: 'wolf3d/world.js',
-    find: "if (boss && boss.alive) { toast('THE BOARD IS STILL IN SESSION'); sfx('deny'); return; }",
-    replace: "if (false) { toast('THE BOARD IS STILL IN SESSION'); sfx('deny'); return; }",
+    find: 'if (boss && boss.alive) { toast(bossRow().deny); sfx(\'deny\'); return; }',
+    replace: 'if (false) { toast(bossRow().deny); sfx(\'deny\'); return; }',
     note: 'you ride the elevator out past a living CEO — the whole boss fight is skippable' },
 
   { id: 'ceo-standoff-seed', group: 'Phase 1', file: 'wolf3d/world.js',
-    find: "want: type === 'ceo' ? CEO_PHASES[0].want : undefined,",
-    replace: 'want: undefined,',
+    find: 'want:  row.phases ? row.phases[0].want  : row.want,',
+    replace: 'want:  2.2,',
     note: 'the CEO falls back to a drone’s 2.2u standoff and walks straight into your muzzle' },
 
-  { id: 'ceo-standoff-phase', group: 'Phase 1', file: 'wolf3d/enemies.js',
+  { id: 'ceo-standoff-phase', group: 'Phase 1', file: 'wolf3d/boss.js',
     find: 'e.want  = ph.want;',
     replace: 'e.want  = e.want;',
     note: 'the CEO keeps its opening 5.2u standoff through every phase and never closes' },
 
-  { id: 'ceo-burst-length', group: 'Phase 1', file: 'wolf3d/enemies.js',
+  { id: 'ceo-burst-length', group: 'Phase 1', file: 'wolf3d/boss.js',
     find: 'e.burst = ph.burst;',
     replace: 'e.burst = 1;',
     note: 'the CEO never fires a burst — the 3- and 4-shot phases hit like the first one' },
 
-  { id: 'ceo-phase-speed', group: 'Phase 1', file: 'wolf3d/enemies.js',
-    find: 'e.spec.speed = ph.speed;',
-    replace: 'e.spec.speed = e.spec.speed;',
+  { id: 'ceo-phase-speed', group: 'Phase 1', file: 'wolf3d/boss.js',
+    find: 'if (ph.speed !== undefined) e.spec.speed = ph.speed;',
+    replace: 'if (false) e.spec.speed = ph.speed;',
     note: 'the CEO never speeds up between phases' },
 
-  { id: 'ceo-phase-damage', group: 'Phase 1', file: 'wolf3d/enemies.js',
-    find: 'e.spec.dmg   = ph.dmg;',
-    replace: 'e.spec.dmg   = e.spec.dmg;',
+  { id: 'ceo-phase-damage', group: 'Phase 1', file: 'wolf3d/boss.js',
+    find: 'if (ph.dmg   !== undefined) e.spec.dmg   = ph.dmg;',
+    replace: 'if (false) e.spec.dmg   = ph.dmg;',
     note: 'the CEO keeps its opening damage forever' },
 
   { id: 'burst-single-shot', group: 'Phase 1', file: 'wolf3d/enemies.js',
@@ -343,8 +343,8 @@ module.exports = [
     note: 'the pre-Phase-2 behaviour: chasers steer straight at the player and grind along the wall at every corner' },
 
   { id: 'chase-standoff-ungated', group: 'Phase 2', file: 'wolf3d/enemies.js',
-    find: 'if (!los || dist > want) {',
-    replace: 'if (dist > want) {',
+    find: 'if (!los || dist > e.want) {',
+    replace: 'if (dist > e.want) {',
     note: 'the standoff stops being gated on sight, so a guard freezes 3.2u from a player it cannot see and has no route to — the "jammed at 4.2u" bug' },
 
   { id: 'move-enemy-axis-coupled', group: 'Phase 2', file: 'wolf3d/enemies.js',
@@ -375,7 +375,7 @@ module.exports = [
     note: 'a chaser opens doors from across the floor rather than by leaning on the one in front of it' },
 
   { id: 'separate-one-radius', group: 'Phase 2', file: 'wolf3d/enemies.js',
-    find: "function bodyRadius(e) { return e.type === 'ceo' ? 0.55 : 0.35; }",
+    find: 'function bodyRadius(e) { return ENEMY_TYPES[e.type].radius; }',
     replace: 'function bodyRadius(e) { return 0.35; }',
     note: 'the CEO claims a guard’s radius, so the drones it summons stand inside its jacket' },
 
@@ -387,10 +387,10 @@ module.exports = [
     note: 'separation acts on corpses, so bodies creep away from where they fell and drift out from under their own blood' },
 
   { id: 'separate-through-walls', group: 'Phase 2', file: 'wolf3d/enemies.js',
-    find: `      moveEnemy(a, -ux, -uy);
-      moveEnemy(b,  ux,  uy);`,
-    replace: `      a.x -= ux; a.y -= uy;
-      b.x += ux; b.y += uy;`,
+    find: `      if (!aFixed) moveEnemy(a, -ux, -uy);
+      if (!bFixed) moveEnemy(b,  ux,  uy);`,
+    replace: `      if (!aFixed) { a.x -= ux; a.y -= uy; }
+      if (!bFixed) { b.x += ux; b.y += uy; }`,
     note: 'the shove bypasses collision and pushes bodies through walls — the way this kind of fix usually goes wrong' },
 
   { id: 'separate-coincident-nan', group: 'Phase 2', file: 'wolf3d/enemies.js',
@@ -426,7 +426,7 @@ module.exports = [
     note: 'bored guards patrol into closed doors, so a floor of them cycles every door on it' },
 
   { id: 'patrol-ceo-paces', group: 'Phase 2', file: 'wolf3d/enemies.js',
-    find: "if (e.type === 'ceo') return;",
+    find: 'if (!ENEMY_TYPES[e.type].patrol) return;',
     replace: 'if (false) return;',
     note: 'the CEO patrols the boardroom instead of waiting, and can wander off its own arena' },
 
@@ -446,7 +446,7 @@ module.exports = [
     note: 'the left/right pair is mirrored in all eight viewing cases — exactly what shipped, from reasoning about the sign of atan2 instead of measuring' },
 
   { id: 'sprite-drone-rotates', group: 'Phase 2', file: 'wolf3d/render.js',
-    find: "if (e.type !== 'guard') return SPR[e.type];",
+    find: 'if (!ENEMY_TYPES[e.type].rotates) return SPR[e.type];',
     replace: 'if (false) return SPR[e.type];',
     note: 'drones and the CEO get the guard rotation table and render as guards from three of four angles' },
 
@@ -674,9 +674,14 @@ module.exports = [
     replace: 'void 0;',
     note: 'blood accumulates without a ceiling — a few hundred kills is a few hundred sprites sorted and depth-tested every frame' },
 
-  { id: 'decal-drones-bleed', group: 'Phase 4', file: 'wolf3d/enemies.js',
-    find: "if (e.type === 'drone') return;",
-    replace: 'if (false) return;',
+  // Anchored on the ROW, not on a guard in spillBlood: the count derived from
+  // `blood` is the whole mechanism, and an early-out beside it was dead weight
+  // that read like the mechanism and survived being deleted.
+  { id: 'decal-drones-bleed', group: 'Phase 4', file: 'wolf3d/roster.js',
+    find: `    want: 2.2, burst: 1, radius: 0.35, score: 150,
+    loot: 0.30, blood: [0, 0],`,
+    replace: `    want: 2.2, burst: 1, radius: 0.35, score: 150,
+    loot: 0.30, blood: [1, 2],`,
     note: 'drones bleed. They are drones' },
 
   { id: 'decal-no-depth-bias', group: 'Phase 4', file: 'wolf3d/render.js',
@@ -710,12 +715,12 @@ module.exports = [
     note: 'the audio cuts dead the instant a floor is cleared, which sounds like a crash rather than a reward' },
 
   { id: 'music-no-boss-track', group: 'Phase 4', file: 'wolf3d/audio.js',
-    find: "if (boss && boss.alive && boss.state !== 'idle') return MUSIC[MUSIC.length - 1];",
-    replace: "if (false) return MUSIC[MUSIC.length - 1];",
-    note: 'the CEO fight plays the ordinary floor track — the boardroom march never appears' },
+    find: "  if (boss && boss.alive && boss.state !== 'idle') {",
+    replace: '  if (false) {',
+    note: 'a boss fight plays the ordinary floor track — no boss march ever appears' },
 
   { id: 'music-one-track', group: 'Phase 4', file: 'wolf3d/audio.js',
-    find: 'return MUSIC[levelIndex % (MUSIC.length - 1)];',
+    find: 'return MUSIC[levelIndex % LEVELS.length];',
     replace: 'return MUSIC[0];',
     note: 'every floor plays floor 1’s track' },
 
@@ -892,8 +897,8 @@ module.exports = [
     note: 'the objective line sends you to the elevator before you hold the keycard that opens the way to it' },
 
   { id: 'objective-ignores-boss', group: 'Phase 7', file: 'wolf3d/hud.js',
-    find: "  if (boss && boss.alive)               return 'THE BOARD IS IN SESSION \\u2014 KILL THE CEO';",
-    replace: "  if (false) return 'THE BOARD IS IN SESSION \\u2014 KILL THE CEO';",
+    find: '  if (boss && boss.alive)               return bossRow().objective;',
+    replace: '  if (false) return bossRow().objective;',
     note: 'floor 3 tells you to ride an elevator that use() refuses while the CEO lives' },
 
   // ── the palette ───────────────────────────────────────────────────────────
@@ -925,5 +930,101 @@ module.exports = [
     find: 'if (e.graceT > 0) { e.graceT -= dt; break; }',
     replace: 'if (false) { e.graceT -= dt; break; }',
     note: 'an enemy that spawns already looking at the player fires on the first frame — no beat to reach cover' },
+
+  // ══ THE ROSTER ═════════════════════════════════════════════════════════════
+  // ENEMY_TYPES made every per-type difference a column. These are the columns
+  // that have somewhere to go wrong: a value the engine could just as well have
+  // kept as a constant, and the one piece of aliasing the table introduces.
+
+  { id: 'roster-spec-shared', group: 'Roster', file: 'wolf3d/world.js',
+    find: 'const spec = { ...row.spec };',
+    replace: 'const spec = row.spec;',
+    note: 'every body of a type shares one spec object, so a boss phase re-tunes the whole floor — and permanently, because the roster outlives the level' },
+
+  { id: 'roster-score-flat', group: 'Roster', file: 'wolf3d/combat.js',
+    find: 'player.score += ENEMY_TYPES[best.type].score;',
+    replace: 'player.score += 150;',
+    note: 'every kill pays a drone’s 150, so a boss is worth the same as the cheapest body on the floor' },
+
+  { id: 'roster-turret-mobile', group: 'Roster', file: 'wolf3d/roster.js',
+    find: 'spec: { hp: 35, speed: 0, range: 14.0, cd: 1.60, dmg: 12, sight: 18 },',
+    replace: 'spec: { hp: 35, speed: 1.35, range: 14.0, cd: 1.60, dmg: 12, sight: 18 },',
+    note: 'the ceiling turret walks off its mount and chases you around the floor' },
+
+  { id: 'roster-separate-shoves-fixtures', group: 'Roster', file: 'wolf3d/enemies.js',
+    find: 'if (!aFixed) moveEnemy(a, -ux, -uy);',
+    replace: 'moveEnemy(a, -ux, -uy);',
+    note: 'a body walking into a turret pushes it out of its alcove' },
+
+  { id: 'roster-rooted-opens-doors', group: 'Roster', file: 'wolf3d/enemies.js',
+    find: 'if (moveEnemy(e, w.x * sp, w.y * sp)) openDoorAhead(e, w.gx, w.gy);',
+    replace: 'moveEnemy(e, w.x * sp, w.y * sp); openDoorAhead(e, w.gx, w.gy);',
+    note: 'a rooted turret cycles a door it can never reach, from across the room' },
+
+  { id: 'blast-never-fires', group: 'Roster', file: 'wolf3d/combat.js',
+    find: 'if (ENEMY_TYPES[best.type].blast) deathBlast(best);',
+    replace: 'if (false) deathBlast(best);',
+    note: 'a spark charge dies quietly — killing one at your feet is free' },
+
+  { id: 'blast-unbounded', group: 'Roster', file: 'wolf3d/enemies.js',
+    find: '  if (dist >= b.radius) return;',
+    replace: '  if (false) return;',
+    note: 'a spark’s blast has no radius, so one dying across the floor hurts you' },
+
+  { id: 'blast-through-walls', group: 'Roster', file: 'wolf3d/enemies.js',
+    find: '  if (dist >= b.radius) return;\n  if (!hasLOS(e.x, e.y, player.x, player.y)) return;',
+    replace: '  if (dist >= b.radius) return;\n  if (false) return;',
+    note: 'a spark detonates through panelling, so cover is a lie against them' },
+
+  // ══ THREE BOSSES ═══════════════════════════════════════════════════════════
+  // Everything that was one hardcoded string while there was one boss, plus the
+  // fields the two later fights added. Each of these is correct for the CEO and
+  // wrong for the other two, which is the exact shape of the bug the roster was
+  // introduced to make impossible.
+
+  { id: 'boss-track-by-position', group: 'Bosses', file: 'wolf3d/audio.js',
+    find: 'return MUSIC.find(t => t.name === want) || MUSIC[LEVELS.length];',
+    replace: 'return MUSIC[MUSIC.length - 1];',
+    note: 'the old "last row by convention" lookup: every boss on every floor plays the FOUNDER’s march' },
+
+  { id: 'boss-bar-names-the-ceo', group: 'Bosses', file: 'wolf3d/hud.js',
+    find: "el('bossName').textContent  = row.title;",
+    replace: "el('bossName').textContent  = 'CHIEF EXECUTIVE OFFICER';",
+    note: 'the health bar over BLACK ICE and the FOUNDER is labelled CHIEF EXECUTIVE OFFICER' },
+
+  { id: 'boss-prompt-static', group: 'Bosses', file: 'wolf3d/hud.js',
+    find: "msg = (boss && boss.alive) ? bossRow().heldBy",
+    replace: "msg = (boss && boss.alive) ? 'ELEVATOR — HELD BY THE BOARD'",
+    note: 'the elevator on the roof says the board is holding it' },
+
+  { id: 'boss-objective-static', group: 'Bosses', file: 'wolf3d/hud.js',
+    find: '  if (boss && boss.alive)               return bossRow().objective;',
+    replace: "  if (boss && boss.alive)               return 'THE BOARD IS IN SESSION — KILL THE CEO';",
+    note: 'every boss floor tells you to kill the CEO, including the two it is not on' },
+
+  { id: 'boss-phase-range', group: 'Bosses', file: 'wolf3d/boss.js',
+    find: 'if (ph.range !== undefined) e.spec.range = ph.range;',
+    replace: 'if (false) e.spec.range = ph.range;',
+    note: 'a phase cannot change a boss’s reach, so BLACK ICE never shortens and the FOUNDER never closes the fight down' },
+
+  { id: 'boss-summon-always-drones', group: 'Bosses', file: 'wolf3d/boss.js',
+    find: 'if (ph.summon) summonMinions(e, ph.summon.type, ph.summon.n);',
+    replace: "if (ph.summon) summonMinions(e, 'drone', ph.summon.n);",
+    note: 'every boss calls in drones — BLACK ICE seeds no turrets and the FOUNDER no enforcers' },
+
+  { id: 'roster-blackice-mobile', group: 'Bosses', file: 'wolf3d/roster.js',
+    find: "      { at: 1.00, name: 'COLD BOOT',      speed: 0,    cd: 1.30, dmg: 14, range: 16.0,",
+    replace: "      { at: 1.00, name: 'COLD BOOT',      speed: 1.60, cd: 1.30, dmg: 14, range: 16.0,",
+    note: 'BLACK ICE walks off its pedestal in the opening phase, so the vault’s pillars stop being the fight' },
+
+  { id: 'boss-exempt-from-thinning', group: 'Bosses', file: 'wolf3d/level.js',
+    find: '    if (!ENEMY_TYPES[s[0]].boss) {',
+    replace: '    if (true) {',
+    note: 'a boss goes through the difficulty thinner like a guard, so an easy setting can delete the floor’s win condition' },
+
+  { id: 'boss-relocated-off-its-mark', group: 'Bosses', file: 'wolf3d/level.js',
+    find: '    if (!ENEMY_TYPES[e.type].relocate) continue;',
+    replace: '    if (false) continue;',
+    note: 'spawn-safety walks bosses and wall turrets off the tiles their floors placed them on' },
 
 ];

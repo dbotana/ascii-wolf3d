@@ -14,7 +14,10 @@ and a deployment story. Phase 6 closed every coverage gap the battery had
 triaged, and the battery now reports none. Phase 7 is the navigation pass: the
 three floors rewritten to one layout language, an auto-map and an objective
 line, and a weapon roster you earn five kills at a time rather than one that
-ships fully owned and entirely invisible. Open work is
+ships fully owned and entirely invisible. Phase 8 is the roster pass: every
+per-type difference became a column of `ENEMY_TYPES`, and on top of that table
+three more enemies, two more bosses and the two floors they hold — five floors
+now, eight kinds of body. Open work is
 ordered roughly by value per hour of work; everything finished is collected
 under **Completed** at the bottom.
 
@@ -26,12 +29,25 @@ number — line numbers drift with every edit, and the file map in
 
 ## Also open
 
-- [ ] **`PAR_TIME` has not been re-timed since the floors were rewritten.** It
-  is still `[150, 180, 210]`, measured against maps that were four or five very
-  large open halls. The new floors have a spine and a ring and traverse faster,
-  so the time bonus (10/sec under par) is probably now more generous than it
-  reads. It wants a stopwatch on a real playthrough at BRING 'EM ON, not a
-  guess — which is why it was left alone rather than adjusted blind.
+- [ ] **`PAR_TIME` has never been measured on a real playthrough.** It is
+  `[150, 180, 210, 230, 260]`. The first three were set against maps that were
+  four or five very large open halls, and the floors were rewritten under them
+  — a spine and a ring traverse faster, so the time bonus (10/sec under par) is
+  probably more generous than it reads. The last two were picked by eye when
+  floors 4 and 5 landed, and floor 4 in particular carries 26 bodies against
+  floor 3's 17, so it may want more. All five want a stopwatch at BRING 'EM ON
+  rather than another guess, which is why they have been left alone.
+
+- [ ] **The mutation battery's mean is close to a whole suite run.** ~25 minutes
+  for 181 mutants on ten cores. `--bail` means a mutant costs the time to its
+  first failing assertion, but the mean is 82s against a ~50s clean suite —
+  most mutants are caught late, so they pay for most of the file. Reordering
+  `run-tests.js` so cheap broad groups run first would cut it, and was NOT done:
+  group order carries real state coupling (fixtures must come last because
+  `load()` replaces process globals, multi-floor groups restore `startLevel(0)`,
+  the difficulty group restores `setDifficulty(2)`). Trading that for ~20% on a
+  weekly job is a bad deal today. Worth revisiting only if the number starts
+  mattering — the runner now prints its own cost, so it is measurable.
 
 ---
 
@@ -61,8 +77,11 @@ number — line numbers drift with every edit, and the file map in
 - `frontCell` (`wolf3d/world.js`) probes three fixed distances (0.6 / 1.1 / 1.6)
   along the facing vector to find what you are trying to use. Crude, and it can
   pick a diagonal neighbour at odd angles.
-- The atlas holds only ~80 entries in normal play against a 32768 cap, so there
-  is plenty of headroom for new colours and glyphs.
+- The atlas holds ~330 entries after a fighting pass over all five floors
+  (156 / 216 / 249 / 308 / 326 cumulative), against a 32768 cap — five new
+  palette keys and eight bodies' worth of glyphs barely moved it. Still plenty
+  of headroom for new colours and art, and the 8-step quantisation in `mix()`
+  is what keeps it that way.
 - `castSecrets` returns `mapX`/`mapY` truncated from a fractional slab origin.
   Nothing reads them — the wall renderer uses `cell`, `side`, `wallX` and the
   corrected distance — so they are dead fields rather than a bug, but they would
@@ -78,6 +97,103 @@ number — line numbers drift with every edit, and the file map in
 
 Newest first. Kept for the design notes — several record why an approach that
 looks obvious was not the one taken.
+
+- [x] **Phase 8 — the roster pass.** Three more enemy types and two more
+  bosses. The content was the easy half; the reason it needed a pass first is
+  that there was no enemy table. A type was a ternary arm in `mkEnemy` plus
+  about a dozen `e.type === 'ceo'` / `=== 'guard'` guards spread over
+  `enemies.js`, `level.js`, `render.js` and `hud.js` — so the cost of a type
+  was one branch per behaviour, and five more types would have been forty more
+  branches and `enemies.js` and `art.js` both over the 400-line budget. That is
+  the shape growth rule 1 exists to reject, so the table came first and the
+  content went on top of it.
+
+  `wolf3d/roster.js` is now one row per type and every per-type difference is a
+  column: `spec`, `want`, `burst`, `radius`, `score`, `loot`, `blood`, `patrol`,
+  `rotates`, `bobs`, `relocate`, `alertSfx`, `char`, an optional `blast`, and
+  for a boss its `phases` plus everything it says about itself — `title`,
+  `tag`, `objective`, `heldBy`, `deny`, `track`. Those last six had been
+  hardcoded CEO strings, which is correct for exactly as long as there is one
+  boss. The whole refactor shipped on its own with **every existing assertion
+  passing unchanged**; that was the proof it was faithful.
+
+  Notes worth keeping:
+
+  - **`mkEnemy` copies the row's spec (`{ ...row.spec }`) and must keep doing
+    it.** `stepBossPhase` writes speed, cooldown and damage straight onto
+    `e.spec`, so an alias would re-tune every body of that type — permanently,
+    because the roster outlives the floor. There is an assertion on it now, and
+    a mutant (`roster-spec-shared`).
+  - **`speed: 0` needed no new code.** `moveEnemy` treats a zero delta as no
+    delta, so the chase state has nothing to do and the turret holds position —
+    the whole enemy is a row. Two places had to learn about it and neither is
+    type-specific: `separateEnemies` gives a rooted body's partner the whole
+    shove instead of half, and `openDoorAhead` is gated on having actually
+    moved, or a bolted-down turret cycles a door across the room off a waypoint
+    it can never walk to.
+  - **The boss fights moved to `wolf3d/boss.js`.** `enemies.js` was at 390 of
+    400 and bosses are the growth area. `stepBossPhase` is generic over
+    `phases`: it copies whichever of speed/cd/damage/range/sight a phase names,
+    which is why BLACK ICE and THE FOUNDER can move their reach and the CEO
+    does not have to care.
+  - **The boss march is looked up by name, not position.** It was
+    `MUSIC[MUSIC.length - 1]`, commented "last row by convention". That is not
+    a convention, it is a single-boss assumption, and the old test kept passing
+    with two bosses because the *last floor's* boss still happened to own the
+    last row.
+  - **Floors 4 and 5 are shaped against their bosses**, not decorated. The
+    vault is full of pillars because BLACK ICE opens rooted at 16u and the
+    fight is what you can put between you and it; the helipad is nearly bare
+    because THE FOUNDER's reach shrinks as its speed climbs, and a deck full of
+    cover would be fighting its own boss.
+  - **The retrofit into floors 1-3 swapped bodies rather than adding them**, so
+    the kill counts stayed 15/15/17 and `WEAPON_UNLOCK = [0, 0, 5, 10]` did not
+    need re-timing. Two turret placements had to move: they were the first
+    thing on the floor with line of sight to the spawn, and `relocate: false`
+    means spawn safety will not walk them out of it.
+
+- [x] **Four test-fragility bugs, all found by the battery rather than by
+  reading.** Worth recording together because three of them are the same
+  mistake.
+
+  Three tests took **"the first alive enemy"** and got a turret once floors 1-3
+  had them. A turret has `speed: 0`, so `separateEnemies`' rooted-body branch
+  holds it still whether or not the guard under test exists — the corpse test,
+  the four-stacked test and the coincident-pair test all passed while measuring
+  nothing. They name what they need now (`e.spec.speed > 0`, or a guard) and
+  say so in a setup assertion.
+
+  The fourth was worse because it was **order-dependent**. A test asserted
+  "killing a spark at 5.0u costs nothing" while the spark was alive and chasing
+  the whole time it was being shot, so the range in the message was the range it
+  started at. The mutation that removes the blast radius deals
+  `22 * (1 - d/4.4)` damage, which rounds to zero at d ≈ 4.4 — so whenever the
+  body drifted there first, a real bug read as no damage. It **died when run
+  alone and survived the full battery**, which is the signature. Both sparks are
+  pinned now and both distances are asserted rather than assumed.
+
+  Separately: `run(n, held, perFrame)` was wrapped at the top of `run-tests.js`
+  as `(n, held) => g.run(n, held)`, silently dropping the hook. A test that
+  passed one got no hook and no error.
+
+- [x] **The mutation battery, measured and made measurable.** A run reported
+  190 minutes and the number was a lie — the machine had slept mid-run and the
+  timer is wall clock. The same tree measured 23 minutes immediately after. To
+  stop that being invisible next time, the runner prints its own cost: total
+  suite-seconds, mean per mutant, and the five slowest with their verdicts.
+
+  Then the real cuts. The suite went 54s to 49s: the boss group was the single
+  most expensive at 9.4s and it was new, splitting as 3.7s of fights, 2.2s of
+  standoff and 3.4s of bursts. The fights stayed — "a player with the starting
+  pistol can down 800 hp in bounded frames" is a balance claim worth paying for
+  — and the other two were over-provisioned: the standoff loop runs until the
+  boss settles instead of a fixed 300 frames, and the burst loop went 400 to
+  250, which is still two and a half attack cycles. Phase sampling moved to
+  per-frame, which is cheaper *and* more accurate, since a big hit can cross two
+  thresholds between shots. `--jobs` defaulted to `min(cpus, 8)` and left two
+  cores idle; it is `min(cpus - 1, 16)` now. Anything marked `unkillable` or
+  `gap` runs the whole suite by definition, so those are scheduled first rather
+  than one landing last and stranding every other worker.
 
 - [x] **`separateEnemies` shoved exactly-coincident bodies the wrong way,
   once.** The coincident branch picked a deterministic axis from the pair's

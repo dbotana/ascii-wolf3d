@@ -61,36 +61,42 @@ the bundler and the harness both read it rather than keeping their own list.
 
 | file | lines | what |
 |---|---|---|
-| `wolf3d/style.css` | 628 | all CSS |
-| `wolf3d/config.js` | 111 | screen/projection constants, `DIFFICULTY`, `DEATH_TIME`, palette + fog cache, distance ramps, faces |
+| `wolf3d/style.css` | 638 | all CSS |
+| `wolf3d/config.js` | 116 | screen/projection constants, `DIFFICULTY`, `DEATH_TIME`, palette + fog cache, distance ramps, faces |
 | `wolf3d/scores.js` | 148 | the persistent high score table and its three storage guards |
-| `wolf3d/levels.js` | 185 | the three floors, `FLOOR_NAMES`, `PAR_TIME` |
-| `wolf3d/art.js` | 307 | `SPR` sprite table, the pistol's `GUN_*` view-model frames |
-| `wolf3d/gore.js` | 107 | `DEATH_SEQ` death-frame sequences, `DECAL_SPR` blood splats |
+| `wolf3d/levels.js` | 286 | the five floors, `FLOOR_NAMES`, `PAR_TIME` |
+| `wolf3d/roster.js` | 182 | `ENEMY_TYPES` — one row per enemy, and the boss phase tables |
+| `wolf3d/bodies.js` | 270 | the post-MVP enemy sprites, spread into `SPR` by art.js |
+| `wolf3d/art.js` | 312 | the MVP roster's sprites + pickups (opens with `...BODY_SPR`), the pistol's `GUN_*` frames |
+| `wolf3d/gore.js` | 201 | `DEATH_SEQ` death-frame sequences, `DECAL_SPR` blood splats |
 | `wolf3d/weapons.js` | 208 | knife / SMG / chaingun art, the `WEAPONS` table, `WEAPON_UNLOCK` |
 | `wolf3d/gfx.js` | 92 | glyph atlas, `drawChar`, wall shading, `neonHex`/`lockColor` |
-| `wolf3d/audio.js` | 289 | the Web Audio graph, and the `MUSIC` table + its scheduler |
+| `wolf3d/audio.js` | 316 | the Web Audio graph, the `MUSIC` table, and the scheduler + track lookup |
 | `wolf3d/input.js` | 64 | keyboard, mouse-look, pointer lock, the pause hooks |
 | `wolf3d/touch.js` | 212 | the twin-stick overlay: stick math, look pad, buttons |
-| `wolf3d/world.js` | 326 | grid + entities, difficulty, pause, grid queries (`inMap`, `cellAt`, `hasKey`), doors, push-walls |
-| `wolf3d/level.js` | 183 | `populateEnemies`, `parseLevel` (incl. the door-axis pass), `startLevel`, `nextLevel` |
+| `wolf3d/world.js` | 333 | grid + entities, difficulty, pause, grid queries (`inMap`, `cellAt`, `hasKey`), doors, push-walls |
+| `wolf3d/level.js` | 259 | `populateEnemies`, `parseLevel` (incl. the door-axis pass), `startLevel`, `nextLevel` |
 | `wolf3d/raycast.js` | 92 | DDA raycast incl. thin-wall doors, `hasLOS`, `spriteSpan` |
 | `wolf3d/nav.js` | 103 | the BFS flow field |
-| `wolf3d/enemies.js` | 379 | FSM, steering, patrols, separation, loot, blood, the CEO |
-| `wolf3d/combat.js` | 309 | the roster lookup, earning it, firing, the magazine cycle, damage numbers, pickups |
+| `wolf3d/enemies.js` | 362 | FSM, steering, patrols, separation, loot, blood, death blasts |
+| `wolf3d/boss.js` | 69 | `stepBossPhase`, `summonMinions`, `bossRow` — generic over `phases` |
+| `wolf3d/combat.js` | 310 | the roster lookup, earning it, firing, the magazine cycle, damage numbers, pickups |
 | `wolf3d/render.js` | 399 | `drawWalls`, sprites, decals, the weapon view-model, crosshair, the damage arc |
 | `wolf3d/minimap.js` | 137 | the auto-map: `seen`, the reveal sweep, `drawMinimap` |
-| `wolf3d/hud.js` | 247 | toasts, banners, status bar, health bar, the weapon strip, the objective line |
+| `wolf3d/hud.js` | 250 | toasts, banners, status bar, health bar, the weapon strip, the objective line |
 | `wolf3d/tally.js` | 169 | the end-of-floor percentage screen, its payout, `clearLevel`, `advanceFromTally` |
 | `wolf3d/main.js` | 203 | `updatePlayer`, `frame`, boot |
 
 **Order matters only for top-level execution.** Function declarations hoist
 across the whole shared scope, so a function body may call anything in any file
-regardless of order — that is how `mkEnemy` reads `CEO_PHASES` from a file
-loaded four tags later, and it is fine. What genuinely needs ordering is small:
+regardless of order — that is how `mkEnemy` reads `ENEMY_TYPES` at call time,
+and it is fine. What genuinely needs ordering is small:
 
 - top-level `const` initialisers that read another file's `const`
   (`CANVAS_W = COLS * CELL_W`), which is why `config.js` is first;
+- `bodies.js` must precede **`art.js`**: `SPR`'s literal opens with
+  `...BODY_SPR`, which is the seam that keeps `SPR[type + view]` a single
+  lookup while the art lives in two files;
 - `weapons.js` must follow **`art.js`**, not merely `config.js`: the pistol's
   row in `WEAPONS` points straight at `GUN_IDLE`/`GUN_FIRE`/`GUN_RECOIL`, and
   it reads `CLIP_SIZE`, `RELOAD_TIME` and `MAX_DEPTH` from `config.js`;
@@ -384,6 +390,35 @@ landed wall is `'done'`.
 
 ## Enemies
 
+**Every per-type difference is a column of `ENEMY_TYPES` in `wolf3d/roster.js`,
+never a branch.** `mkEnemy` copies a row's `spec`, and the FSM, the renderer,
+`populateEnemies` and the HUD all read fields off the row: `loot`, `blood`,
+`radius`, `patrol`, `rotates`, `bobs`, `relocate`, `alertSfx`, `want`, `burst`,
+`score`, `char`, plus an optional `blast` and, for a boss, `phases`. Adding a
+type is a row there, four sprites in `bodies.js`, a `DEATH_SEQ` row in
+`gore.js`, and a character in a level. No new code — that is growth rule 1, and
+this table is what redeems it: before it, `type === 'ceo'` appeared in five
+files and the cost of a type was a branch per behaviour.
+
+The roster today:
+
+| type | char | hp | speed | range | notes |
+|---|---|---|---|---|---|
+| guard | `g` | 45 | 1.35 | 9.5 | the only type with rotation sprites |
+| drone | `d` | 28 | 2.10 | 7.0 | hovers, bleeds nothing |
+| turret | `t` | 35 | **0** | 14.0 | wall-mounted; `speed: 0` IS the behaviour |
+| spark | `k` | 30 | 2.80 | 1.4 | closes to contact, `blast` on death |
+| enforcer | `h` | 140 | 0.90 | 8.0 | 3-round bursts, 0.50 radius — a corridor plug |
+| CEO | `C` | 520 | — | 12.0 | boss, floor 3 |
+| BLACK ICE | `I` | 640 | — | 16.0 | boss, floor 4 |
+| THE FOUNDER | `F` | 800 | — | 13.0 | boss, floor 5 |
+
+`speed: 0` needed no code: `moveEnemy` treats a zero delta as no delta, so the
+chase state has nothing to do and the body holds. Two places had to learn about
+it — `separateEnemies` gives a rooted body's partner the whole shove instead of
+half, and `openDoorAhead` is gated on having actually moved, or a turret would
+cycle a door across the room off a waypoint it can never walk.
+
 State machine in `stepEnemies`: `idle → alert → chase → attack → hurt → dead`,
 with `dying` as a brief animation state before `dead`. The `attack` case fires
 through `enemyShot()` and re-enters itself while `shotsLeft > 1`, so a burst is
@@ -487,25 +522,37 @@ shoot.
 > back. The view-dependent door slide this note used to point at as a sibling
 > turned out not to be a bug at all — see **The door trick** above.
 
-### The CEO
+### The bosses
 
-Floor 3's boss is an ordinary member of `enemies` — same FSM, same `castRay`
-line of sight, same death animation — with `type: 'ceo'` and a `phase` that
-re-tunes its own `spec` as its health falls. `CEO_PHASES` is the whole fight:
+A boss is an ordinary member of `enemies` — same FSM, same `castRay` line of
+sight, same death animation — with `boss: true` and a `phases` table on its
+roster row. `stepBossPhase` in `wolf3d/boss.js` is generic over that table: it
+copies whichever of `speed / cd / dmg / range / sight` a phase names onto
+`e.spec`, plus `want` and `burst` onto the body, and calls `summonMinions` for
+a phase's `{ type, n }`.
 
-| phase | at | speed | cd | dmg | standoff | burst |
-|---|---|---|---|---|---|---|
-| BOARD MEETING | 100% | 1.10 | 1.40 | 16 | 5.2 | 1 |
-| HOSTILE TAKEOVER | 62% | 1.75 | 1.00 | 14 | 3.2 | 3 |
-| GOLDEN PARACHUTE | 28% | 2.20 | 0.62 | 12 | 2.3 | 4 |
+| | floor | hp | the arc |
+|---|---|---|---|
+| THE CEO | 3 | 520 | closes and speeds up: 5.2u → 2.3u standoff, 1 → 4 round bursts, summons drones |
+| BLACK ICE | 4 | 640 | the inverse: **rooted** at 16u reach for two phases, seeds the vault with turrets, then comes off the pedestal |
+| THE FOUNDER | 5 | 800 | pulls you in: reach 13 → 5 as speed climbs 1.3 → 2.6, summons enforcers then sparks, and `blast`s on death |
 
-`stepCeoPhase` mutates `e.spec` in place, which is safe only because `mkEnemy`
-builds a fresh spec literal per enemy — don't hoist those into shared constants.
+`stepBossPhase` mutates `e.spec` in place, which is safe only because `mkEnemy`
+builds a **fresh copy** of the roster's spec per body (`{ ...row.spec }`). Do
+not make that an alias — a shared spec would re-tune every body of that type,
+permanently, since the roster outlives the floor. There is a test for it.
 
-The last phase calls `summonDrones`, which **increments `totalEnemies`**. That
-is deliberate: summoned drones are real enemies and count toward the floor's
-kill ratio, so 100% stays achievable and stays honest. If they were excluded the
-ratio could exceed 100% the moment you killed one.
+`summonMinions` **increments `totalEnemies`**. That is deliberate: summons are
+real enemies and count toward the floor's kill ratio, so 100% stays achievable
+and stays honest. If they were excluded the ratio could exceed 100% the moment
+you killed one.
+
+Everything a boss says about itself is a column too — `title` (the bar),
+`tag` (the phase toast), `objective`, `heldBy`, `deny` and `track`. All five
+were hardcoded CEO strings while there was one boss, which is exactly the shape
+of bug that stays invisible until the second one lands. The boss march is found
+by **name** off `track`; it used to be `MUSIC[MUSIC.length - 1]`, "last row by
+convention", which cannot survive two.
 
 The elevator on a floor with a live boss refuses (`use()` checks `boss.alive`),
 and `updatePrompt` says so. Nothing in `validate-level.js` models that gate — it
@@ -519,12 +566,14 @@ stripped to floor during `parseLevel` so they never block rays.
 ```
 #  panel        |  window       N  neon sign     X  exit switch (solid)
 D  door         R  red-locked   B  blue-locked   S  secret push-wall
-g  guard        d  sec-drone    C  the CEO (floor 3 only)
+g  guard        d  sec-drone    t  ceiling turret
+k  spark charge  h  corporate enforcer
+C  the CEO (3)   I  BLACK ICE (4)  F  the FOUNDER (5)
 +  ramen (+25hp)  a  battery cell (+8 ammo)
 r  red keycard    b  blue keycard    $  crypto wallet (+500)    @  spawn
 ```
 
-Three 40x40 floors, each its own `const LEVEL_N`, collected into `LEVELS` with
+Five 40x40 floors, each its own `const LEVEL_N`, collected into `LEVELS` with
 display names in `FLOOR_NAMES` and target times in `PAR_TIME`:
 
 | | name | route |
@@ -532,6 +581,15 @@ display names in `FLOOR_NAMES` and target times in `PAR_TIME`:
 | 1 | ATRIUM · SUBLEVEL | plain door → red keycard (west office) → red door → blue keycard (neon office) → blue door → elevator |
 | 2 | R&D · SERVER FARM | both keycards in mirrored lab wings behind plain doors → red door → clean room → blue door |
 | 3 | EXECUTIVE SUITE | red keycard in a corner office off the aisle → red door → boardroom → kill the CEO → elevator |
+| 4 | BLACK ICE · DATA VAULT | red keycard behind a plain door off the spawn bay → red door → the vault → kill BLACK ICE, take the blue card it guards → blue door → elevator |
+| 5 | THE SPIRE · HELIPAD | red keycard in a west plant room → red door → blue keycard east → blue door → the deck → kill THE FOUNDER → elevator |
+
+Floors 4 and 5 each carry one deliberately large room, the way floor 3 carries
+the boardroom, and they are shaped against their bosses rather than decorated:
+the vault is full of pillars because BLACK ICE opens rooted at 16u and the fight
+is what you can put between you and it, and the helipad is nearly bare because
+THE FOUNDER's reach *shrinks* as its speed climbs and a deck full of cover would
+be fighting its own boss.
 
 ### How a floor is shaped, and why
 
@@ -613,7 +671,7 @@ last floor sets `gameState = 'won'` and shows the OUT banner instead.
 Run all of these before shipping any change. None of them needs a browser.
 
 ```sh
-node reference/run-tests.js                              # 580 assertions against the real game loop
+node reference/run-tests.js                              # 731 assertions against the real game loop
 WOLF3D_HTML=dist/wolf3d.html node reference/run-tests.js # ...and against the shipped bundle
 node reference/validate-level.js                         # map geometry + key-gated reachability, all 3 floors
 node reference/bundle.js                                 # rebuild dist/wolf3d.html
@@ -698,6 +756,26 @@ applies one patch, and points the PRISTINE suite at the copy with
 `WOLF3D_HTML`. `reference/` is never copied — the tools have to stay honest —
 and that works because `collectSources` resolves every `<script src>` relative
 to the HTML's own directory.
+
+**What it costs.** ~25 minutes for the whole catalog on ten cores. The runner
+prints its own cost — total suite-seconds, mean per mutant, and the five
+slowest — because that is the only way to notice this file getting expensive.
+Two things set the number:
+
+- **`--bail`.** A killed mutant costs the time to its FIRST failing assertion,
+  not a whole suite run, so mutants caught by an early group are nearly free
+  and ones caught in the fixtures at the end pay for everything above them.
+  Anything that SURVIVES pays the full suite by definition.
+- **`--jobs`**, defaulting to one less than the core count (capped at 16).
+  Every worker is a CPU-bound node process, so throughput is linear in cores.
+  The declared long poles — anything marked `unkillable` or `gap`, which always
+  run the whole suite — are scheduled first, so one of them cannot land last
+  and strand every other worker for a final full run.
+
+If a run reports hours rather than minutes, suspect the machine slept: the
+timer is wall clock. It measured 190 minutes once for exactly that reason, and
+23 minutes on the same tree immediately after.
+
 
 Three things about it are load-bearing:
 
@@ -891,6 +969,35 @@ enforces. It names the goal and never the route.
 
 ## Bugs already made here, so they aren't made twice
 
+- A test asserted "killing a spark at 5.0u costs nothing" while the spark was
+  **alive and chasing the whole time it was being shot**, so the range in the
+  message was the range it started at, not the one it died at. The mutation
+  that removes the blast radius deals `22 * (1 - d/4.4)` damage, which rounds
+  to zero at d ≈ 4.4 — so whenever the body drifted there first, a real bug
+  read as "no damage" and the mutant survived. It died when run alone and
+  survived the full battery, which is the signature: **order-dependent
+  coverage.** If an assertion's message states a number, the test has to hold
+  that number and then measure it. Both distances are pinned and asserted now.
+- The harness's `run(n, held, perFrame)` was wrapped at the top of
+  `run-tests.js` as `(n, held) => g.run(n, held)` — the hook argument was
+  dropped silently. A test that passed one got no hook, no error, and a
+  quietly weaker assertion. Wrappers over a harness API have to carry its whole
+  signature or not exist.
+- The spawn-safety exemption assertion for bosses and turrets read
+  `hypot(e.x - e.spawnX, e.y - e.spawnY) < 1e-9` — and **`relocateSpawnLOS`
+  moves `spawnX`/`spawnY` with the body**, on purpose, so the patrol leash
+  follows it. The check was therefore true of a body it had just walked across
+  a room, and the mutation that removed the exemption entirely survived a green
+  suite. Measure "it did not move" against something that does not move with
+  it: the assertion now compares the body's tile to the character the map
+  authored. Any invariant about a starting position has to be anchored outside
+  the thing that can change it.
+- `musicTrackFor` reached for the boss march as `MUSIC[MUSIC.length - 1]`,
+  documented as "last row by convention". That is not a convention, it is a
+  single-boss assumption: the moment a second boss existed, both played the last
+  row's track and the older test kept passing because the LAST floor's boss
+  still happened to own it. A lookup that only resolves correctly when there is
+  one of something will not announce itself when there are two — key it by name.
 - Enemy movement applied its y-step twice when the x-step was blocked, giving
   double sideways speed. Axis-separated collision needs two independent `if`s,
   never an `if/else if` followed by a bare `if`.

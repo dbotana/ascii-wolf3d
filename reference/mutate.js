@@ -80,7 +80,10 @@ const flag = name => process.argv.includes('--' + name);
 const VERBOSE = flag('verbose');
 const KEEP    = flag('keep');
 const ONLY    = arg('only', null);
-const JOBS    = Math.max(1, parseInt(arg('jobs', Math.min(os.cpus().length, 8)), 10));
+// One worker is one CPU-bound node process, so throughput is linear in cores.
+// Leave one for the OS, and cap it so a 64-core CI box does not try to hold 63
+// node heaps at once. CI passes --jobs explicitly and is unaffected.
+const JOBS    = Math.max(1, parseInt(arg('jobs', Math.min(os.cpus().length - 1, 16)), 10));
 
 // What a mutant needs to be a complete game. reference/ is deliberately absent.
 const GAME_PARTS = ['wolf3d.html', 'wolf3d'];
@@ -171,19 +174,21 @@ function runSuite(htmlPath) {
 
 async function runMutant(m, scratch) {
   const dest = path.join(scratch, m.id);
+  const t0 = Date.now();
   copyGame(dest);
   const bad = applyPatch(dest, m);
-  if (bad) return { m, verdict: 'STALE', detail: bad };
+  if (bad) return { m, verdict: 'STALE', detail: bad, ms: Date.now() - t0 };
   const { code, out } = await runSuite(path.join(dest, 'wolf3d.html'));
+  const ms = Date.now() - t0;
   if (!KEEP) fs.rmSync(dest, { recursive: true, force: true });
   // A load failure is not a kill. assertProbe throws by name when a source
   // fails to evaluate, and a mutation that breaks the parse would otherwise
   // read as covered by every assertion in the file.
   if (/incomplete game load|SyntaxError|ReferenceError: \w+ is not defined/.test(out) &&
       !/passed, \d+ failed/.test(out)) {
-    return { m, verdict: 'BROKEN', detail: firstLines(out, 6) };
+    return { m, verdict: 'BROKEN', detail: firstLines(out, 6), ms };
   }
-  return { m, verdict: code === 0 ? 'SURVIVED' : 'KILLED', out };
+  return { m, verdict: code === 0 ? 'SURVIVED' : 'KILLED', out, ms };
 }
 
 const firstLines = (s, n) => s.split('\n').filter(Boolean).slice(0, n).map(l => '      ' + l).join('\n');
@@ -197,7 +202,13 @@ const killedBy = out => {
 // ── pool ─────────────────────────────────────────────────────────────────────
 
 async function runPool(list, scratch, onDone) {
-  const queue = list.slice();
+  // Longest-processing-time first. With --bail a killed mutant costs only the
+  // time to its first failing assertion, but a survivor pays the whole suite —
+  // and the catalog already says which ones are meant to survive. Starting
+  // those first stops one of them landing last and stranding every other
+  // worker for a full suite run.
+  const queue = list.slice().sort((a, b) =>
+    ((b.unkillable || b.gap) ? 1 : 0) - ((a.unkillable || a.gap) ? 1 : 0));
   const results = [];
   const workers = new Array(Math.min(JOBS, queue.length)).fill(0).map(async () => {
     for (;;) {
@@ -288,6 +299,21 @@ async function main() {
 
   const mins = ((Date.now() - started) / 60000).toFixed(1);
   console.log('\n' + '─'.repeat(76));
+
+  // What the run cost, and where. A mutant's time is the time to its first
+  // failing assertion, so a slow one is usually a bug caught late in the suite
+  // rather than a slow test — worth seeing either way, and the only way to
+  // tell whether this file is getting more expensive.
+  const timed = order.filter(r => r.ms !== undefined).sort((a, b) => b.ms - a.ms);
+  if (timed.length) {
+    const total = timed.reduce((t, r) => t + r.ms, 0);
+    console.log('\ncost: ' + (total / 1000).toFixed(0) + 's of suite across ' + JOBS +
+                ' job(s), mean ' + (total / timed.length / 1000).toFixed(1) + 's/mutant');
+    console.log('slowest:');
+    for (const r of timed.slice(0, 5))
+      console.log('  ' + (r.ms / 1000).toFixed(1).padStart(6) + 's  ' + r.m.id +
+                  '  (' + r.verdict.toLowerCase() + ')');
+  }
 
   if (stale.length) {
     console.log('\nSTALE ANCHORS — these tested nothing:\n');

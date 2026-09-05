@@ -65,7 +65,7 @@ function enemySprite(e) {
     return seq[Math.min(seq.length - 1, (e.stateT / DEATH_TIME * seq.length) | 0)];
   }
   if (e.state === 'attack') return SPR[e.type + 'Fire'];
-  if (e.type !== 'guard') return SPR[e.type];
+  if (!ENEMY_TYPES[e.type].rotates) return SPR[e.type];
   const view = Math.atan2(e.y - player.y, e.x - player.x);
   let rel = view - e.heading;
   rel -= Math.PI * 2 * Math.floor((rel + Math.PI) / (Math.PI * 2));   // -> [-π, π)
@@ -110,7 +110,7 @@ function drawSprites(zbuf, horizon) {
   for (const s of spriteList()) {
     if (s.kind === 'e') {
       const e = s.ref;
-      const bob = e.alive && e.type === 'drone' ? Math.sin(e.bob) * 0.12 : 0;
+      const bob = e.alive && ENEMY_TYPES[e.type].bobs ? Math.sin(e.bob) * 0.12 : 0;
       drawSprite(enemySprite(e), e.x, e.y, zbuf, horizon, bob);
     } else if (s.kind === 'p') {
       drawSprite(s.ref.spr, s.ref.x, s.ref.y, zbuf, horizon, 0);
