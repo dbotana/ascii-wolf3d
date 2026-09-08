@@ -1,0 +1,75 @@
+# Publishes the two single-file programs to GitHub Pages, so a repo visitor can
+# click a link and be playing — rather than landing on a source view.
+#
+# This exists because GitHub will not render HTML from the repo itself. The file
+# view shows source, and raw.githubusercontent.com sends
+# `Content-Type: text/plain` with `X-Content-Type-Options: nosniff`, so a raw
+# link is source too. Pages is the only path that actually launches the game.
+#
+# The site is ASSEMBLED here rather than checked in: _site/ is built from the
+# existing source of truth on every push, so it cannot drift the way a third
+# copy of the bundle in the tree would. Nothing new to hand-maintain.
+#
+#   /            -> dist/wolf3d.html   the shooter (the repo's namesake)
+#   /wolf3d.html -> dist/wolf3d.html   the same file at a stable named URL
+#   /city.html   -> index.html         the original city
+#
+# check-structure.js runs first for the same reason it goes first in ci.yml: it
+# is the step that catches a stale dist/, and publishing a stale bundle is worse
+# than not publishing.
+
+name: pages
+
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+# configure-pages needs `pages: write` to turn Pages on the first time; the
+# deploy needs `id-token: write` for its OIDC handshake.
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Never let two deploys race; queue instead of cancelling so a push is not
+# silently dropped mid-publish.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: structure (refuse to publish a stale dist/)
+        run: node reference/check-structure.js
+
+      - name: assemble _site from the source of truth
+        run: |
+          mkdir -p _site
+          cp dist/wolf3d.html _site/index.html
+          cp dist/wolf3d.html _site/wolf3d.html
+          cp index.html       _site/city.html
+
+      # enablement:true turns Pages on for the repo on the first run, so this
+      # needs no click in Settings.
+      - uses: actions/configure-pages@v5
+        with:
+          enablement: true
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+      - id: deployment
+        uses: actions/deploy-pages@v4

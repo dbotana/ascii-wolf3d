@@ -5,6 +5,29 @@ as monospace ASCII, DDA raycaster, procedural audio. Runs in any modern browser.
 
 Live public build: `https://blackice.taila0726f.ts.net:8443/city/`
 
+## Play it
+
+**[Play WOLFENSTAIN 3D in your browser](https://dbotana.github.io/ascii-wolf3d/)**
+— no clone, no install, no build step.
+
+| | url |
+|---|---|
+| the shooter | <https://dbotana.github.io/ascii-wolf3d/> |
+| the shooter, named path | <https://dbotana.github.io/ascii-wolf3d/wolf3d.html> |
+| the city | <https://dbotana.github.io/ascii-wolf3d/city.html> |
+
+Prefer a local copy? **[Download `wolf3d.html`](https://raw.githubusercontent.com/dbotana/ascii-wolf3d/master/dist/wolf3d.html)**
+(right-click, *Save Link As…*) and double-click the saved file. It runs straight
+off `file://` with no server: the bundle inlines its CSS and all twenty-four
+scripts, so the only thing it ever asks the network for is the Google Fonts
+stylesheet — and it falls back to system monospace without it. One file, 242 KB,
+no dependencies.
+
+> **Clicking the `.html` inside the GitHub file browser will not launch it.**
+> GitHub serves repo files — and `raw.githubusercontent.com` links — as
+> `text/plain`, so you get source, not a game. The Pages links above are the
+> ones that run it; the raw link above is for *saving*, not opening.
+
 ## Controls
 
 | key           | action                     |
@@ -239,8 +262,8 @@ tailscale funnel status
 | the shooter | `https://blackice.taila0726f.ts.net:8443/wolf3d` |
 
 **A path can be mapped straight at the one file because the bundle has no local
-dependencies.** `dist/wolf3d.html` inlines its CSS and all nineteen scripts; the
-only request it makes is the Google Fonts stylesheet. The development tree could
+dependencies.** `dist/wolf3d.html` inlines its CSS and all twenty-four
+scripts; the only request it makes is the Google Fonts stylesheet. The development tree could
 not be served this way — its relative `<script src>` paths would need the whole
 directory proxied — which is the practical reason the bundle exists at all,
 beyond being nice to hand to someone.
@@ -257,3 +280,17 @@ ssh <host> 'cd ~/Github/ascii-rain-city && git pull'
 No restart: the unit serves files off disk, so a `git pull` is the deploy. The
 unit only needs `systemctl --user restart ascii-city` if the unit file itself
 changed.
+
+### The public mirror (GitHub Pages)
+
+The funnel above is the private build and needs the tailnet. For anyone else,
+`.github/workflows/pages.yml` publishes the same bundle to GitHub Pages on every
+push to `master`, so the repo's own visitors get a link that launches rather
+than a source view.
+
+That workflow **assembles** `_site/` from the files already in the tree — the
+shooter at `/` and `/wolf3d.html`, the city at `/city.html` — rather than
+checking a site directory in. A third copy of the bundle in the repo is a copy
+that goes stale; a copy made in CI, after `check-structure.js` has refused a
+stale `dist/`, cannot.
+
