@@ -991,8 +991,8 @@ module.exports = [
     note: 'a body walking into a turret pushes it out of its alcove' },
 
   { id: 'roster-rooted-opens-doors', group: 'Roster', file: 'wolf3d/enemies.js',
-    find: 'if (moveEnemy(e, w.x * sp, w.y * sp)) openDoorAhead(e, w.gx, w.gy);',
-    replace: 'moveEnemy(e, w.x * sp, w.y * sp); openDoorAhead(e, w.gx, w.gy);',
+    find: 'if (e.spec.speed > 0) openDoorAhead(e, w.gx, w.gy);',
+    replace: 'openDoorAhead(e, w.gx, w.gy);',
     note: 'a rooted turret cycles a door it can never reach, from across the room' },
 
   { id: 'blast-never-fires', group: 'Roster', file: 'wolf3d/combat.js',
@@ -1047,8 +1047,8 @@ module.exports = [
     note: 'every boss calls in drones — BLACK ICE seeds no turrets and the FOUNDER no enforcers' },
 
   { id: 'roster-blackice-mobile', group: 'Bosses', file: 'wolf3d/roster.js',
-    find: "      { at: 1.00, name: 'COLD BOOT',      speed: 0,    cd: 1.30, dmg: 14, range: 16.0,",
-    replace: "      { at: 1.00, name: 'COLD BOOT',      speed: 1.60, cd: 1.30, dmg: 14, range: 16.0,",
+    find: "      { at: 1.00, name: 'COLD BOOT',      speed: 0,    cd: 0.70, dmg: 24, range: 16.0,",
+    replace: "      { at: 1.00, name: 'COLD BOOT',      speed: 1.70, cd: 0.70, dmg: 24, range: 16.0,",
     note: 'BLACK ICE walks off its pedestal in the opening phase, so the vault’s pillars stop being the fight' },
 
   { id: 'boss-exempt-from-thinning', group: 'Bosses', file: 'wolf3d/level.js',
@@ -1060,5 +1060,41 @@ module.exports = [
     find: '    if (!ENEMY_TYPES[e.type].relocate) continue;',
     replace: '    if (false) continue;',
     note: 'spawn-safety walks bosses and wall turrets off the tiles their floors placed them on' },
+
+  // ══ THE PLAYTEST PASS ══════════════════════════════════════════════════════
+  // The four systems the stopwatch run produced: the sighting gate on doors,
+  // the burst gap, the pickup constant, and the layer the red screen edge sits
+  // on. Three are one-line gates, which is exactly the shape that survives a
+  // suite nobody extended alongside it.
+
+  { id: 'doors-open-for-the-unsighted', group: 'Playtest', file: 'wolf3d/enemies.js',
+    find: '  if (!e.sawPlayer) return;',
+    replace: '  if (false) return;',
+    note: 'one shot near a door empties the room behind it into the corridor — every body woken by noise works the doors as if it had seen you' },
+
+  { id: 'sighting-never-latches', group: 'Playtest', file: 'wolf3d/enemies.js',
+    find: '        if (los) e.sawPlayer = true;',
+    replace: '        if (false) e.sawPlayer = true;',
+    note: 'a body that sees you while chasing never learns it, so it holds at the door forever and the floor can never follow you through one' },
+
+  { id: 'burst-gap-hardcoded', group: 'Playtest', file: 'wolf3d/enemies.js',
+    find: '            e.stateT = e.gap;         // stay in the muzzle-flash frame',
+    replace: '            e.stateT = 0.16;          // stay in the muzzle-flash frame',
+    note: 'every burst in the game fires at 6.25 rounds a second, so a boss volley of eighteen takes three seconds and no phase can be a torrent' },
+
+  { id: 'boss-gap-not-carried', group: 'Playtest', file: 'wolf3d/boss.js',
+    find: '  e.gap   = ph.gap !== undefined ? ph.gap : BURST_GAP;',
+    replace: '  e.gap   = e.gap;',
+    note: 'a boss keeps its opening cadence through every phase change, so the fights never accelerate' },
+
+  { id: 'ammo-pickup-is-a-magazine', group: 'Playtest', file: 'wolf3d/combat.js',
+    find: '        player.ammo = Math.min(99, player.ammo + AMMO_PICKUP);',
+    replace: '        player.ammo = Math.min(99, player.ammo + CLIP_SIZE);',
+    note: 'a battery cell is worth a pistol magazine again — half the reserve the retuned bosses are sized against' },
+
+  { id: 'hurt-edge-never-lights', group: 'Playtest', file: 'wolf3d/hud.js',
+    find: "  const t = Math.max(0, Math.min(1, player.hurtT / HURT_TIME));",
+    replace: '  const t = 0;',
+    note: 'taking a hit shows no screen outline at all — the indicator the playtest asked for is silently dead' },
 
 ];

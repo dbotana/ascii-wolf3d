@@ -16,9 +16,24 @@ const WALL_H = 3;             // every wall is flat-topped, Wolf3D style
 const EYE_Z = 1.6;            // player eye height
 const FOCAL = COLS / (2 * Math.tan(FOV / 2));
 const CLIP_SIZE = 8;          // rounds per magazine before a reload cycle
+// What a battery cell is worth. Separate from CLIP_SIZE, which it used to be:
+// they were the same 8 by coincidence, and reading the pistol's magazine size
+// to size a pickup meant the reserve could not be made more generous without
+// also changing how often the pistol reloads. Two numbers, two reasons.
+const AMMO_PICKUP = 16;       // rounds per battery cell
 const RELOAD_TIME = 1.05;     // seconds for the full reload animation
 const DEATH_TIME = 0.45;      // the 'dying' window, subdivided across DEATH_SEQ
 const SPAWN_GRACE = 0.75;     // seconds an idle enemy ignores the player after spawn
+// How long taking a hit shows for. THREE things read it — the canvas wash, the
+// DOM outline and the timer hurtPlayer sets — and they were three copies of the
+// literal 0.28, which is a window that can go out of sync with itself: move one
+// and the outline outlives the wash, or stops before it.
+const HURT_TIME = 0.28;
+// Seconds between the shots of one burst. The roster (and a boss phase) may
+// override it with a `gap` of its own — that column is the whole difference
+// between an enforcer's three measured rounds and a boss unloading a wall of
+// them, and without it 0.16 would cap every body in the game at 6 shots/sec.
+const BURST_GAP = 0.16;
 
 // ─── DIFFICULTY ─────────────────────────────────────────────
 // Wolf3D's four, and its philosophy: the enemies do not get tougher, they get

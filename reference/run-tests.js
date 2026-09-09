@@ -985,7 +985,13 @@ const grab = kind => {
 P.player.hp = 50;
 ok(grab('health').taken && P.player.hp === 75, `ramen heals +25 (hp=${P.player.hp})`);
 P.player.ammo = 2;
-ok(grab('ammo').taken && P.player.ammo === 10, `battery cell gives +8 ammo (ammo=${P.player.ammo})`);
+// Read from the constant, not written as a literal: a cell was worth CLIP_SIZE
+// until the two were separated, so "+8" was quietly an assertion about the
+// PISTOL's magazine. The interesting claim is that a cell pays its own number.
+ok(grab('ammo').taken && P.player.ammo === 2 + P.ammoPickup(),
+   `battery cell gives +${P.ammoPickup()} ammo (ammo=${P.player.ammo})`);
+ok(P.ammoPickup() !== P.clipSize(),
+   `and that number is its own, not the pistol's magazine (${P.ammoPickup()} vs ${P.clipSize()})`);
 const s0 = P.player.score;
 ok(grab('cash').taken && P.player.score === s0 + 500, 'crypto wallet gives +500');
 ok(grab('keyRed').taken && P.player.keyRed, 'red keycard is collected');
@@ -2400,7 +2406,12 @@ group('patrol leash (fixture)');
 // `D` is unlocked and `R` needs the red keycard, which no enemy will ever hold.
 group('enemies and doors (fixture)');
 {
-  const openRun = (lockChar) => {
+  // `seen` is the new axis: a body that has laid eyes on the player works the
+  // doors, and one that has only been woken by noise does not. Both arms are
+  // otherwise identical, and both start in `chase` — the point is that the
+  // STATE is not what decides it, because gunfire puts a whole room into
+  // `chase` through a wall.
+  const openRun = (lockChar, seen) => {
     const f = loadWithLevel([
       '##########',
       '#@..' + lockChar + '...g#',
@@ -2410,17 +2421,42 @@ group('enemies and doors (fixture)');
     F.player.x = 1.5; F.player.y = 1.5; F.player.a = 0;
     const foe = F.enemies().find(e => e.type === 'guard');
     foe.state = 'chase';
+    foe.sawPlayer = !!seen;
     f.run(750);                                            // 12s
-    return { F, foe, door: F.doors()[0] };
+    // `f` itself, not a detached f.run — the harness's run() is a method and
+    // reads `this` to reach step().
+    return { F, foe, door: F.doors()[0], f };
   };
 
-  const un = openRun('D');
+  const un = openRun('D', true);
   ok(un.door.phase !== 'closed',
-     `a chasing guard leans on an unlocked door (phase=${un.door.phase})`);
+     `a chasing guard that has SEEN you leans on an unlocked door (phase=${un.door.phase})`);
   ok(un.F.hasLOS(un.foe.x, un.foe.y, un.F.player.x, un.F.player.y),
      'and comes through it to reach the player');
 
-  const lk = openRun('R');
+  // ...and the room that has only HEARD you stays a room. Without this, one
+  // shot anywhere near a door emptied the floor behind it into the corridor,
+  // because alertNear wakes a radius and walls do not stop it.
+  const blind = openRun('D', false);
+  ok(blind.door.phase === 'closed' && blind.door.open === 0,
+     `a guard that has only heard you leaves the door shut (phase=${blind.door.phase})`);
+  ok(blind.foe.x > blind.door.gx,
+     `and waits on its own side of it (guard at ${blind.foe.x.toFixed(2)}, door at ${blind.door.gx})`);
+  ok(!blind.F.hasLOS(blind.foe.x, blind.foe.y, blind.F.player.x, blind.F.player.y),
+     'so it never reaches the player at all');
+  // It is WAITING, not stuck, and that half needs its own assertion: a shut
+  // door proves nothing on its own, because a body that could never follow
+  // under any circumstances passes it just as well. Open the door — the thing
+  // a player walking into the room actually does — and the guard sees the
+  // player through it, latches, and comes.
+  ok(!blind.foe.sawPlayer, 'test setup: it really has not seen the player yet');
+  blind.door.phase = 'open'; blind.door.open = 1;
+  blind.f.run(750);
+  ok(blind.foe.sawPlayer, 'open the door onto it and it lays eyes on you');
+  ok(blind.F.hasLOS(blind.foe.x, blind.foe.y, blind.F.player.x, blind.F.player.y),
+     'and then it comes through — waiting, not stuck');
+
+  const lk = openRun('R', true);
   ok(lk.door.phase === 'closed' && lk.door.open === 0,
      `a locked door stays shut — enemies carry no keycards (phase=${lk.door.phase})`);
   ok((lk.foe.x | 0) !== lk.door.gx,
@@ -2433,18 +2469,28 @@ group('enemies and doors (fixture)');
   // unpick every keycard gate on all three floors, which is too load-bearing to
   // leave resting on one caller happening to filter its arguments.
   lk.foe.x = lk.door.gx + 1.4; lk.foe.y = lk.door.gy + 0.5;
+  lk.foe.sawPlayer = true;
   lk.F.openDoorAhead(lk.foe, lk.door.gx, lk.door.gy);
   ok(lk.door.phase === 'closed',
      'openDoorAhead refuses a locked door even when handed one directly');
   const un2 = un.door;
   un2.phase = 'closed'; un2.open = 0;
   un.foe.x = un2.gx + 1.4; un.foe.y = un2.gy + 0.5;
+  un.foe.sawPlayer = true;
   un.F.openDoorAhead(un.foe, un2.gx, un2.gy);
   ok(un2.phase === 'opening', 'and opens an unlocked one from the same distance');
   un.foe.x = un2.gx + 4.0;
   un2.phase = 'closed'; un2.open = 0;
   un.F.openDoorAhead(un.foe, un2.gx, un2.gy);
   ok(un2.phase === 'closed', 'a door is only leaned on from arm\'s length, not across the room');
+  // The sighting gate, tested on the function directly for the same reason the
+  // lock is: in play it is filtered by the caller, and a branch that only ever
+  // sees pre-filtered arguments is a branch nobody has watched work.
+  un.foe.x = un2.gx + 1.4;
+  un.foe.sawPlayer = false;
+  un.F.openDoorAhead(un.foe, un2.gx, un2.gy);
+  ok(un2.phase === 'closed',
+     'and refuses outright for a body that has never seen the player');
 }
 
 // ── spread makes distance matter (fixture) ───────────────────────────────────
@@ -4009,8 +4055,8 @@ group('a rooted body does not work the doors (fixture)');
 {
   // The turret's flow-field waypoint is the door tile, and it is within the
   // 1.2u openDoorAhead asks for — so the only thing keeping the door shut is
-  // that the body never actually moved. A guard in the same spot is the
-  // control: it does move, and it does lean on the door.
+  // that the body cannot walk at all. A guard in the same spot is the control:
+  // same waypoint, same distance, and it does lean on the door.
   const rows = [
     '##########',
     '#@.......#',
@@ -4029,11 +4075,13 @@ group('a rooted body does not work the doors (fixture)');
     const door = F.doors()[0];
     ok(!!e && !!door && Math.hypot(door.gx + 0.5 - e.x, door.gy + 0.5 - e.y) <= 1.2,
        `test setup: a ${type} within openDoorAhead's reach of a shut door`);
-    e.graceT = 0; e.state = 'chase';
+    // sawPlayer as well as chase: the door gate would otherwise hold BOTH arms
+    // shut and the turret would pass for the wrong reason entirely.
+    e.graceT = 0; e.state = 'chase'; e.sawPlayer = true;
     f.run(90);
     ok((door.phase !== 'closed') === wants,
-       wants ? `a chaser that moves leans on the door in its way (${door.phase})`
-             : `while a rooted body never opens it — it has a waypoint, not a step (${door.phase})`);
+       wants ? `a chaser that can walk leans on the door in its way (${door.phase})`
+             : `while a rooted body never opens it — it has a waypoint, not legs (${door.phase})`);
   }
 }
 
@@ -4071,6 +4119,243 @@ group('spawn relocation leaves fixtures alone (fixture)');
      `(${tur.x},${tur.y}) — it is in that sightline on purpose`);
   ok(F.hasLOS(tur.x, tur.y, F.player.x, F.player.y),
      'test setup: which means it really is still looking at the player');
+}
+
+// ── the burst gap (fixture) ─────────────────────────────────────────────────
+// `gap` is the seconds between the shots of one burst, and it is a column
+// rather than the literal 0.16 the FSM used to hold because the boss rewrite
+// needed volleys the old constant could not express: at 0.16 nothing in the
+// game can fire faster than 6 rounds a second however large its burst, which
+// put a ceiling on "bullet hell" well below where the fights wanted to sit.
+group('the burst gap (fixture)');
+{
+  const f = loadWithLevel([
+    '###############',
+    '#@...........h#',
+    '###############',
+  ], { htmlPath: process.env.WOLF3D_HTML });
+  const F = f.P;
+  const foe = F.enemies().find(e => e.type === 'enforcer');
+  ok(!!foe, 'test setup: an enforcer, which bursts');
+
+  // A row that names no gap takes the constant. This is the default path every
+  // ordinary body in the roster is on.
+  ok(F.roster().enforcer.gap === undefined, 'test setup: its row names no gap of its own');
+  ok(foe.gap === F.burstGap(),
+     `a body whose row names no gap fires at BURST_GAP (${foe.gap})`);
+
+  // ...and the FSM actually READS the field rather than the constant. Measured
+  // as a difference between two gaps on the SAME burst: an absolute frame count
+  // would also pass on a build that ignored `gap` and happened to be near the
+  // expected number, and it would have to re-derive the harness's step size.
+  const burstFrames = (gap) => {
+    F.player.x = 1.5; F.player.y = 1.5; F.player.a = 0; F.player.hp = 100;
+    foe.gap = gap;
+    foe.state = 'attack'; foe.stateT = 0.22; foe.shotsLeft = 6; foe.atkCd = 0;
+    let n = 0;
+    while (foe.state === 'attack' && n < 600) { f.run(1, null, () => { F.player.hp = 100; }); n++; }
+    return n;
+  };
+  const slow = burstFrames(0.30);
+  const fast = burstFrames(0.05);
+  ok(slow > fast,
+     `a wider gap makes the same six rounds take longer (${slow} frames against ${fast})`);
+  // and by roughly the right amount: five inter-shot waits of 0.25s more, over
+  // a 16ms step, is ~78 frames. A loose band, because the point is that the
+  // field drives the timing and not that the harness steps at any exact rate.
+  ok(slow - fast > 50 && slow - fast < 110,
+     `and by about the five extra waits it names (${slow - fast} frames)`);
+
+  // A boss carries it through a phase change, which is the case that actually
+  // ships: mkEnemy seeds it from phases[0] and stepBossPhase rewrites it.
+  const b = load({ htmlPath: process.env.WOLF3D_HTML });
+  const B = b.P;
+  for (let i = 0; i < B.levels().length; i++) {
+    B.startLevel(i);
+    const boss = B.boss();
+    if (!boss) continue;
+    const PH = B.roster()[boss.type].phases;
+    const N = boss.type.toUpperCase();
+    ok(boss.gap === (PH[0].gap ?? B.burstGap()),
+       `${N}: opens on phase 0's gap (${boss.gap})`);
+    for (let k = 1; k < PH.length; k++) {
+      boss.hp = Math.floor(boss.maxHp * PH[k].at) - 1;
+      b.run(1);
+      ok(boss.gap === (PH[k].gap ?? B.burstGap()),
+         `${N}: ${PH[k].name} takes its own gap (${boss.gap})`);
+    }
+  }
+  B.startLevel(0);
+}
+
+// ── par times ───────────────────────────────────────────────────────────────
+// The numbers themselves are tuning and deliberately not asserted — they came
+// off a stopwatch and will move again. What is asserted is the shape openTally
+// depends on, because its `PAR_TIME[levelIndex] || 180` fallback means a floor
+// with no par of its own does not fail, it quietly pays a bonus against three
+// minutes that nobody chose.
+group('par times');
+{
+  const t = load({ htmlPath: process.env.WOLF3D_HTML });
+  const T = t.P;
+  const par = T.parTime();
+  ok(par.length === T.levels().length,
+     `every floor has a par time of its own (${par.length} for ${T.levels().length} floors)`);
+  ok(par.every(n => typeof n === 'number' && isFinite(n) && n > 0),
+     `and all of them are real, positive seconds (${par.join(', ')})`);
+  // The time bonus is 10/sec under par, so a par that a floor cannot be
+  // finished inside pays nothing and one nobody can miss pays a flat maximum.
+  // Both are tuning failures rather than bugs, but a par of zero is neither —
+  // it is a floor whose time row can only ever read +0.
+  ok(Math.min(...par) >= 30, `and none is so short the row is dead on arrival (min ${Math.min(...par)}s)`);
+}
+
+// ── the damage indicator ────────────────────────────────────────────────────
+// Two claims, and the second is the one that was actually broken in play: the
+// red screen edge was being drawn and then buried. #stage::after lays a dark
+// CRT vignette over the outer 45% of the screen, which is exactly where a
+// screen-edge warning lives, so at a z-index below it the warning was painted
+// and then had 60% of itself taken back at the corners. Nothing about that is
+// visible from the JS side — the element had the right opacity the whole time
+// — so it needs an assertion on the stylesheet.
+group('the damage indicator');
+{
+  const fs2 = require('fs'), path2 = require('path');
+  // Both representations, the same way collectSources reads scripts: the
+  // manifest links a local stylesheet, the bundle inlines it into a <style>.
+  const htmlPath = path2.resolve(process.env.WOLF3D_HTML || 'wolf3d.html');
+  const html = fs2.readFileSync(htmlPath, 'utf8');
+  const href = (html.match(/<link\b[^>]*\brel\s*=\s*["']stylesheet["'][^>]*>/gi) || [])
+    .map(tag => (tag.match(/\bhref\s*=\s*["']([^"']+)["']/) || [])[1])
+    .find(h => h && !/^https?:/i.test(h));
+  const raw = href
+    ? fs2.readFileSync(path2.resolve(path2.dirname(htmlPath), href), 'utf8')
+    : (html.match(/<style>([\s\S]*?)<\/style>/i) || [])[1];
+  // Comments go first, and not as tidiness: this file's comments are prose,
+  // prose has commas in it, and the selector split below would otherwise take
+  // the tail of a paragraph as the selector of the rule it documents.
+  const css = (raw || '').replace(/\/\*[\s\S]*?\*\//g, '');
+  ok(!!css && css.length > 100, 'test setup: found the stylesheet in this representation');
+
+  // z-index of the LAST rule whose selector list mentions `sel`. Crude on
+  // purpose: a real parser here would be more code than the thing it checks.
+  const zOf = (sel) => {
+    let z = null;
+    for (const m of css.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+      if (!m[1].split(',').some(s2 => s2.trim() === sel)) continue;
+      const hit = m[2].match(/(?:^|[;\s])z-index\s*:\s*(-?\d+)/);
+      if (hit) z = Number(hit[1]);
+    }
+    return z;
+  };
+  const scanlines = zOf('#stage::before'), vignette = zOf('#stage::after');
+  const hpV = zOf('#hpVignette'), hurt = zOf('#hurtEdge');
+  ok(scanlines !== null && vignette !== null && hpV !== null && hurt !== null,
+     `test setup: all four layers declare a z-index ` +
+     `(scanlines ${scanlines}, crt ${vignette}, hp ${hpV}, hurt ${hurt})`);
+  ok(hpV > scanlines && hpV > vignette,
+     `the health vignette sits above the CRT overlays (${hpV} against ${scanlines}/${vignette})`);
+  ok(hurt > scanlines && hurt > vignette,
+     `and so does the hit outline (${hurt} against ${scanlines}/${vignette})`);
+
+  // ...and the behaviour: the outline tracks player.hurtT, which is a 0.28s
+  // window. It is painted from frame() rather than syncHud for that reason —
+  // syncHud runs one frame in twelve, and at that stride a flash is caught
+  // twice, or once, or not at all.
+  const d = load({ htmlPath: process.env.WOLF3D_HTML });
+  const D = d.P;
+  const edge = () => Number(d.el('hurtEdge').style.opacity);
+  D.player.hurtT = 0;
+  D.paintHurtEdge();
+  ok(edge() === 0, `no hit, no outline (${edge()})`);
+  D.player.hurtT = 0.28;
+  D.paintHurtEdge();
+  ok(edge() >= 0.95, `a fresh hit lights it fully (${edge()})`);
+  D.player.hurtT = 0.14;
+  D.paintHurtEdge();
+  const half = edge();
+  ok(half > 0 && half < 1, `and it fades with the window rather than snapping off (${half})`);
+  // Square-rooted, not linear: a linear fade spends most of its life almost
+  // invisible, which is the failure this indicator exists to fix. Halfway
+  // through the window it should still be well over half lit.
+  ok(half > 0.6, `staying legible through the middle of the window (${half} at the halfway point)`);
+
+  // The real path, end to end: taking a hit lights it on the very next frame.
+  D.startLevel(0);
+  D.player.hp = 100;
+  D.hurtPlayer(10, D.player.x + 2, D.player.y);
+  D.paintHurtEdge();
+  ok(edge() >= 0.95, `and hurtPlayer drives it, not just the setter (${edge()})`);
+}
+
+// ── the boss arenas can supply their own fights ─────────────────────────────
+// A floor's TOTAL ammo is the wrong number and every floor passes on it: they
+// all carry several times what they need. The reserve caps at 99, so ammo on
+// the route cannot be banked past that cap and carried in — what decides
+// whether a boss is winnable is what sits inside its own room.
+//
+// This is a level-geometry invariant, so it belongs in a test rather than in a
+// tuning note: moving cells around a map, or raising a boss's health, can break
+// it without touching a line of code.
+group('the boss arenas can supply their own fights');
+{
+  const a = load({ htmlPath: process.env.WOLF3D_HTML });
+  const A = a.P;
+  // Worst damage-per-round across the weapons that cost ammo. The chaingun is
+  // it today at ~19; the shotgun and sniper are 92 and 112 per round and so
+  // cost a quarter as many. Derived rather than written down, so a new weapon
+  // that is stingier than the chaingun re-prices this automatically.
+  const perRound = Math.min(...A.weapons()
+    .filter(w => w.cost > 0)
+    .map(w => (w.dmgMin + w.dmgSpan / 2) * (w.pellets || 1)));
+  ok(perRound > 0 && perRound < 40,
+     `test setup: the least damage-efficient round in the roster is ${perRound}`);
+
+  // The arena: flood fill from the boss's own tile, with walls AND doors as the
+  // boundary. A cell on the far side of the door is not ammo you can reach in
+  // the middle of a fight.
+  const arenaOf = (b) => {
+    const grid = A.grid(), H = grid.length, W = grid[0].length;
+    const seen = new Set(), stack = [[b.x | 0, b.y | 0]];
+    seen.add((b.x | 0) + ',' + (b.y | 0));
+    while (stack.length) {
+      const [x, y] = stack.pop();
+      for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+        const nx = x + dx, ny = y + dy, k = nx + ',' + ny;
+        if (nx < 0 || ny < 0 || nx >= W || ny >= H || seen.has(k)) continue;
+        if (A.cellAt(nx, ny)) continue;
+        seen.add(k); stack.push([nx, ny]);
+      }
+    }
+    return seen;
+  };
+
+  let bossFloors = 0;
+  for (let i = 0; i < A.levels().length; i++) {
+    A.startLevel(i);
+    const b = A.boss();
+    if (!b) continue;
+    bossFloors++;
+    const N = b.type.toUpperCase();
+    const room = arenaOf(b);
+    const cells = A.items().filter(it => it.kind === 'ammo' &&
+                                         room.has((it.x | 0) + ',' + (it.y | 0))).length;
+    const inRoom = cells * A.ammoPickup();
+    const costs = Math.ceil(b.maxHp / perRound);
+
+    // The rule the fights are tuned to: a boss may outlast a full reserve, but
+    // never two of them. 99 is the cap in stepItems.
+    ok(costs <= 99 * 2,
+       `${N}: costs ${costs} rounds — at most one refill of the 99-round reserve`);
+    // ...and the case that actually bites, because a player reaches the boss
+    // having already fought the floor: arriving with NOTHING, the room alone
+    // still has to be able to finish the fight.
+    ok(inRoom >= costs,
+       `${N}: its arena holds ${cells} cells (${inRoom} rounds) against a ` +
+       `${costs}-round fight — winnable on an empty reserve`);
+  }
+  ok(bossFloors >= 3, `test setup: checked ${bossFloors} boss floors`);
+  A.startLevel(0);
 }
 
 // ── report ───────────────────────────────────────────────────────────────────

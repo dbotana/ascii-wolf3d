@@ -117,6 +117,9 @@ function mkEnemy(type, x, y) {
   // every body of a type would re-tune the whole floor — and permanently, for
   // the rest of the session, since the roster is a module-level literal.
   const spec = { ...row.spec };
+  // Phase 0 first, then the row's own, then the constant — the same precedence
+  // stepBossPhase applies on every later phase change.
+  const rowGap = row.phases ? row.phases[0].gap : row.gap;
   return {
     type, x, y, spawnX: x, spawnY: y,
     hp: spec.hp, maxHp: spec.hp, spec,
@@ -133,11 +136,18 @@ function mkEnemy(type, x, y) {
     heading: -Math.PI / 2,
     patrolDir: null, patrolT: Math.random() * 1.2, patrolTX: 0, patrolTY: 0,
     phase: 0, shotsLeft: 1,
-    // A boss opens on phase 0, so its standoff and burst come from there rather
-    // than from the row's plain fields — stepBossPhase rewrites both from the
-    // same table the moment its health drops.
+    // Has this body ever actually laid eyes on the player? It is what separates
+    // a room that waits for you from a floor that empties into the corridor:
+    // only a body that has seen you will work a door open behind you. Set in
+    // the FSM wherever line of sight is established, and never cleared —
+    // nothing un-sees the player, the same way nothing un-alerts.
+    sawPlayer: false,
+    // A boss opens on phase 0, so its standoff, burst and burst gap come from
+    // there rather than from the row's plain fields — stepBossPhase rewrites
+    // all three from the same table the moment its health drops.
     burst: row.phases ? row.phases[0].burst : row.burst,
     want:  row.phases ? row.phases[0].want  : row.want,
+    gap:   rowGap === undefined ? BURST_GAP : rowGap,
   };
 }
 function mkItem(kind, x, y) {

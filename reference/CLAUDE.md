@@ -61,11 +61,11 @@ the bundler and the harness both read it rather than keeping their own list.
 
 | file | lines | what |
 |---|---|---|
-| `wolf3d/style.css` | 650 | all CSS |
-| `wolf3d/config.js` | 116 | screen/projection constants, `DIFFICULTY`, `DEATH_TIME`, palette + fog cache, distance ramps, faces |
+| `wolf3d/style.css` | 687 | all CSS |
+| `wolf3d/config.js` | 126 | screen/projection constants, `DIFFICULTY`, `DEATH_TIME`, `AMMO_PICKUP`, `BURST_GAP`, palette + fog cache, distance ramps, faces |
 | `wolf3d/scores.js` | 148 | the persistent high score table and its three storage guards |
-| `wolf3d/levels.js` | 286 | the five floors, `FLOOR_NAMES`, `PAR_TIME` |
-| `wolf3d/roster.js` | 182 | `ENEMY_TYPES` — one row per enemy, and the boss phase tables |
+| `wolf3d/levels.js` | 303 | the five floors, `FLOOR_NAMES`, `PAR_TIME` |
+| `wolf3d/roster.js` | 222 | `ENEMY_TYPES` — one row per enemy, and the boss phase tables |
 | `wolf3d/bodies.js` | 270 | the post-MVP enemy sprites, spread into `SPR` by art.js |
 | `wolf3d/art.js` | 312 | the MVP roster's sprites + pickups (opens with `...BODY_SPR`), the pistol's `GUN_*` frames |
 | `wolf3d/gore.js` | 201 | `DEATH_SEQ` death-frame sequences, `DECAL_SPR` blood splats |
@@ -74,18 +74,18 @@ the bundler and the harness both read it rather than keeping their own list.
 | `wolf3d/audio.js` | 323 | the Web Audio graph, the `MUSIC` table, and the scheduler + track lookup |
 | `wolf3d/input.js` | 69 | keyboard, mouse-look, pointer lock, `WEAPON_KEYS`, the pause hooks |
 | `wolf3d/touch.js` | 212 | the twin-stick overlay: stick math, look pad, buttons |
-| `wolf3d/world.js` | 336 | grid + entities, difficulty, pause, grid queries (`inMap`, `cellAt`, `hasKey`), doors, push-walls |
+| `wolf3d/world.js` | 343 | grid + entities, difficulty, pause, grid queries (`inMap`, `cellAt`, `hasKey`), doors, push-walls |
 | `wolf3d/level.js` | 259 | `populateEnemies`, `parseLevel` (incl. the door-axis pass), `startLevel`, `nextLevel` |
 | `wolf3d/raycast.js` | 92 | DDA raycast incl. thin-wall doors, `hasLOS`, `spriteSpan` |
 | `wolf3d/nav.js` | 103 | the BFS flow field |
-| `wolf3d/enemies.js` | 362 | FSM, steering, patrols, separation, loot, blood, death blasts |
-| `wolf3d/boss.js` | 69 | `stepBossPhase`, `summonMinions`, `bossRow` — generic over `phases` |
+| `wolf3d/enemies.js` | 389 | FSM, steering, patrols, separation, loot, blood, death blasts |
+| `wolf3d/boss.js` | 74 | `stepBossPhase`, `summonMinions`, `bossRow` — generic over `phases` |
 | `wolf3d/combat.js` | 352 | the roster lookup, earning it, firing, `resolveHit`, the magazine cycle, damage numbers, pickups |
 | `wolf3d/render.js` | 399 | `drawWalls`, sprites, decals, the weapon view-model, crosshair, the damage arc |
 | `wolf3d/minimap.js` | 137 | the auto-map: `seen`, the reveal sweep, `drawMinimap` |
-| `wolf3d/hud.js` | 250 | toasts, banners, status bar, health bar, the weapon strip, the objective line |
+| `wolf3d/hud.js` | 274 | toasts, banners, status bar, health bar, the two red damage edges, the weapon strip, the objective line |
 | `wolf3d/tally.js` | 169 | the end-of-floor percentage screen, its payout, `clearLevel`, `advanceFromTally` |
-| `wolf3d/main.js` | 203 | `updatePlayer`, `frame`, boot |
+| `wolf3d/main.js` | 208 | `updatePlayer`, `frame`, boot |
 
 **Order matters only for top-level execution.** Function declarations hoist
 across the whole shared scope, so a function body may call anything in any file
@@ -249,8 +249,49 @@ Order matters — each stage depends on the one before.
 4. **Sprites** — `drawSprites` sorts enemies and items back-to-front and blits
    them, testing `zbuf[col] < depth` per column so walls occlude correctly.
 5. **Crosshair, then weapon** — the view-model draws over everything.
-6. **Screen flashes** — muzzle and damage tints, as translucent `fillRect`.
+6. **Screen flashes** — muzzle and damage tints, as translucent `fillRect`,
+   then `paintHurtEdge()` for the DOM half of the damage indicator.
 7. **HUD** — DOM, refreshed every 12 frames rather than every frame.
+
+### The damage indicator, and why the red edge was invisible
+
+Taking a hit shows three things: a full-screen red wash on the canvas, the
+directional arc of red cells (see **Enemies**, and `addHitDir`), and a red
+outline around the screen. The outline is DOM, not canvas, and that is the
+whole fix rather than an implementation detail.
+
+`#stage::after` is the CRT vignette — `radial-gradient(..., transparent 55%,
+rgba(2,3,10,0.6) 100%)` at z-index 5, over the canvas. It darkens the outer 45%
+of the screen by up to 60%, which is *exactly* where a screen-edge warning
+lives. `#hpVignette` was at z-index 4 and was therefore being painted and then
+having most of itself taken back at the corners. It reported the right opacity
+the entire time; it was a colour underneath a wash, which is why it read as a
+colour that was simply too weak.
+
+Both red edges now sit at **z-index 7**, above the scanlines (6) and that
+vignette (5), where the touch overlay already was. The rule the CRT comment in
+`style.css` states still holds: the treatment goes over anything *diegetic* —
+the status bar and the boss bar are objects in the world and belong behind the
+glass — and these two are not in the world at all.
+
+They are deliberately two elements, because they say different things:
+
+| | what it is | driven by | timing |
+|---|---|---|---|
+| `#hpVignette` | a **state**: how close to dead you are | `paintHpBar`, off `player.hp` | held; CSS-eased over 0.45s |
+| `#hurtEdge` | an **event**: this hit, just now | `paintHurtEdge`, off `player.hurtT` | one 0.28s flash, no transition |
+
+Merging them would mean a full-health player and a dying one get the same
+warning, or — worse — that a dying player gets no new information when a fresh
+round lands, which is precisely when it matters most.
+
+`paintHurtEdge` is called from `frame()` and **not** from `syncHud`. That is
+load-bearing: `syncHud` runs one frame in twelve and `hurtT` is a 0.28s window,
+so on the HUD stride a flash would be sampled twice, or once, or — for a hit
+landing just after a sync — not at all. The fade is square-rooted rather than
+linear, because a linear fade spends most of its life almost invisible and this
+indicator exists to be seen inside a burst that is handing out the next hit
+70ms later.
 
 ## The atlas — why this is fast
 
@@ -394,7 +435,8 @@ landed wall is `'done'`.
 never a branch.** `mkEnemy` copies a row's `spec`, and the FSM, the renderer,
 `populateEnemies` and the HUD all read fields off the row: `loot`, `blood`,
 `radius`, `patrol`, `rotates`, `bobs`, `relocate`, `alertSfx`, `want`, `burst`,
-`score`, `char`, plus an optional `blast` and, for a boss, `phases`. Adding a
+`score`, `char`, plus an optional `gap`, an optional `blast` and, for a boss,
+`phases`. Adding a
 type is a row there, four sprites in `bodies.js`, a `DEATH_SEQ` row in
 `gore.js`, and a character in a level. No new code — that is growth rule 1, and
 this table is what redeems it: before it, `type === 'ceo'` appeared in five
@@ -409,9 +451,9 @@ The roster today:
 | turret | `t` | 35 | **0** | 14.0 | wall-mounted; `speed: 0` IS the behaviour |
 | spark | `k` | 30 | 2.80 | 1.4 | closes to contact, `blast` on death |
 | enforcer | `h` | 140 | 0.90 | 8.0 | 3-round bursts, 0.50 radius — a corridor plug |
-| CEO | `C` | 520 | — | 12.0 | boss, floor 3 |
-| BLACK ICE | `I` | 640 | — | 16.0 | boss, floor 4 |
-| THE FOUNDER | `F` | 800 | — | 13.0 | boss, floor 5 |
+| CEO | `C` | 1400 | — | 12.0 | boss, floor 3 |
+| BLACK ICE | `I` | 1700 | — | 16.0 | boss, floor 4 |
+| THE FOUNDER | `F` | 2100 | — | 13.0 | boss, floor 5 |
 
 `speed: 0` needed no code: `moveEnemy` treats a zero delta as no delta, so the
 chase state has nothing to do and the body holds. Two places had to learn about
@@ -469,6 +511,41 @@ keycards. Route them at one and they queue against it forever. Unlocked doors
 are passable, and `openDoorAhead` leans on them with the same two lines `use()`
 runs — `stepDoors` already refuses to close on an occupied tile, so nobody gets
 crushed in the frame.
+
+#### Doors are a room boundary until you are seen
+
+`openDoorAhead` is gated on **`e.sawPlayer`**, a latch set wherever the FSM
+establishes line of sight (the idle sight check, and `chase`'s own `los`) and
+never cleared. The effect is that a floor reads as rooms: bodies come as far as
+the door and hold there, and the ones that actually lay eyes on you follow you
+anywhere afterward.
+
+The reason it is a *sighting* and not a state is that `alertNear` wakes a
+**radius, not a sightline** — gunfire carries through walls by design, which is
+what makes a fight pull in the room rather than one target. Without the latch
+that same rule emptied every room adjoining a door into the corridor on the
+first trigger pull, because every woken body went straight to `chase` and every
+chaser worked doors. Gating on `state === 'chase'` would therefore have changed
+nothing at all.
+
+One thing had to move with it, and it is the sort of coupling that is easy to
+miss. The chase used to open a door only if the step that frame **succeeded**:
+
+```js
+if (moveEnemy(e, w.x * sp, w.y * sp)) openDoorAhead(e, w.gx, w.gy);   // WRONG NOW
+```
+
+That gate exists so a rooted body (`speed: 0`) does not cycle a door across the
+room off a waypoint it can never walk to — but testing the *step* only looks
+equivalent to testing the *legs*. A chaser pressed flat against a shut door
+moves exactly zero, so the old gate locked it out of the one action that
+unblocks it. Before the latch nothing ever reached that state; with it, bodies
+park there by design, the door times out and shuts, and a guard that could
+plainly see the player through it could never push it open again. It is
+`e.spec.speed > 0` now, which is what the turret case actually meant. The
+fixture that catches the regression opens the door onto a waiting guard and
+asserts it *comes through* — asserting only that the door stayed shut passes
+just as well on a body that could never follow.
 
 ### Separation
 
@@ -528,14 +605,54 @@ A boss is an ordinary member of `enemies` — same FSM, same `castRay` line of
 sight, same death animation — with `boss: true` and a `phases` table on its
 roster row. `stepBossPhase` in `wolf3d/boss.js` is generic over that table: it
 copies whichever of `speed / cd / dmg / range / sight` a phase names onto
-`e.spec`, plus `want` and `burst` onto the body, and calls `summonMinions` for
-a phase's `{ type, n }`.
+`e.spec`, plus `want`, `burst` and `gap` onto the body, and calls
+`summonMinions` for a phase's `{ type, n }`.
 
 | | floor | hp | the arc |
 |---|---|---|---|
-| THE CEO | 3 | 520 | closes and speeds up: 5.2u → 2.3u standoff, 1 → 4 round bursts, summons drones |
-| BLACK ICE | 4 | 640 | the inverse: **rooted** at 16u reach for two phases, seeds the vault with turrets, then comes off the pedestal |
-| THE FOUNDER | 5 | 800 | pulls you in: reach 13 → 5 as speed climbs 1.3 → 2.6, summons enforcers then sparks, and `blast`s on death |
+| THE CEO | 3 | 1400 | closes and speeds up: 5.0u → 2.0u standoff, 5 → 14 round volleys, summons drones then sparks |
+| BLACK ICE | 4 | 1700 | the inverse: **rooted** at 16u reach for two phases, seeds the vault with turrets, then comes off the pedestal |
+| THE FOUNDER | 5 | 2100 | pulls you in: reach 13 → 4 as speed climbs 1.3 → 2.9, summons enforcers then sparks, and `blast`s on death |
+
+#### They were not fights, and the numbers say why
+
+A stopwatch run killed the CEO in about five seconds and took no damage doing
+it, and floor 4 went much the same way. Neither was a health problem on its
+own. The CEO opened at `cd: 1.40, burst: 1` — **one round every 1.4 seconds**,
+which works out at 3.4 landed dps at its own 5.2u standoff, or 29 seconds to
+kill a full-health player. The fight was over before its second shot. All three
+bosses have since been retuned along the same two axes:
+
+- **Volleys, not shots.** Opening bursts run 5–8 rounds and closing ones 14–18,
+  so landed damage in the open now runs 12 → 42 dps across the CEO's four
+  phases rather than 3.4 → 20 across three.
+- **Health sized against the guns, not against a guard.** The budget that
+  actually constrains a boss's health is the 99-round reserve cap, not dps.
+  Measured against a player who aims and holds the trigger, the three fights
+  cost **~85 / 97 / 130 chaingun rounds** — the chaingun being the worst case
+  at ~19 damage a round, where the shotgun and sniper are 92 and 112 and so
+  cost roughly a quarter as many. That is at most **one refill** each, which is
+  the design rule: a fight may outlast a full reserve, but never two.
+
+  (An earlier measurement here read 160-250 rounds and was wrong. The simulated
+  player held a fixed heading, so every phase that moved the boss laterally was
+  scored as the weapon missing. A sim that does not do the thing a player
+  obviously does will quietly price the thing you are tuning.)
+
+The bursts are also the *dodge*, and that is the part worth not undoing. A body
+in `attack` does not move, and `enemyShot` re-checks line of sight for **every**
+round of a burst — so a long volley roots the boss for a second and pays out
+only for as long as it can still see you. Break the sightline mid-volley and the
+rest of it hits the cover you stepped behind. A "bullet hell" here is therefore
+made of the same hitscan shots as everything else; what makes it dodgeable is
+geometry and timing, not projectile speed.
+
+`gap` — the seconds between the rounds of one burst — is a roster and phase
+column for this reason. It was the literal `0.16` in the FSM, which capped
+*every* body in the game at 6.25 shots a second no matter how large its burst,
+and that ceiling sat well below where these fights needed to be. A row that
+names no `gap` gets `BURST_GAP`, which is that same 0.16, so nothing else in
+the roster moved.
 
 `stepBossPhase` mutates `e.spec` in place, which is safe only because `mkEnemy`
 builds a **fresh copy** of the roster's spec per body (`{ ...row.spec }`). Do
@@ -569,7 +686,7 @@ D  door         R  red-locked   B  blue-locked   S  secret push-wall
 g  guard        d  sec-drone    t  ceiling turret
 k  spark charge  h  corporate enforcer
 C  the CEO (3)   I  BLACK ICE (4)  F  the FOUNDER (5)
-+  ramen (+25hp)  a  battery cell (+8 ammo)
++  ramen (+25hp)  a  battery cell (+16 ammo, AMMO_PICKUP)
 r  red keycard    b  blue keycard    $  crypto wallet (+500)    @  spawn
 ```
 
@@ -590,6 +707,49 @@ the vault is full of pillars because BLACK ICE opens rooted at 16u and the fight
 is what you can put between you and it, and the helipad is nearly bare because
 THE FOUNDER's reach *shrinks* as its speed climbs and a deck full of cover would
 be fighting its own boss.
+
+**Battery cells are worth `AMMO_PICKUP` (16), not `CLIP_SIZE`.** Those were the
+same literal 8 until the boss rewrite needed a more generous reserve, and
+reading the pistol's magazine size to price a pickup meant the two could not
+move independently — a more generous reserve would also have changed how often
+the pistol reloads. Two numbers, two reasons.
+
+Cell counts per floor are `21 / 19 / 22 / 26 / 25`. Floors 4 and 5 were `17`
+and **`7`**, which is where the note "a lot more for 5" came from: floor 5 is
+the largest floor, holds four enforcers and the longest fight in the game, and
+carried a third of what the teaching floor does. Ten of its new cells are on
+the deck itself — pickups are not cover, so they do not fight the bare-helipad
+rule above — and the rest sit on the service ring, mirrored about the same axis
+the rooms are. Floor 3 went 18 → 22, and all four of those are inside the
+boardroom for the reason in the next paragraph.
+
+**Total supply per floor is the wrong number to check; arena supply is the
+right one.** Every floor carries several times the ammo it needs — but the
+reserve caps at 99, so ammo on the route cannot be banked past that cap and
+carried into the fight. What decides whether a boss is winnable is what sits
+*inside its own room*, flood-filled from the boss's tile with walls and doors
+as the boundary:
+
+| floor | boss costs | ammo in the arena | ramen | arriving dry | arriving full |
+|---|---|---|---|---|---|
+| 3 CEO | ~85 rounds | 6 cells = 96 | 3 | ok, +11 | 0 refills |
+| 4 BLACK ICE | ~97 rounds | 8 cells = 128 | 2 | ok, +31 | 0 refills |
+| 5 THE FOUNDER | ~130 rounds | 12 cells = 192 | 2 | ok, +62 | 1 refill |
+
+The boardroom's ramen are placed the way its ammo is not: one at the far north
+by the exit and a mirrored pair on the mid-room flanks, none on the entry lane.
+A boss arena's healing should cost you the position you were holding, or it is
+just a larger health bar handed out at the door.
+
+"Arriving dry" is the case worth keeping green: a player who spent the whole
+reserve on the floor's own population can still finish the boss on what the
+room itself holds. The boardroom held **2 cells against an 84-round fight**
+when the CEO was retuned, which failed that test outright — it was fine for a
+boss that died in five seconds and stopped being fine the moment that changed.
+The same floor was also the only boss arena with **no ramen at all**, against a
+CEO that went from 3.4 dps to 12-42; it has three now.
+Route supply is 340-470 rounds per floor against mob costs of 41-69, so
+topping back up to 99 before the door is never the constraint.
 
 ### How a floor is shaped, and why
 
@@ -655,6 +815,24 @@ time bonus  = max(0, round(PAR_TIME[floor] - levelTime)) * 10
 per category = 2500, and only at a clean 100%
 ```
 
+`PAR_TIME` is `[100, 110, 120, 135, 150]`, and those are the first values in
+the game that came off a stopwatch rather than out of the air. It was
+`[150, 180, 210, 230, 260]`: the first three were set against floors that were
+four or five open halls, and the floors were rewritten under them without the
+pars moving — a spine and a ring traverse far faster than that did. A measured
+run at BRING 'EM ON came in at **1:30 / 1:19 / 1:30 / 2:00** on floors 2–5, so
+par was paying full price for taking roughly twice as long as a floor needs.
+
+The new values are that measurement plus the room the boss rewrite takes.
+Floors 3 and 4 were timed against bosses that died in about five seconds and
+those fights are several times longer now, which is where floor 3's 1:19
+becomes 120 and floor 4's 1:30 becomes 135. Floor 1 has never been timed and is
+set just under floor 2 because it is the smaller, thinner floor.
+
+`openTally` reads `PAR_TIME[levelIndex] || 180`, so a floor added without a par
+of its own does not fail — it quietly pays against three minutes that nobody
+chose. There is an assertion that every floor has one.
+
 `finishTally()` is the single payout path — the roll-up calls it when it lands
 and the action key calls it to skip ahead, so watching the animation and
 skipping it award exactly the same total. There is a test for that, because an
@@ -671,7 +849,7 @@ last floor sets `gameState = 'won'` and shows the OUT banner instead.
 Run all of these before shipping any change. None of them needs a browser.
 
 ```sh
-node reference/run-tests.js                              # 755 assertions against the real game loop
+node reference/run-tests.js                              # 809 assertions against the real game loop
 WOLF3D_HTML=dist/wolf3d.html node reference/run-tests.js # ...and against the shipped bundle
 node reference/validate-level.js                         # map geometry + key-gated reachability, all 3 floors
 node reference/bundle.js                                 # rebuild dist/wolf3d.html
@@ -798,7 +976,9 @@ Three things about it are load-bearing:
   three of the five were found by trying to build the fixture and measuring
   what came back.
 - **`gap: '<what it would take>'` marks a triaged survivor.** There are none
-  left as of Phase 6; the field stays because the next new system will need it.
+  left as of Phase 6, and the Phase 9 playtest pass added six mutations without
+  adding one — 192 mutants, 187 killed, 0 survivors, 5 unkillable. The field
+  stays because the next new system will need it.
   Real news the
   first time and noise every run after, so it is reported loudly without
   failing the run. What fails is movement in either direction — a new survivor,

@@ -54,7 +54,9 @@
      scanlines and the vignette fall across the bar exactly the way they fall
      across the viewport. The bar used to be at 7 and escaped both. The modal
      screens (#banner / #tally at 8, #splash at 10) stay above them on
-     purpose: those are read, not inhabited. */
+     purpose: those are read, not inhabited — and so do the two red damage
+     edges and the touch overlay at 7, for the reason spelled out at
+     #hpVignette below. */
   #stage::before {
     content: '';
     position: absolute; inset: 0;
@@ -171,16 +173,50 @@
     78%  { transform: translateX(2px)  scale(1.02); filter: brightness(1.1); }
     100% { transform: translateX(0)    scale(1);    filter: brightness(1); }
   }
-  /* border tint that deepens as health drops */
+  /* ─── THE TWO RED EDGES ───────────────────────────────────────────────
+     Both sit at z-index 7, ABOVE the scanlines (6) and the CRT vignette (5),
+     and that placement is the whole reason they read at all. #stage::after
+     lays rgba(2,3,10,0.6) over the outer 45% of the screen — which is exactly
+     where a screen-edge warning lives — so at the z-index 4 this one used to
+     have, a red border was being painted and then having 60% of it taken
+     back at the corners. It looked like a colour that was too weak; it was a
+     colour underneath a wash. The CRT treatment belongs over anything
+     DIEGETIC: the status bar and the boss bar are objects in the world and
+     should sit behind the glass. These two are not in the world at all —
+     they are what taking a bullet feels like — and neither is the touch
+     overlay, which is why 7 already existed as the layer above the glass.
+
+     They say different things and are deliberately not merged. #hpVignette is
+     a STATE: how close to dead you are, held for as long as that is true, and
+     eased over 0.45s so it never flickers. #hurtEdge is an EVENT: one hit, one
+     hard flash, driven per frame off player.hurtT with no transition at all
+     (a transition would fight a value that is already animating). Merging them
+     would mean a full-health player and a dying one get the same warning, or a
+     dying player gets no new information when a fresh round lands. */
   #hpVignette {
     position: absolute; inset: 0;
-    z-index: 4;
+    z-index: 7;
     pointer-events: none;
     opacity: 0;
     box-shadow:
       inset 0 0 60px  rgba(200,20,45,0.55),
       inset 0 0 140px rgba(160,10,35,0.40);
     transition: opacity 0.45s ease;
+  }
+  /* The event flash. A hard 3px rim so there is an actual OUTLINE — a soft
+     glow alone is what the health vignette already does, and two soft glows
+     on top of each other read as one — then the inset falloff behind it to
+     tie the rim to the picture. */
+  #hurtEdge {
+    position: absolute; inset: 0;
+    z-index: 7;
+    pointer-events: none;
+    opacity: 0;
+    border: 3px solid rgba(255,60,80,0.95);
+    box-shadow:
+      inset 0 0  22px rgba(255,60,80,0.85),
+      inset 0 0  70px rgba(230,25,55,0.60),
+      inset 0 0 170px rgba(190,10,40,0.45);
   }
   @media (prefers-reduced-motion: reduce) {
     .hp-hit { animation: none; }
@@ -666,6 +702,7 @@
   </header>
 
   <div id="hpVignette"></div>
+  <div id="hurtEdge"></div>
 
   <div id="bossBar">
     <span class="name" id="bossName"></span>
@@ -794,9 +831,24 @@ const WALL_H = 3;             // every wall is flat-topped, Wolf3D style
 const EYE_Z = 1.6;            // player eye height
 const FOCAL = COLS / (2 * Math.tan(FOV / 2));
 const CLIP_SIZE = 8;          // rounds per magazine before a reload cycle
+// What a battery cell is worth. Separate from CLIP_SIZE, which it used to be:
+// they were the same 8 by coincidence, and reading the pistol's magazine size
+// to size a pickup meant the reserve could not be made more generous without
+// also changing how often the pistol reloads. Two numbers, two reasons.
+const AMMO_PICKUP = 16;       // rounds per battery cell
 const RELOAD_TIME = 1.05;     // seconds for the full reload animation
 const DEATH_TIME = 0.45;      // the 'dying' window, subdivided across DEATH_SEQ
 const SPAWN_GRACE = 0.75;     // seconds an idle enemy ignores the player after spawn
+// How long taking a hit shows for. THREE things read it — the canvas wash, the
+// DOM outline and the timer hurtPlayer sets — and they were three copies of the
+// literal 0.28, which is a window that can go out of sync with itself: move one
+// and the outline outlives the wash, or stops before it.
+const HURT_TIME = 0.28;
+// Seconds between the shots of one burst. The roster (and a boss phase) may
+// override it with a `gap` of its own — that column is the whole difference
+// between an enforcer's three measured rounds and a boss unloading a wall of
+// them, and without it 0.16 would cap every body in the game at 6 shots/sec.
+const BURST_GAP = 0.16;
 
 // ─── DIFFICULTY ─────────────────────────────────────────────
 // Wolf3D's four, and its philosophy: the enemies do not get tougher, they get
@@ -1189,15 +1241,15 @@ const LEVEL_3 = [
   '#################...$...################',
   '#################.......################',
   '###########NN#######D#######NN##########',
-  '#######$a.#...................#..$######',
+  '#######$a.#.........+.........#..$######',
   '#######...S..$.............$..S...######',
   '#######$..#..####.......####..#.a$######',
   '###########..####.......####..##########',
-  '###########.a...............a.##########',
+  '###########.a..+.........+..a.##########',
   '###########.........C.........##########',
-  '###########...................##########',
+  '###########..a.............a..##########',
   '###########..$.............$..##########',
-  '###########...................##########',
+  '###########...a...........a...##########',
   '####################R###################',
   '###################...##################',
   '#####...........$.......$..........#####',
@@ -1238,25 +1290,25 @@ const LEVEL_4 = [
   '#################...$...################',
   '#################.......################',
   '###########NN#######B#######NN##########',
-  '########.......................#########',
+  '########..a.................a..#########',
   '########.....##..........##....#########',
   '########..$..##....I.....##.$..#########',
-  '########.......................#########',
+  '########.a...................a.#########',
   '########....t.............t....#########',
   '########.##.....a.....a.....##.#########',
   '########.##........b........##.#########',
-  '########.......................#########',
+  '########......a.........a......#########',
   '########.....##..........##....#########',
   '########..$..##....t.....##.$..#########',
   '########......+..........+.....#########',
   '####################R###################',
   '###################...##################',
-  '#####..a..g..................d.....#####',
+  '#####..a..g.......a..........d.....#####',
   '#####.a.h.....d.$.......a.g....h.a.#####',
   '##.a#.###########.#....###########.#####',
   '##$.S.#############...############.#####',
   '##..#.#############...############.#####',
-  '#####..g..a..k...t.......k...a..g..#####',
+  '#####..g..a..k...t..a....k...a..g..#####',
   '#####.###########.#....###########.#####',
   '#####.#############.$.############.#####',
   '#####.#############...############.#####',
@@ -1264,7 +1316,7 @@ const LEVEL_4 = [
   '#####.###########.#....###########.#a.##',
   '#####.#############..a############.S.$##',
   '#####.#############...############.#..##',
-  '#####...k..a..g.........a..h..t.d..#####',
+  '#####...k..a..g.....a...a..h..t.d..#####',
   '#####.###########.#....###########.#####',
   '#####.#############+..############.#####',
   '#####.#############...############.#####',
@@ -1285,27 +1337,27 @@ const LEVEL_5 = [
   '####################X###################',
   '############||||||.....|||||############',
   '###########|................|###########',
-  '#########|.........$..........|#########',
+  '#########|..a......$.......a..|#########',
   '#######|......h..........h......|#######',
-  '######|..........................|######',
+  '######|...a..................a...|######',
   '######|....##...............##...|######',
   '######|....##...............##...|######',
   '######|......a............a......|######',
   '######|..$.........F..........$..|######',
-  '######|..........................|######',
+  '######|...a..................a...|######',
   '######|....##...............##...|######',
   '######|....##...............##...|######',
-  '######|..........................|######',
+  '######|.....a..............a.....|######',
   '#######|........+......+........|#######',
-  '#########|.........$..........|#########',
+  '#########|...a.....$......a...|#########',
   '###########|................|###########',
   '############|||||||#B#||||||############',
   '###################...##################',
-  '####................................####',
+  '####....a......................a....####',
   '####.#########.#k##...##k.#########.####',
   '####.#...h.....####.$.###.....h...#.####',
-  '####.#..r......####...###.........#.####',
-  '####.......k.................k......####',
+  '####.#..r...a..####...###...a.....#.####',
+  '####.......k....a.......a....k......####',
   '####.#......$..####...###...$.....#.####',
   '####.#.a.......####...###.......a.#.####',
   '####.###############R##############.####',
@@ -1313,7 +1365,7 @@ const LEVEL_5 = [
   '####.##############...#############.####',
   '####.#.g.......####...###.......g.#.####',
   '####.#.+.......####.a.###.......+.#.####',
-  '####.........d.............d........####',
+  '####......a..d.............d..a.....####',
   '####.#......$..####...###...$..b..#.####',
   '####.#....t....####.+.###.....t...#.####',
   '####.............g.....g............####',
@@ -1328,8 +1380,25 @@ const LEVEL_5 = [
 const LEVELS = [LEVEL_1, LEVEL_2, LEVEL_3, LEVEL_4, LEVEL_5];
 const FLOOR_NAMES = ['ATRIUM \u00b7 SUBLEVEL', 'R&D \u00b7 SERVER FARM', 'EXECUTIVE SUITE',
                      'BLACK ICE \u00b7 DATA VAULT', 'THE SPIRE \u00b7 HELIPAD'];
-// seconds a competent run takes; drives the time bonus on the tally screen
-const PAR_TIME = [150, 180, 210, 230, 260];
+// Seconds a competent run takes; drives the time bonus on the tally screen
+// (10 points per second under par).
+//
+// These were [150, 180, 210, 230, 260], and every one of them was a guess made
+// against a floor plan that no longer exists — the first three were set when a
+// floor was four or five open halls, and a spine with a ring traverses much
+// faster than that did. A stopwatch run at BRING 'EM ON came in at 1:30 on
+// floor 2, 1:19 on floor 3, 1:30 on floor 4 and 2:00 on floor 5, so par was
+// paying a full-price time bonus for taking twice as long as the floor needs.
+//
+// Par is now that measurement plus the room the boss rewrite takes. Floors 3
+// and 4 were measured with bosses that died in about five seconds; those two
+// fights are several times longer now, which is where floor 3's 79s becomes
+// 120 and floor 4's 90s becomes 135. Floors 1 and 2 have no boss and take the
+// measurement almost straight — floor 1 was never timed, and is set just under
+// floor 2 because it is the smaller, thinner floor. Floor 5 gets the most
+// headroom of all: the largest floor, the longest fight, and the only one
+// where dying to the death blast costs you the whole run back.
+const PAR_TIME = [100, 110, 120, 135, 150];
 
 ;
 'use strict';
@@ -1351,6 +1420,7 @@ const PAR_TIME = [150, 180, 210, 230, 260];
 //              mkEnemy, never shared: a boss phase rewrites these in place.
 //   want       standoff distance held while chasing with line of sight
 //   burst      shots per attack entry
+//   gap        seconds between the shots of one burst; omitted means BURST_GAP
 //   radius     how much room the body claims in separateEnemies
 //   score      points for the kill
 //   loot       probability of dropping an ammo cell
@@ -1368,7 +1438,7 @@ const PAR_TIME = [150, 180, 210, 230, 260];
 //              the only source, so the two can never drift apart
 //   phases     the whole fight: a health fraction `at`, a display `name`, any
 //              of speed/cd/dmg/range/sight to write onto the spec, plus want,
-//              burst and an optional summon { type, n }
+//              burst, an optional gap and an optional summon { type, n }
 //   title      the boss bar's name
 //   tag        the phase-change toast's prefix
 //   objective  the objective line while it lives
@@ -1441,7 +1511,7 @@ const ENEMY_TYPES = {
 
   ceo: {
     char: 'C', name: 'THE CEO', boss: true,
-    spec: { hp: 520, speed: 1.10, range: 12.0, cd: 1.40, dmg: 16, sight: 20 },
+    spec: { hp: 1400, speed: 1.10, range: 12.0, cd: 0.85, dmg: 11, sight: 20 },
     radius: 0.55, score: 5000,
     loot: 0.30, blood: [3, 3],
     patrol: false, rotates: false, bobs: false, relocate: false,
@@ -1450,14 +1520,30 @@ const ENEMY_TYPES = {
     objective: 'THE BOARD IS IN SESSION — KILL THE CEO',
     heldBy: 'ELEVATOR — HELD BY THE BOARD',
     deny: 'THE BOARD IS STILL IN SESSION',
-    // A three-phase fight rather than a guard with more hp. Each phase
-    // re-tunes the same spec fields the ordinary FSM already reads, so no new
-    // state machine is needed. `at` is the health fraction it takes over at.
+    // A four-phase fight rather than a guard with more hp. Each phase re-tunes
+    // the same spec fields the ordinary FSM already reads, so no new state
+    // machine is needed. `at` is the health fraction it takes over at.
+    //
+    // It opened at ONE round every 1.4s — 3.4 dps at its own standoff, which
+    // is 29 seconds to kill a full-health player, against a fight that a
+    // measured run finished in five. It never got to fire twice. The rewrite
+    // keeps the same closing arc and changes what a phase IS: a volley, not a
+    // shot. Landed damage in the open, at each phase's standoff, now runs
+    // 12 -> 22 -> 33 -> 42 dps, so the boardroom's tables stop being scenery.
+    //
+    // The bursts are the dodge, not just the threat. A body in `attack` does
+    // not move, and enemyShot re-checks line of sight for EVERY round — so a
+    // long volley roots the CEO for a second while you break its sightline,
+    // and the rest of that volley hits the table you stepped behind.
     phases: [
-      { at: 1.00, name: 'BOARD MEETING',    speed: 1.10, cd: 1.40, dmg: 16, want: 5.2, burst: 1 },
-      { at: 0.62, name: 'HOSTILE TAKEOVER', speed: 1.75, cd: 1.00, dmg: 14, want: 3.2, burst: 3 },
-      { at: 0.28, name: 'GOLDEN PARACHUTE', speed: 2.20, cd: 0.62, dmg: 12, want: 2.3, burst: 4,
-        summon: { type: 'drone', n: 2 } },
+      { at: 1.00, name: 'BOARD MEETING',    speed: 1.10, cd: 0.85, dmg: 11, want: 5.0,
+        burst: 5,  gap: 0.13 },
+      { at: 0.70, name: 'HOSTILE TAKEOVER', speed: 1.80, cd: 0.60, dmg: 10, want: 3.6,
+        burst: 8,  gap: 0.11, summon: { type: 'drone', n: 2 } },
+      { at: 0.42, name: 'GOLDEN PARACHUTE', speed: 2.20, cd: 0.45, dmg:  9, want: 2.6,
+        burst: 11, gap: 0.09, summon: { type: 'drone', n: 3 } },
+      { at: 0.18, name: 'SEVERANCE',        speed: 2.45, cd: 0.35, dmg:  8, want: 2.0,
+        burst: 14, gap: 0.07, summon: { type: 'spark', n: 2 } },
     ],
   },
 
@@ -1468,7 +1554,7 @@ const ENEMY_TYPES = {
   // the same field the turret uses — the FSM needs nothing new for either.
   blackice: {
     char: 'I', name: 'BLACK ICE', boss: true,
-    spec: { hp: 640, speed: 0, range: 16.0, cd: 1.30, dmg: 14, sight: 24 },
+    spec: { hp: 1700, speed: 0, range: 16.0, cd: 0.70, dmg: 24, sight: 24 },
     radius: 0.60, score: 6000,
     loot: 0.30, blood: [0, 0],
     patrol: false, rotates: false, bobs: false, relocate: false,
@@ -1477,13 +1563,27 @@ const ENEMY_TYPES = {
     objective: 'THE VAULT IS SEALED — BREAK THE ICE',
     heldBy: 'ELEVATOR — LOCKED BY BLACK ICE',
     deny: 'THE ICE STILL HOLDS THE FLOOR',
+    // Its two rooted phases carry the damage on the SHOT, not on the rate,
+    // and that is forced by the accuracy model rather than chosen: enemyShot
+    // floors the hit chance at 0.16 past ~12.4u, so a boss that lives at 16u
+    // lands roughly one round in six however many it fires. Heavy rounds turn
+    // that into a distance gradient instead of a flat nuisance — attrition
+    // across the vault at 12u, punishing at 6u, lethal if you walk up to it.
+    // The pillars are what you spend that gradient on, which is the fight the
+    // room was drawn for.
+    //
+    // Coming off the pedestal inverts it: phases 2 and 3 close, so their reach
+    // shortens, their damage per round drops and the volleys get long enough
+    // that the room's cover matters again on the way in.
     phases: [
-      { at: 1.00, name: 'COLD BOOT',      speed: 0,    cd: 1.30, dmg: 14, range: 16.0,
-        want: 0, burst: 2 },
-      { at: 0.60, name: 'TRACE LOCK',     speed: 0,    cd: 0.80, dmg: 13, range: 16.0,
-        want: 0, burst: 4, summon: { type: 'turret', n: 3 } },
-      { at: 0.25, name: 'SCORCHED EARTH', speed: 1.60, cd: 0.55, dmg: 12, range: 12.0,
-        want: 6.0, burst: 5 },
+      { at: 1.00, name: 'COLD BOOT',      speed: 0,    cd: 0.70, dmg: 24, range: 16.0,
+        want: 0,   burst: 8,  gap: 0.11 },
+      { at: 0.65, name: 'TRACE LOCK',     speed: 0,    cd: 0.50, dmg: 22, range: 16.0,
+        want: 0,   burst: 12, gap: 0.09, summon: { type: 'turret', n: 3 } },
+      { at: 0.38, name: 'SCORCHED EARTH', speed: 1.70, cd: 0.42, dmg: 10, range: 12.0,
+        want: 5.5, burst: 14, gap: 0.08, summon: { type: 'spark', n: 3 } },
+      { at: 0.15, name: 'MELTDOWN',       speed: 2.40, cd: 0.32, dmg:  9, range: 8.0,
+        want: 2.4, burst: 18, gap: 0.06 },
     ],
   },
 
@@ -1493,7 +1593,7 @@ const ENEMY_TYPES = {
   // whole arc — kill it at your feet and it takes you with it.
   founder: {
     char: 'F', name: 'THE FOUNDER', boss: true,
-    spec: { hp: 800, speed: 1.30, range: 13.0, cd: 1.20, dmg: 15, sight: 24 },
+    spec: { hp: 2100, speed: 1.30, range: 13.0, cd: 0.80, dmg: 12, sight: 24 },
     radius: 0.60, score: 8000,
     loot: 0.30, blood: [3, 3],
     patrol: false, rotates: false, bobs: false, relocate: false,
@@ -1503,13 +1603,22 @@ const ENEMY_TYPES = {
     objective: 'THE FOUNDER IS BOARDING — DO NOT LET THEM LEAVE',
     heldBy: 'ELEVATOR — THE ROOF IS NOT CLEAR',
     deny: 'THE ROOF IS NOT CLEAR',
+    // The last phase is the heaviest volley in the game and the shortest reach
+    // to deliver it from, which is the arc finally arriving: by then the deck
+    // has nowhere left to stand. It stays survivable for the same reason the
+    // CEO's does — a boss unloading twenty rounds is a boss standing still,
+    // and every one of them is line-of-sight gated — but on an almost bare
+    // helipad that buys you distance rather than cover, which is the whole
+    // difference between this floor and the vault.
     phases: [
-      { at: 1.00, name: 'EXIT PACKAGE',    speed: 1.30, cd: 1.20, dmg: 15, range: 13.0,
-        want: 6.5, burst: 2 },
-      { at: 0.66, name: 'VESTED INTEREST', speed: 2.00, cd: 0.85, dmg: 16, range: 9.0,
-        want: 3.5, burst: 3, summon: { type: 'enforcer', n: 2 } },
-      { at: 0.30, name: 'LEGACY MODE',     speed: 2.60, cd: 0.50, dmg: 14, range: 5.0,
-        want: 1.6, burst: 5, summon: { type: 'spark', n: 4 } },
+      { at: 1.00, name: 'EXIT PACKAGE',    speed: 1.30, cd: 0.80, dmg: 12, range: 13.0,
+        want: 6.5, burst: 6,  gap: 0.12 },
+      { at: 0.68, name: 'VESTED INTEREST', speed: 2.00, cd: 0.55, dmg: 11, range: 9.0,
+        want: 3.5, burst: 10, gap: 0.09, summon: { type: 'enforcer', n: 2 } },
+      { at: 0.40, name: 'LEGACY MODE',     speed: 2.60, cd: 0.42, dmg: 10, range: 5.0,
+        want: 1.8, burst: 14, gap: 0.07, summon: { type: 'spark', n: 4 } },
+      { at: 0.15, name: "FOUNDER'S SHARE", speed: 2.90, cd: 0.30, dmg:  8, range: 4.0,
+        want: 1.2, burst: 16, gap: 0.05 },
     ],
   },
 
@@ -3465,6 +3574,9 @@ function mkEnemy(type, x, y) {
   // every body of a type would re-tune the whole floor — and permanently, for
   // the rest of the session, since the roster is a module-level literal.
   const spec = { ...row.spec };
+  // Phase 0 first, then the row's own, then the constant — the same precedence
+  // stepBossPhase applies on every later phase change.
+  const rowGap = row.phases ? row.phases[0].gap : row.gap;
   return {
     type, x, y, spawnX: x, spawnY: y,
     hp: spec.hp, maxHp: spec.hp, spec,
@@ -3481,11 +3593,18 @@ function mkEnemy(type, x, y) {
     heading: -Math.PI / 2,
     patrolDir: null, patrolT: Math.random() * 1.2, patrolTX: 0, patrolTY: 0,
     phase: 0, shotsLeft: 1,
-    // A boss opens on phase 0, so its standoff and burst come from there rather
-    // than from the row's plain fields — stepBossPhase rewrites both from the
-    // same table the moment its health drops.
+    // Has this body ever actually laid eyes on the player? It is what separates
+    // a room that waits for you from a floor that empties into the corridor:
+    // only a body that has seen you will work a door open behind you. Set in
+    // the FSM wherever line of sight is established, and never cleared —
+    // nothing un-sees the player, the same way nothing un-alerts.
+    sawPlayer: false,
+    // A boss opens on phase 0, so its standoff, burst and burst gap come from
+    // there rather than from the row's plain fields — stepBossPhase rewrites
+    // all three from the same table the moment its health drops.
     burst: row.phases ? row.phases[0].burst : row.burst,
     want:  row.phases ? row.phases[0].want  : row.want,
+    gap:   rowGap === undefined ? BURST_GAP : rowGap,
   };
 }
 function mkItem(kind, x, y) {
@@ -4211,7 +4330,7 @@ function hurtPlayer(amount, sx, sy) {
   chipHpFromNow();                          // chip starts from the old value
   addHitDir(sx, sy);
   player.hp -= amount;
-  player.hurtT = 0.28;
+  player.hurtT = HURT_TIME;
   pulseHpBar();
   sfx('ouch');
   if (player.hp <= 0) {
@@ -4279,8 +4398,17 @@ function moveEnemy(e, nx, ny) {
  * through a locked one, because enemies carry no keycards and a guard queuing
  * at a door it can never open is worse than one that never came.
  * `stepDoors` will not close on an occupied tile, so nobody is crushed here.
+ *
+ * And only a body that has actually SEEN the player, which is what makes a
+ * floor read as rooms rather than as one pool of bodies. Gunfire carries
+ * through walls — `alertNear` wakes a radius, not a sightline — so without
+ * this every shot fired anywhere near a door pulled the room behind it out
+ * into the corridor to meet you, and a floor emptied itself at the first
+ * trigger pull. Now they come as far as the door and hold there; open it, or
+ * step into the room, and the ones that lay eyes on you follow you anywhere.
  */
 function openDoorAhead(e, gx, gy) {
+  if (!e.sawPlayer) return;
   const c = cellAt(gx, gy);
   if (!c || c.tag !== 'door' || c.lock !== null || c.phase !== 'closed') return;
   if (Math.hypot(gx + 0.5 - e.x, gy + 0.5 - e.y) > 1.2) return;
@@ -4444,6 +4572,7 @@ function stepEnemies(dt) {
           if (dist < e.spec.sight && hasLOS(e.x, e.y, player.x, player.y)) {
             e.state = 'alert';
             e.stateT = 0.4;
+            e.sawPlayer = true;
             sfx(ENEMY_TYPES[e.type].alertSfx);
             alertNear(e.x, e.y, 7);
           }
@@ -4462,6 +4591,12 @@ function stepEnemies(dt) {
       }
       case 'chase': {
         const los = hasLOS(e.x, e.y, player.x, player.y);
+        // The second place a body can lay eyes on you, and the one that
+        // matters for the door gate: a guard woken by gunfire through a wall
+        // arrives here having seen nothing, walks its route as far as the door
+        // and waits. The moment the sightline opens it becomes a real chaser
+        // and the doors stop being a boundary.
+        if (los) e.sawPlayer = true;
         if (los && dist < e.spec.range && e.atkCd <= 0) {
           e.state = 'attack';
           e.stateT = 0.22;
@@ -4479,9 +4614,17 @@ function stepEnemies(dt) {
           // flow field the moment the geometry gets in the way
           const w = los ? null : navStep(e);
           if (w) {
-            // gated on actually moving: a rooted body has a waypoint like
-            // anything else, and would otherwise cycle a door it can never reach
-            if (moveEnemy(e, w.x * sp, w.y * sp)) openDoorAhead(e, w.gx, w.gy);
+            moveEnemy(e, w.x * sp, w.y * sp);
+            // Gated on being ABLE to walk, not on having walked. A rooted body
+            // has a waypoint like anything else and would otherwise cycle a
+            // door across the room off a step it can never take — but testing
+            // the STEP for that only looks equivalent. A chaser pressed flat
+            // against a shut door moves exactly zero, so the old gate locked it
+            // out of the one action that unblocks it, and the sighting gate in
+            // openDoorAhead now parks bodies in precisely that spot: they wait
+            // at the door, the door times out and shuts, and they could never
+            // push it open again however plainly they could see you.
+            if (e.spec.speed > 0) openDoorAhead(e, w.gx, w.gy);
           } else {
             moveEnemy(e, dx / dist * sp, dy / dist * sp);
           }
@@ -4494,7 +4637,7 @@ function stepEnemies(dt) {
           enemyShot(e, dist);
           if (e.shotsLeft > 1) {
             e.shotsLeft--;
-            e.stateT = 0.16;          // stay in the muzzle-flash frame
+            e.stateT = e.gap;         // stay in the muzzle-flash frame
           } else {
             e.state = 'chase';
             // scaled HERE and not in mkEnemy: stepBossPhase reassigns e.spec.cd
@@ -4572,6 +4715,11 @@ function stepBossPhase(e) {
   if (ph.sight !== undefined) e.spec.sight = ph.sight;
   e.want  = ph.want;
   e.burst = ph.burst;
+  // `gap` is optional on a phase row the way the spec fields are, but it has to
+  // fall back to the CONSTANT rather than be left alone: a phase that names no
+  // gap means "ordinary cadence", and carrying the previous phase's forward
+  // would leave a boss stuck at the last torrent it fired.
+  e.gap   = ph.gap !== undefined ? ph.gap : BURST_GAP;
   e.atkCd = Math.min(e.atkCd, 0.5);
   if (want > 0) {
     toast(row.tag + '  ·  ' + ph.name);
@@ -4914,10 +5062,10 @@ function stepItems(dt) {
         toast('INSTANT RAMEN  +25 HP'); break;
       case 'ammo':
         if (player.ammo >= 99) continue;
-        player.ammo = Math.min(99, player.ammo + CLIP_SIZE);
+        player.ammo = Math.min(99, player.ammo + AMMO_PICKUP);
         // picking up with an empty gun seats a clip straight away
         if (player.clip <= 0 && player.reloadT <= 0) startReload();
-        toast('BATTERY CELL  +' + CLIP_SIZE + ' AMMO'); break;
+        toast('BATTERY CELL  +' + AMMO_PICKUP + ' AMMO'); break;
       case 'cash':
         player.score += 500;
         treasureFound++;
@@ -5561,6 +5709,29 @@ function paintHpBar() {
   el('hpVignette').style.opacity = (t * t * 0.9).toFixed(3);
 }
 
+/**
+ * The per-hit red outline, driven straight off player.hurtT.
+ *
+ * Called every frame rather than from syncHud, which is the whole point of it
+ * being here and not there: syncHud runs one frame in twelve, and hurtT is a
+ * HURT_TIME window of 0.28s. At that stride a flash would be caught twice, or
+ * once, or — if a hit landed just after a sync — not at all, so the indicator
+ * would fire inconsistently for hits that all did the same thing.
+ *
+ * Quantised to sixteenths for the same reason the canvas fades are: this
+ * writes an inline style every frame, and an unrounded ratio hands the browser
+ * a fresh string 60 times a second to re-parse for a difference nobody can
+ * see. Unlike the atlas fades there is no cache to overflow here, so the
+ * saving is small — but the shape of the number should match its neighbours.
+ */
+function paintHurtEdge() {
+  const t = Math.max(0, Math.min(1, player.hurtT / HURT_TIME));
+  // Square-rooted, not linear: a flash that decays linearly spends most of its
+  // life almost invisible, and this one has to register inside a burst that is
+  // handing out the next hit 70ms later.
+  el('hurtEdge').style.opacity = (Math.round(Math.sqrt(t) * 16) / 16).toFixed(3);
+}
+
 function syncHud() {
   el('sFloor').textContent = String(levelIndex + 1);
   el('sScore').textContent = String(player.score).padStart(6, '0');
@@ -6038,7 +6209,12 @@ function frame(now) {
 
   // ── SCREEN FLASHES
   screenFlash(player.flashT, 0.09, '255,225,160', 0.13);   // muzzle
-  screenFlash(player.hurtT,  0.28, '220,30,50',   0.30);   // taking a hit
+  screenFlash(player.hurtT,  HURT_TIME, '220,30,50', 0.30); // taking a hit
+  // ...and the same hit as an OUTLINE, in the DOM above the CRT overlays. The
+  // wash above it is drawn on the canvas, which #stage::after then darkens by
+  // 60% at exactly the edges an outline needs — see style.css. Every frame,
+  // not on the syncHud stride: hurtT lives for HURT_TIME.
+  paintHurtEdge();
 
   // ── HUD refresh (cheap, every ~12 frames)
   if ((++hudTick % 12) === 0) syncHud();

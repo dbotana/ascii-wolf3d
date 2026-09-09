@@ -330,10 +330,10 @@ function stepItems(dt) {
         toast('INSTANT RAMEN  +25 HP'); break;
       case 'ammo':
         if (player.ammo >= 99) continue;
-        player.ammo = Math.min(99, player.ammo + CLIP_SIZE);
+        player.ammo = Math.min(99, player.ammo + AMMO_PICKUP);
         // picking up with an empty gun seats a clip straight away
         if (player.clip <= 0 && player.reloadT <= 0) startReload();
-        toast('BATTERY CELL  +' + CLIP_SIZE + ' AMMO'); break;
+        toast('BATTERY CELL  +' + AMMO_PICKUP + ' AMMO'); break;
       case 'cash':
         player.score += 500;
         treasureFound++;

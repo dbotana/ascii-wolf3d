@@ -59,6 +59,11 @@ function stepBossPhase(e) {
   if (ph.sight !== undefined) e.spec.sight = ph.sight;
   e.want  = ph.want;
   e.burst = ph.burst;
+  // `gap` is optional on a phase row the way the spec fields are, but it has to
+  // fall back to the CONSTANT rather than be left alone: a phase that names no
+  // gap means "ordinary cadence", and carrying the previous phase's forward
+  // would leave a boss stuck at the last torrent it fired.
+  e.gap   = ph.gap !== undefined ? ph.gap : BURST_GAP;
   e.atkCd = Math.min(e.atkCd, 0.5);
   if (want > 0) {
     toast(row.tag + '  ·  ' + ph.name);

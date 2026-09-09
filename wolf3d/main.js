@@ -137,7 +137,12 @@ function frame(now) {
 
   // ── SCREEN FLASHES
   screenFlash(player.flashT, 0.09, '255,225,160', 0.13);   // muzzle
-  screenFlash(player.hurtT,  0.28, '220,30,50',   0.30);   // taking a hit
+  screenFlash(player.hurtT,  HURT_TIME, '220,30,50', 0.30); // taking a hit
+  // ...and the same hit as an OUTLINE, in the DOM above the CRT overlays. The
+  // wash above it is drawn on the canvas, which #stage::after then darkens by
+  // 60% at exactly the edges an outline needs — see style.css. Every frame,
+  // not on the syncHud stride: hurtT lives for HURT_TIME.
+  paintHurtEdge();
 
   // ── HUD refresh (cheap, every ~12 frames)
   if ((++hudTick % 12) === 0) syncHud();

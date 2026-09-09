@@ -170,12 +170,20 @@ Five ordinary bodies and three bosses, all of them rows in
 | corporate enforcer | 140 hp, three-round bursts, and wide enough to plug a doorway |
 
 Each floor from 3 up ends with a boss, and each one is a different problem.
-The **CEO** closes and speeds up as it falls, summoning drones. **BLACK ICE**
-does the opposite: it opens rooted with a reach nothing you carry can match, so
-the vault's pillars are the fight, then it seeds the room with turrets, then it
-finally comes for you. **THE FOUNDER** pulls you in — every phase raises its
-speed and shortens its reach until the last one is a knife fight, and it goes up
-when it dies.
+The **CEO** closes and speeds up as it falls, summoning drones and then charges.
+**BLACK ICE** does the opposite: it opens rooted with a reach nothing you carry
+can match, so the vault's pillars are the fight, then it seeds the room with
+turrets, then it finally comes for you. **THE FOUNDER** pulls you in — every
+phase raises its speed and shortens its reach until the last one is a knife
+fight, and it goes up when it dies.
+
+All three fight in volleys — five to eight rounds early, fourteen to eighteen
+by the last phase. Standing in the open is worth two to eight seconds of your
+life depending on the phase, but a boss firing a long burst is a boss standing
+still, and every round of it is checked against line of sight separately. Step
+behind something mid-volley and the rest of it hits that instead. Bring enough
+ammo: a full 99-round reserve does not finish any of them through a chaingun,
+which is what the shotgun and the sniper are for.
 
 ## Tech
 
@@ -227,7 +235,7 @@ dropping its marker.
 All of them exit non-zero on failure. GitHub Actions runs the first four on
 every push and pull request, against both the split tree and the bundle; the
 mutation battery runs weekly and on demand, because it is a ~25-minute job
-on ten cores (181 mutants, and `--bail` means most stop at the assertion that
+on ten cores (192 mutants, and `--bail` means most stop at the assertion that
 catches them). It prints what it cost and which mutants were slowest.
 
 There is an opt-in pre-commit hook that runs the same checks locally:

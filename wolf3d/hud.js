@@ -83,6 +83,29 @@ function paintHpBar() {
   el('hpVignette').style.opacity = (t * t * 0.9).toFixed(3);
 }
 
+/**
+ * The per-hit red outline, driven straight off player.hurtT.
+ *
+ * Called every frame rather than from syncHud, which is the whole point of it
+ * being here and not there: syncHud runs one frame in twelve, and hurtT is a
+ * HURT_TIME window of 0.28s. At that stride a flash would be caught twice, or
+ * once, or — if a hit landed just after a sync — not at all, so the indicator
+ * would fire inconsistently for hits that all did the same thing.
+ *
+ * Quantised to sixteenths for the same reason the canvas fades are: this
+ * writes an inline style every frame, and an unrounded ratio hands the browser
+ * a fresh string 60 times a second to re-parse for a difference nobody can
+ * see. Unlike the atlas fades there is no cache to overflow here, so the
+ * saving is small — but the shape of the number should match its neighbours.
+ */
+function paintHurtEdge() {
+  const t = Math.max(0, Math.min(1, player.hurtT / HURT_TIME));
+  // Square-rooted, not linear: a flash that decays linearly spends most of its
+  // life almost invisible, and this one has to register inside a burst that is
+  // handing out the next hit 70ms later.
+  el('hurtEdge').style.opacity = (Math.round(Math.sqrt(t) * 16) / 16).toFixed(3);
+}
+
 function syncHud() {
   el('sFloor').textContent = String(levelIndex + 1);
   el('sScore').textContent = String(player.score).padStart(6, '0');

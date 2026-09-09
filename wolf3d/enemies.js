@@ -65,7 +65,7 @@ function hurtPlayer(amount, sx, sy) {
   chipHpFromNow();                          // chip starts from the old value
   addHitDir(sx, sy);
   player.hp -= amount;
-  player.hurtT = 0.28;
+  player.hurtT = HURT_TIME;
   pulseHpBar();
   sfx('ouch');
   if (player.hp <= 0) {
@@ -133,8 +133,17 @@ function moveEnemy(e, nx, ny) {
  * through a locked one, because enemies carry no keycards and a guard queuing
  * at a door it can never open is worse than one that never came.
  * `stepDoors` will not close on an occupied tile, so nobody is crushed here.
+ *
+ * And only a body that has actually SEEN the player, which is what makes a
+ * floor read as rooms rather than as one pool of bodies. Gunfire carries
+ * through walls — `alertNear` wakes a radius, not a sightline — so without
+ * this every shot fired anywhere near a door pulled the room behind it out
+ * into the corridor to meet you, and a floor emptied itself at the first
+ * trigger pull. Now they come as far as the door and hold there; open it, or
+ * step into the room, and the ones that lay eyes on you follow you anywhere.
  */
 function openDoorAhead(e, gx, gy) {
+  if (!e.sawPlayer) return;
   const c = cellAt(gx, gy);
   if (!c || c.tag !== 'door' || c.lock !== null || c.phase !== 'closed') return;
   if (Math.hypot(gx + 0.5 - e.x, gy + 0.5 - e.y) > 1.2) return;
@@ -298,6 +307,7 @@ function stepEnemies(dt) {
           if (dist < e.spec.sight && hasLOS(e.x, e.y, player.x, player.y)) {
             e.state = 'alert';
             e.stateT = 0.4;
+            e.sawPlayer = true;
             sfx(ENEMY_TYPES[e.type].alertSfx);
             alertNear(e.x, e.y, 7);
           }
@@ -316,6 +326,12 @@ function stepEnemies(dt) {
       }
       case 'chase': {
         const los = hasLOS(e.x, e.y, player.x, player.y);
+        // The second place a body can lay eyes on you, and the one that
+        // matters for the door gate: a guard woken by gunfire through a wall
+        // arrives here having seen nothing, walks its route as far as the door
+        // and waits. The moment the sightline opens it becomes a real chaser
+        // and the doors stop being a boundary.
+        if (los) e.sawPlayer = true;
         if (los && dist < e.spec.range && e.atkCd <= 0) {
           e.state = 'attack';
           e.stateT = 0.22;
@@ -333,9 +349,17 @@ function stepEnemies(dt) {
           // flow field the moment the geometry gets in the way
           const w = los ? null : navStep(e);
           if (w) {
-            // gated on actually moving: a rooted body has a waypoint like
-            // anything else, and would otherwise cycle a door it can never reach
-            if (moveEnemy(e, w.x * sp, w.y * sp)) openDoorAhead(e, w.gx, w.gy);
+            moveEnemy(e, w.x * sp, w.y * sp);
+            // Gated on being ABLE to walk, not on having walked. A rooted body
+            // has a waypoint like anything else and would otherwise cycle a
+            // door across the room off a step it can never take — but testing
+            // the STEP for that only looks equivalent. A chaser pressed flat
+            // against a shut door moves exactly zero, so the old gate locked it
+            // out of the one action that unblocks it, and the sighting gate in
+            // openDoorAhead now parks bodies in precisely that spot: they wait
+            // at the door, the door times out and shuts, and they could never
+            // push it open again however plainly they could see you.
+            if (e.spec.speed > 0) openDoorAhead(e, w.gx, w.gy);
           } else {
             moveEnemy(e, dx / dist * sp, dy / dist * sp);
           }
@@ -348,7 +372,7 @@ function stepEnemies(dt) {
           enemyShot(e, dist);
           if (e.shotsLeft > 1) {
             e.shotsLeft--;
-            e.stateT = 0.16;          // stay in the muzzle-flash frame
+            e.stateT = e.gap;         // stay in the muzzle-flash frame
           } else {
             e.state = 'chase';
             // scaled HERE and not in mkEnemy: stepBossPhase reassigns e.spec.cd

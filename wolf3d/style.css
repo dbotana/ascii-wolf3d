@@ -46,7 +46,9 @@
      scanlines and the vignette fall across the bar exactly the way they fall
      across the viewport. The bar used to be at 7 and escaped both. The modal
      screens (#banner / #tally at 8, #splash at 10) stay above them on
-     purpose: those are read, not inhabited. */
+     purpose: those are read, not inhabited — and so do the two red damage
+     edges and the touch overlay at 7, for the reason spelled out at
+     #hpVignette below. */
   #stage::before {
     content: '';
     position: absolute; inset: 0;
@@ -163,16 +165,50 @@
     78%  { transform: translateX(2px)  scale(1.02); filter: brightness(1.1); }
     100% { transform: translateX(0)    scale(1);    filter: brightness(1); }
   }
-  /* border tint that deepens as health drops */
+  /* ─── THE TWO RED EDGES ───────────────────────────────────────────────
+     Both sit at z-index 7, ABOVE the scanlines (6) and the CRT vignette (5),
+     and that placement is the whole reason they read at all. #stage::after
+     lays rgba(2,3,10,0.6) over the outer 45% of the screen — which is exactly
+     where a screen-edge warning lives — so at the z-index 4 this one used to
+     have, a red border was being painted and then having 60% of it taken
+     back at the corners. It looked like a colour that was too weak; it was a
+     colour underneath a wash. The CRT treatment belongs over anything
+     DIEGETIC: the status bar and the boss bar are objects in the world and
+     should sit behind the glass. These two are not in the world at all —
+     they are what taking a bullet feels like — and neither is the touch
+     overlay, which is why 7 already existed as the layer above the glass.
+
+     They say different things and are deliberately not merged. #hpVignette is
+     a STATE: how close to dead you are, held for as long as that is true, and
+     eased over 0.45s so it never flickers. #hurtEdge is an EVENT: one hit, one
+     hard flash, driven per frame off player.hurtT with no transition at all
+     (a transition would fight a value that is already animating). Merging them
+     would mean a full-health player and a dying one get the same warning, or a
+     dying player gets no new information when a fresh round lands. */
   #hpVignette {
     position: absolute; inset: 0;
-    z-index: 4;
+    z-index: 7;
     pointer-events: none;
     opacity: 0;
     box-shadow:
       inset 0 0 60px  rgba(200,20,45,0.55),
       inset 0 0 140px rgba(160,10,35,0.40);
     transition: opacity 0.45s ease;
+  }
+  /* The event flash. A hard 3px rim so there is an actual OUTLINE — a soft
+     glow alone is what the health vignette already does, and two soft glows
+     on top of each other read as one — then the inset falloff behind it to
+     tie the rim to the picture. */
+  #hurtEdge {
+    position: absolute; inset: 0;
+    z-index: 7;
+    pointer-events: none;
+    opacity: 0;
+    border: 3px solid rgba(255,60,80,0.95);
+    box-shadow:
+      inset 0 0  22px rgba(255,60,80,0.85),
+      inset 0 0  70px rgba(230,25,55,0.60),
+      inset 0 0 170px rgba(190,10,40,0.45);
   }
   @media (prefers-reduced-motion: reduce) {
     .hp-hit { animation: none; }

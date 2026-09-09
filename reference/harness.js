@@ -97,6 +97,7 @@ const PROBE_SRC = `global.__PROBE = {
   resetWeapons:  (typeof resetWeapons !== "undefined" ? resetWeapons : null),
   objectiveText: (typeof objectiveText !== "undefined" ? objectiveText : null),
   paintWeaponStrip: (typeof paintWeaponStrip !== "undefined" ? paintWeaponStrip : null),
+  paintHurtEdge: (typeof paintHurtEdge !== "undefined" ? paintHurtEdge : null),
   syncHud:       (typeof syncHud      !== "undefined" ? syncHud : null),
   markVisible:   (typeof markVisible  !== "undefined" ? markVisible : null),
   drawMinimap:   (typeof drawMinimap  !== "undefined" ? drawMinimap : null),
@@ -122,6 +123,15 @@ const PROBE_SRC = `global.__PROBE = {
   decalSpr:      () => (typeof DECAL_SPR !== "undefined" ? DECAL_SPR : []),
   deathTime:     () => (typeof DEATH_TIME !== "undefined" ? DEATH_TIME : 0.45),
   spawnGrace:    () => (typeof SPAWN_GRACE !== "undefined" ? SPAWN_GRACE : 0.75),
+  // What a battery cell is worth, and the default seconds between the shots of
+  // a burst. Both are read rather than written into the assertions: a pickup
+  // worth "+8" and a magazine of 8 were the same literal until they were two
+  // constants, and a test that hardcodes either goes red for a tuning change
+  // while saying nothing about whether the code still works.
+  ammoPickup:    () => (typeof AMMO_PICKUP !== "undefined" ? AMMO_PICKUP : 8),
+  burstGap:      () => (typeof BURST_GAP !== "undefined" ? BURST_GAP : 0.16),
+  clipSize:      () => (typeof CLIP_SIZE !== "undefined" ? CLIP_SIZE : 8),
+  parTime:       () => (typeof PAR_TIME !== "undefined" ? PAR_TIME : []),
   decalCap:      () => (typeof DECAL_CAP !== "undefined" ? DECAL_CAP : 0),
   music:         () => (typeof MUSIC !== "undefined" ? MUSIC : []),
   musicTrackFor: (typeof musicTrackFor !== "undefined" ? musicTrackFor : null),
@@ -185,7 +195,7 @@ const REQUIRED_FNS = [
   'bossRow', 'stepBossPhase', 'summonMinions', 'bodyRadius', 'deathBlast',
   'updatePrompt',
   'checkWeaponUnlock', 'pickWeapon', 'resetWeapons', 'objectiveText', 'paintWeaponStrip',
-  'markVisible', 'drawMinimap', 'toggleMinimap', 'syncHud',
+  'markVisible', 'drawMinimap', 'toggleMinimap', 'syncHud', 'paintHurtEdge',
 ];
 
 function assertProbe(P, htmlPath) {

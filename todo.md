@@ -29,18 +29,18 @@ number — line numbers drift with every edit, and the file map in
 
 ## Also open
 
-- [ ] **`PAR_TIME` has never been measured on a real playthrough.** It is
-  `[150, 180, 210, 230, 260]`. The first three were set against maps that were
-  four or five very large open halls, and the floors were rewritten under them
-  — a spine and a ring traverse faster, so the time bonus (10/sec under par) is
-  probably more generous than it reads. The last two were picked by eye when
-  floors 4 and 5 landed, and floor 4 in particular carries 26 bodies against
-  floor 3's 17, so it may want more. All five want a stopwatch at BRING 'EM ON
-  rather than another guess, which is why they have been left alone.
+- [x] **`PAR_TIME` has been measured.** It was `[150, 180, 210, 230, 260]`, all
+  five guessed, the first three against maps that no longer exist. A stopwatch
+  run at BRING 'EM ON came in at 1:30 / 1:19 / 1:30 / 2:00 on floors 2-5 —
+  roughly half of par, so the time bonus was paying full price for taking twice
+  as long as a floor needs. It is `[100, 110, 120, 135, 150]` now: the
+  measurement, plus the room the boss rewrite takes on floors 3-5. Floor 1 is
+  still the one unmeasured number, set just under floor 2 because it is the
+  smaller, thinner floor — worth a stopwatch of its own next time.
 
 - [ ] **The mutation battery's mean is close to a whole suite run.** ~25 minutes
-  for 181 mutants on ten cores. `--bail` means a mutant costs the time to its
-  first failing assertion, but the mean is 82s against a ~50s clean suite —
+  for 192 mutants on ten cores. `--bail` means a mutant costs the time to its
+  first failing assertion, but the mean is 72s against a ~50s clean suite —
   most mutants are caught late, so they pay for most of the file. Reordering
   `run-tests.js` so cheap broad groups run first would cut it, and was NOT done:
   group order carries real state coupling (fixtures must come last because
@@ -97,6 +97,82 @@ number — line numbers drift with every edit, and the file map in
 
 Newest first. Kept for the design notes — several record why an approach that
 looks obvious was not the one taken.
+
+- [x] **Phase 9 — the playtest pass.** The first changes in the project driven
+  by a stopwatch and a real playthrough rather than by reading the code, and
+  four of the five findings were the same shape: a number that was correct when
+  it was written and was never revisited when the thing under it changed.
+
+  **Par times were guesses against maps that no longer exist.** Measured at
+  1:30 / 1:19 / 1:30 / 2:00 on floors 2-5 against pars of 180 / 210 / 230 /
+  260. Now `[100, 110, 120, 135, 150]`. See the closed item above.
+
+  **The bosses did not fight.** The CEO died in about five seconds and dealt no
+  damage, and the reason was not its health: it opened at `cd: 1.40, burst: 1`,
+  one round every 1.4 seconds, which is **3.4 landed dps** — 29 seconds to kill
+  a full-health player, in a fight that lasted five. All three bosses were
+  retuned along two axes: volleys instead of shots (opening bursts of 5-8,
+  closing bursts of 14-18, so landed damage runs 12 → 42 dps across the CEO's
+  four phases), and health sized against the guns rather than against a guard
+  (1400 / 1700 / 2100). Against a player who aims, the three fights cost
+  **~85 / 97 / 130 chaingun rounds** — at most one refill of the 99-round
+  reserve each, which is the rule the ammo budget is held to.
+
+  The "bullet hell" is dodgeable for a reason that was already in the engine
+  and only needed to be leaned on: a body in `attack` does not move, and
+  `enemyShot` re-checks line of sight for every round of a burst. A long volley
+  roots the boss and pays out only while it can still see you. This is why the
+  bursts are long rather than the shots heavy.
+
+  `gap` — seconds between the rounds of a burst — became a roster and phase
+  column. It was the literal `0.16` in the FSM, which capped every body in the
+  game at 6.25 shots a second however large its burst.
+
+  **The red screen outline was invisible, and not because of its colour.** It
+  was at z-index 4, under the CRT vignette at 5 — which lays `rgba(2,3,10,0.6)`
+  over the outer 45% of the screen, exactly where a screen-edge warning lives.
+  It had the right opacity the whole time. Both red edges are at z-index 7 now,
+  and there is a second one: `#hpVignette` is a state (how close to dead you
+  are) and the new `#hurtEdge` is an event (this hit, just now), painted every
+  frame rather than on the 12-frame HUD stride because `hurtT` is a 0.28s
+  window.
+
+  **Enemies charged through doors.** `alertNear` wakes a radius, not a
+  sightline — deliberately, so a fight pulls in the room — but every woken body
+  went to `chase` and every chaser worked doors, so one shot near a door emptied
+  the room behind it into the corridor. `openDoorAhead` is gated on
+  `e.sawPlayer` now: bodies come as far as the door and hold, and follow you
+  anywhere once they have actually seen you.
+
+  That gate turned up a second bug that had been latent since the turret
+  landed. The chase opened a door only if the step that frame *succeeded*,
+  which is not the same claim as "the body can walk": a chaser pressed flat
+  against a shut door moves zero, so it was locked out of the one action that
+  unblocks it. Nothing reached that state before, because chasers opened doors
+  on approach; the new gate parks bodies there by design. It is
+  `e.spec.speed > 0` now.
+
+  **Ammo.** A battery cell was worth `CLIP_SIZE`, so the pickup could not be
+  made more generous without also changing how often the pistol reloads. It is
+  its own `AMMO_PICKUP` (16) now. Floors 4 and 5 carried 17 and **7** cells;
+  floor 5 is the largest floor with the longest fight and had a third of what
+  the teaching floor does. They are 26 and 25, and floor 3 is 22.
+
+  The number that matters turned out not to be a floor's total. Every floor
+  carries several times the ammo it needs, but the reserve caps at 99, so route
+  ammo cannot be banked into the fight — what decides a boss is what is inside
+  its own room. Flood-filled from the boss's tile, the three arenas hold 96 /
+  128 / 192 rounds against fights costing ~85 / 97 / 130, so a player who
+  arrives with an EMPTY reserve can still finish on the room alone, and a
+  player who arrives full needs one refill at most (floor 5 only). The
+  boardroom held 2 cells against an 84-round fight and was the one real
+  failure; it holds 6 now. It was also the only boss arena with no ramen —
+  against the boss whose damage grew the most — and now holds three, placed on
+  the far side of the room rather than on the entry lane.
+
+  Six mutations went in with the code, per the catalog's own rule, and the
+  battery came back 192 mutants / 187 killed / **0 survivors** / 5 unkillable.
+  The suite went 755 → 809 assertions.
 
 - [x] **Phase 8 — the roster pass.** Three more enemy types and two more
   bosses. The content was the easy half; the reason it needed a pass first is
